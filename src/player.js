@@ -90,6 +90,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     let loopPassOffset = 0;
     let playTranspose = null;    // { ratio, fold, offset } of the playback in flight, or null
     let shownPass = 0;
+    let playbackRequest = 0;
     let playbackBaseTime = 0;    // baseStartTime of the active playback (to arm mid-play)
     let playbackFromTime = 0;    // score time the active playback started from (the playhead is this + engine.scoreElapsed())
 
@@ -3525,12 +3526,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     // The pass being heard, on screen: every absolute value times its factor.
+    eventBus.on('display:transposition', () => {
+        glWorkspace?.renderer?.syncBaseFrequencyLabel();
+    });
+
     function showPass(pass) {
         if (!playTranspose || pass === shownPass) return;
         shownPass = pass;
         const factor = pass > 0 ? passTransposition(playTranspose.ratio, pass, playTranspose.fold) : null;
         setDisplayTransposition(pass, factor);
-        try { updateVisualNotes(evaluatedNotes); } catch {}
     }
 
     function resetPasses() {
@@ -3539,7 +3543,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         shownPass = 0;
         if (getDisplayTransposition().factor) {
             clearDisplayTransposition();
-            try { updateVisualNotes(evaluatedNotes); } catch {}
         }
     }
 
@@ -3579,14 +3582,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         // a mid-module list is only valid for the pass it was built for. When starting
         // from 0 the two are the same list — share the promise rather than evaluating
         // the module twice.
+        const request = ++playbackRequest;
+        const score = myModule;
         const firstPass = preparePlayback(fromTime);
         const loopPass = wantLoop
             ? (fromTime === 0 ? firstPass : preparePlayback(0))
             : Promise.resolve(null);
 
-        Promise.all([firstPass, loopPass]).then(async ([preparedNotes, loopNotes]) => {
+        Promise.all([firstPass, loopPass]).then(([preparedNotes, loopNotes]) => {
+            if (request !== playbackRequest || score !== myModule) return;
             try {
-                const loop = (wantLoop && loopNotes && loopNotes.length)
+                const loop = (isLoopEnabled && wantLoop && loopNotes && loopNotes.length)
                     ? { period: endTime, notes: loopNotes, firstCycleAudioLength: endTime - fromTime }
                     : null;
 
@@ -3623,6 +3629,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     function pause() {
         if (!isPlaying || isPaused) return;
+        const request = ++playbackRequest;
         isPaused = true;
         isFadingOut = true;
 
@@ -3648,13 +3655,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isLoopDisarming = false;
         loopEndAudioTime = null;
 
-        audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
-            isPlaying = false;
-            isFadingOut = false;
-        }).catch(() => {
-            isPlaying = false;
-            isFadingOut = false;
-        });
+        const finishPause = () => {
+            if (request === playbackRequest) {
+                isPlaying = false;
+                isFadingOut = false;
+            }
+        };
+        audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(finishPause, finishPause);
 
         // Pausing a loop drops the orbit and shows the play triangle. The mode was
         // disarmed above, so the next play is an ordinary single pass.
@@ -3667,6 +3674,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
      *   let the sounding notes' releases ring out (a note's end is a note-off)
      */
     function stop(resetPlayhead = true, ringOut = false) {
+        ++playbackRequest;
         // Above the early-out below: a real stop must disarm the mode even when the
         // transport is already parked at 0, or the Stop button stops being an escape
         // hatch out of loop mode. resetPlayhead === false means a seek or play()'s own
@@ -3759,9 +3767,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             // the loop body, and the rel-time at which the pass in flight ends. Module
             // time t sits at audioContext time (currentTime + t), so that pass ends
             // firstLen seconds after the playback's base.
+            const request = playbackRequest;
             preparePlayback(0).then((loopNotes) => {
                 // The user may have toggled off, paused or stopped while we evaluated.
-                if (!isLoopEnabled || !isPlaying || isPaused || isFadingOut) return;
+                if (request !== playbackRequest || !isLoopEnabled || !isPlaying || isPaused || isFadingOut) return;
                 // Score time: the pass in flight ends endTime - fromTime after it began.
                 const firstLen = endTime - playbackFromTime;
                 if (!(firstLen > 0)) return;

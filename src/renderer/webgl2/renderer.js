@@ -667,6 +667,41 @@ export class RendererAdapter {
     this._syncInstances(args);
   }
 
+  // A transposed repeat changes this label and the note inspector. Note positions
+  // and frequency ratios on the canvas are relative to the same written base.
+  syncBaseFrequencyLabel(evaluatedFrequency) {
+    // Keep the last label while an empty score is being initialized.
+    try {
+      const { factor } = getDisplayTransposition();
+      const transposed = factor && X.isRational(factor) && this._baseFreqExact && X.isRational(this._baseFreqExact);
+      const frequency = transposed ? X.mul(this._baseFreqExact, factor)
+        : evaluatedFrequency ?? this._moduleRef?.baseNote?.getVariable?.('frequency');
+      if (frequency == null) return;
+
+      let num, den;
+      if (frequency.n != null && frequency.d != null) {
+        num = (frequency.s < 0 ? '-' : '') + String(frequency.n);
+        den = String(frequency.d);
+      } else if (typeof frequency.toFraction === 'function') {
+        [num, den = '1'] = frequency.toFraction().split('/');
+      } else {
+        const hz = toNumber(frequency, NaN);
+        if (!Number.isFinite(hz)) return;
+        num = String(hz);
+        den = '1';
+      }
+      const elide = value => {
+        const negative = value.startsWith('-');
+        const digits = negative ? value.slice(1) : value;
+        if (digits.length <= 12) return value;
+        return (negative ? '-' : '') + digits.slice(0, 6) + '…' + digits.slice(-4);
+      };
+      this._baseFracNum = elide(num);
+      this._baseFracDen = elide(den);
+      this.needsRedraw = true;
+    } catch { /* Keep the previous label until a frequency is available. */ }
+  }
+
   _syncInstances(args) {
     const { evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId = null, tempOverrides = null } = args;
     if (!module) return;
@@ -741,71 +776,7 @@ export class RendererAdapter {
       } catch { this._baseFreqCache = 440; }
     }
 
-    // Resolve base fraction strings for GL fraction rendering
-    // Robust behavior on "clean slate": if we cannot derive a new fraction this frame,
-    // keep showing the previously known numerator/denominator instead of clearing it.
-    try {
-      let assigned = false;
-      // Huge components would draw one glyph per digit clipped by the circle mask;
-      // show head…tail instead. Anything at 12 digits or fewer renders verbatim.
-      const elide = (s) => {
-        const neg = s.charCodeAt(0) === 45 /* '-' */;
-        const digits = neg ? s.slice(1) : s;
-        if (digits.length <= 12) return s;
-        return (neg ? '-' : '') + digits.slice(0, 6) + '…' + digits.slice(-4);
-      };
-      const assign = (n, d) => {
-        if (n != null && d != null) {
-          this._baseFracNum = elide(String(n));
-          this._baseFracDen = elide(String(d));
-          assigned = true;
-        }
-      };
-      const coerceFrom = (src) => {
-        if (!src) return;
-        const nT = typeof src.n;
-        const dT = typeof src.d;
-        if ((nT === 'number' || nT === 'bigint') && (dT === 'number' || dT === 'bigint')) {
-          const sign = (src.s != null && src.s < 0) ? '-' : '';
-          assign(sign + String(src.n), String(src.d));
-        } else if (typeof src.toFraction === 'function') {
-          const fs = String(src.toFraction());
-          const parts = fs.split('/');
-          assign(parts[0] || fs, parts[1] || '1');
-        } else {
-          const val = toNumber(src, NaN);
-          if (isFinite(val)) assign(val, 1);
-        }
-      };
-
-      // Prefer evaluated base frequency, fall back to raw baseNote variable.
-      // During a transposed loop the circle shows the BaseNote of the pass being
-      // heard (display only; a rational factor: an irrational one leaves it written,
-      // the note widget shows that exact value).
-      const baseEv = getEv(0)?.frequency;
-      const shown = getDisplayTransposition();
-      if (shown.factor && X.isRational(shown.factor) && this._baseFreqExact && X.isRational(this._baseFreqExact)) {
-        coerceFrom(X.mul(this._baseFreqExact, shown.factor));
-      } else {
-        coerceFrom(baseEv);
-      }
-      if (!assigned) {
-        const bf = module?.baseNote?.getVariable?.('frequency');
-        coerceFrom(bf);
-      }
-
-      // If nothing was assigned and we have no previous cache yet, initialize to 1/1 once.
-      if (!assigned && (!this._baseFracNum || !this._baseFracDen)) {
-        this._baseFracNum = '1';
-        this._baseFracDen = '1';
-      }
-    } catch {
-      // Preserve previous values on error; initialize once if missing.
-      if (!this._baseFracNum || !this._baseFracDen) {
-        this._baseFracNum = '1';
-        this._baseFracDen = '1';
-      }
-    }
+    this.syncBaseFrequencyLabel(getEv(0)?.frequency);
 
     // Build list of visible notes (those with startTime and duration)
     const items = [];
