@@ -235,13 +235,38 @@ try {
     if (pick) { r.setHoverNoteId(pick.id); r._render(); }
     // A stationary view must replay exactly the same pixels without retaining
     // another set of note labels on each hover or playhead redraw.
-    const labels = r._glyphRunsCache;
-    const detailGlyphs = labels?.length;
-    const fresh = sample();
-    const replay = sample();
-    const stable = r._glyphRunsCache === labels && labels?.length === detailGlyphs;
-    if (!stable || fresh.some((value, i) => value !== replay[i])) {
-      throw Error('Cached detail redraw changed the label count or pixels');
+    // The production canvas uses MSAA. Compare exact bytes on a single-sample
+    // target so the driver's multisample resolve cannot round an edge differently.
+    const framebuffer = gl.createFramebuffer();
+    const color = gl.createRenderbuffer(), depth = gl.createRenderbuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    for (const [buffer, format, attachment] of [
+      [color, gl.RGBA8, gl.COLOR_ATTACHMENT0], [depth, gl.DEPTH_COMPONENT24, gl.DEPTH_ATTACHMENT],
+    ]) {
+      gl.bindRenderbuffer(gl.RENDERBUFFER, buffer);
+      gl.renderbufferStorage(gl.RENDERBUFFER, format, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, attachment, gl.RENDERBUFFER, buffer);
+    }
+    let detailGlyphs;
+    try {
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw Error('Incomplete detail comparison framebuffer');
+      }
+      r._textDirty = true;
+      const fresh = sample();
+      const labels = r._glyphRunsCache;
+      detailGlyphs = labels?.length;
+      const replay = sample();
+      if (r._glyphRunsCache !== labels || labels?.length !== detailGlyphs ||
+          fresh.some((value, i) => value !== replay[i])) {
+        throw Error('Cached detail redraw changed the label count or pixels');
+      }
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteRenderbuffer(color);
+      gl.deleteRenderbuffer(depth);
     }
     return { overviewBodyPixels: changed, detailGlyphs, pick, glError: gl.getError() };
   });
