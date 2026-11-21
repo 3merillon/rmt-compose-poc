@@ -23,8 +23,7 @@ So a fresh module already has a little room around it. If you want the raw, dry 
 
 A note's end is a note-off: its sound rings briefly after it, as a key lifted or a bow leaving the string
 (see [Instruments](/user-guide/playback/instruments)). When the playhead reaches the end of the module,
-the last notes therefore ring out to silence instead of being cut. **Stop**, **Pause** and a new
-**Play** still silence everything at once. When a loop is switched off, the last pass ends the same
+the last notes therefore ring out to silence instead of being cut. **Stop** fades the current playback over 20 ms, and **Pause** fades it over 200 ms. A new playback opens over 8 ms. Existing room reverberation can continue after the dry sound fades. When a loop is switched off, the last pass ends the same
 way. **Most voices at once** defaults to 256 and can be set as high as 4096 in
 Settings → Audio. When more notes arrive, the player fades older release tails
 first. Held notes play through their written ends, even in a chord larger than
@@ -78,7 +77,7 @@ A voice with overtones adds the loudest cue of all. Two notes a ratio `p/q` apar
 :::
 
 ::: tip
-Like stereo, the switch takes a couple of seconds to bite mid-playback. Each note is given its pitch as it is scheduled, and the scheduler runs about 2 seconds ahead. Notes already sounding keep the tuning they started with, so a held chord does not change under your finger — the next one does.
+Each note takes its playback pitch when scheduled. Previously scheduled notes retain that pitch. To compare a held chord immediately, stop, change the switch, and play the chord again.
 :::
 
 ::: warning It stays on until you turn it off
@@ -105,7 +104,7 @@ The room itself is generated in the browser at runtime — no impulse-response f
 - **Pre-delay** buys clarity. A few tens of milliseconds keeps the attack of a note in front of its own reverb.
 
 ::: info A sustained tone's reverb tail shimmers
-Hold a long steady note with a lot of reverb and the tail will waver a little rather than decaying perfectly smoothly. That is inherent to convolution reverb with a narrowband input — recorded impulse responses do it too, and no amount of tuning removes it. If it bothers you, the levers are **Decay** (shorter) and **Reverb amount** (less).
+Hold a long steady note with a lot of reverb and the tail will waver a little rather than decaying perfectly smoothly. Try a shorter **Decay** or lower **Reverb amount** to reduce the effect.
 :::
 
 ## Stereo width
@@ -117,16 +116,16 @@ Turn **Spread notes by pitch** on and each note is placed left-to-right accordin
 It is a musical effect, not a mixing tool: it makes a dense module easier to hear apart, and it makes a wide-ranging melody sweep across the stereo field.
 
 ::: tip
-Toggling stereo mid-playback takes a couple of seconds to bite. The placement is baked into each note as it is scheduled, and the scheduler runs about 2 seconds ahead — so already-scheduled notes keep their old placement. Notes already sounding never move.
+The setting applies when each voice is scheduled. Already scheduled notes retain their placement. The scheduling window can reach two seconds in sparse music and is shorter in dense passages.
 :::
 
 Both sampled instruments are mono recordings. Their stereo position comes entirely from this stage.
 
 ## Limiter
 
-A peak catcher on the master output. It sits after the master volume, last in the chain before your speakers, and stops loud passages from clipping — a −6 dB threshold with a high ratio, a fast attack and a quarter-second release.
+With **Limiter** enabled, the master output passes through two stages. The first reduces loud passages. The second catches sharp peaks such as many notes striking together. A gain adjustment compensates for the second stage’s makeup gain.
 
-Leave it on. It is not a volume control and it is not a compressor for tone-shaping; it is there so a dense chord in a module you have never heard before does not distort. Turn it off only if you are measuring the raw output.
+Switching the limiter off bypasses both stages. Use **Master volume** to set the listening level.
 
 ## Master volume
 
@@ -141,7 +140,7 @@ each note → its instrument's bus ─┬─ dry ──────────�
                                               master volume → limiter → speakers
 ```
 
-Every instrument gets its own bus, but the buses are plumbing, not a mixer: there are **no per-instrument volume, mute, solo or send controls**. The only levels you can change are master volume and reverb amount.
+Every instrument gets its own bus, but the buses are plumbing, not a mixer: there are **no per-instrument volume, mute, solo or send controls**. Master volume changes the whole mix. Use a note’s amplitude expression to adjust that note or its dependents.
 
 ## Where these settings live
 

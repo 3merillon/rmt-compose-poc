@@ -216,13 +216,13 @@ The piano's recordings run their whole decay (19 s in the bass, 2 s at the top),
 
 Different notes can use different instruments, which is how you get ensemble textures out of one module. Pin an instrument on the head of each voice's dependency chain and the rest of that voice follows it for free.
 
-Every instrument gets its own mix bus internally, but there are **no per-instrument volume, mute or solo controls** — the only levels you can change are the master volume and the reverb amount. See [Audio & Reverb](/user-guide/playback/audio).
+Every instrument gets its own mix bus internally, but there are **no per-instrument volume, mute or solo controls** — use note amplitude for musical dynamics, master volume for the whole mix, and reverb amount for the wet return. See [Audio & Reverb](/user-guide/playback/audio).
 
 ## Tips
 
-1. **Start with `sine-wave`.** It is the clearest voice for hearing whether an interval is in tune.
-2. **Switch to `harmonium` to make the difference louder.** Its harmonics coincide when an interval is pure and beat when it is not: what you hear on a sine, with the most salient cue added.
-3. **Pin the instrument high in the chain.** One pin on the note everything hangs off is worth twenty pins on leaves.
+1. **Start with `sine-wave`.** Use two nearby sine pitches to hear beats between their fundamentals.
+2. **Switch to `harmonium` to make the difference louder.** Compare a just fifth with a tempered fifth over the same root. The third partial of the lower note and second partial of the upper note coincide at 3/2 and separate slightly in 12-TET.
+3. **Pin the instrument high in the chain.** Choose the first note of the line that should change instrument.
 4. **Use synths for long notes.** The sample cap makes drones a poor fit for `piano` and `violin`; `harmonium` holds its level for as long as the note lasts.
 5. **An unknown instrument name is silently ignored.** A module saved with `"instrument": "cello"` loads fine and plays as `sine-wave`.
 

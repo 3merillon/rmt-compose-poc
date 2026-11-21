@@ -49,7 +49,7 @@ oscillators (a unison stack, an FM carrier + modulator) plus a filter, and the e
 identically. A bare `OscillatorNode` also satisfies this shape natively, which is why the
 multisample fallback can just return one.
 
-Build one with `makeVoice()` (`instrument-manager.js:202`):
+Build one with `makeVoice()` (`instrument-manager.js`):
 
 ```javascript
 export function makeVoice(sources, output, frequency, onStart)
@@ -76,7 +76,7 @@ a bow leaves the string.
 applyVoiceEnvelope(gainNode, startTime, duration, peak, env, shape)
 ```
 
-`instrument-manager.js:63`. `env` comes from the instrument's `getEnvelopeSettings(duration, frequency)`
+`instrument-manager.js`. `env` comes from the instrument's `getEnvelopeSettings(duration, frequency)`
 and is in **seconds**:
 
 ```javascript
@@ -94,7 +94,7 @@ and is in **seconds**:
 Because the times are seconds, a short note keeps the shape of a long one: a 0.1 s piano note is a
 0.1 s strike followed by its damper.
 
-`byPitch(freq, [f1, v1], [f2, v2])` (`instrument-manager.js:45`) is the helper for a value that
+`byPitch(freq, [f1, v1], [f2, v2])` (`instrument-manager.js`) is the helper for a value that
 follows pitch: `v1` at `f1`, `v2` at `f2`, geometric in between, held beyond either end. The
 vibraphone's `t60`, the electric piano's `t60` and the piano's release use it.
 
@@ -140,16 +140,16 @@ length. Nothing else has to fit. The release is not squeezed into the note, beca
 `shape` is `{ attack, release }`, the note's `attack` and `release` variables (its own, else the
 BaseNote's), each a **share of the note's own duration** (`1/8` is an eighth of it) or `null`. A given
 value replaces the instrument's `attack` or `release` for that note; a `null` leaves the instrument's
-time. `noteShape()` (`instrument-manager.js:190`) clamps the attack to 0 to 1 and the release to 0 to
-`MAX_RELEASE_SHARE` (4, `instrument-manager.js:26`); a value that is not a finite number is `null`.
-`envelopeTimes()` (`instrument-manager.js:105`) turns the shares into seconds:
+time. `noteShape()` (`instrument-manager.js`) clamps the attack to 0 to 1 and the release to 0 to
+`MAX_RELEASE_SHARE` (4, `instrument-manager.js`); a value that is not a finite number is `null`.
+`envelopeTimes()` (`instrument-manager.js`) turns the shares into seconds:
 
 - The attack is the share times the duration, counted from the note's start.
 - The release is the share times the duration, counted **from the note's end**: `release = 1` rings
   for as long again as the note lasted, `4` for four times as long.
 - The anti-click floors stay: `ATTACK_FLOOR` 3 ms and `RELEASE_FLOOR` 15 ms still apply to a note's
   own values.
-- `envelopeShares()` (`instrument-manager.js:172`) returns the same envelope as fractions of the
+- `envelopeShares()` (`instrument-manager.js`) returns the same envelope as fractions of the
   duration. The renderer draws the part inside the note, so what is seen is what is heard. It does not
   yet draw the release, which lies after the note's end.
 
@@ -158,7 +158,7 @@ last arguments and passes them on.
 
 ### How long a voice lives
 
-`envelopeLength()` (`instrument-manager.js:160`) is the end of the release plus `ZERO_RAMP` plus
+`envelopeLength()` (`instrument-manager.js`) is the end of the release plus `ZERO_RAMP` plus
 `STOP_MARGIN`. `SynthInstrument.voiceLength()` and `InstrumentManager.voiceLength()` return it, and
 `_scheduleNote` stops the source at `start + voiceLength(...)`. Note lengths are unchanged; only the
 sound outlasts them. If the envelope cannot be computed the engine falls back to the duration plus
@@ -182,14 +182,13 @@ All times are in seconds; sustain is a fraction of the peak.
 | `piano` | sampled | — | — | — | 0.002 | none (the recording decays) | from the pitch: 0.30 at C1 to 0.10 at C6, 1.5 above F#6 |
 | `violin` | sampled | — | — | — | 0.005 | none (the recording decays) | 0.12 |
 
-The per-note `peak` is `initialVolume` — **0.2** (`player.js:69`, and the `AudioEngine` constructor
-default). That is not master volume; master volume lives on the
+The per-note envelope peak is `initialVolume * amplitude`. Transport playback supplies an initial volume of 0.2, and an unset amplitude resolves to the BaseNote’s amplitude or 1. Master volume lives on the
 [audio graph](/developer/audio/audio-graph#master-volume). Three instruments scale it: `piano` by its
 manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.42.
 
 ## SynthInstrument
 
-`instrument-manager.js:224`. Subclasses set fields; the base class builds the voice.
+`instrument-manager.js`. Subclasses set fields; the base class builds the voice.
 
 ```javascript
 export class SquareInstrument extends SynthInstrument {
@@ -219,7 +218,7 @@ export class SquareInstrument extends SynthInstrument {
 | `filterQ` | `0.7` | Q of that filter. |
 
 `fm-epiano` is the one synth that overrides `createOscillator()` outright
-(`synth-instruments.js:201`): a sine carrier, a sine modulator at a 1:1 ratio, and a `modGain` whose
+(`synth-instruments.js`): a sine carrier, a sine modulator at a 1:1 ratio, and a `modGain` whose
 value is `index × modFreq` feeding `carrier.frequency`. The index decays exponentially from **4** to
 **0.6** over **0.28 s**, scheduled inside the voice's `start()` so it locks to the note's absolute
 start.
@@ -227,7 +226,7 @@ start.
 ### The harmonic voices
 
 `harmonium` and `harmonium-soft` are two three-line subclasses of `HarmonicVoice`
-(`synth-instruments.js:276`), a `SynthInstrument` that is deliberately **not** exported in the
+(`synth-instruments.js`), a `SynthInstrument` that is deliberately **not** exported in the
 `SynthInstruments` map, so it is never registered itself. They exist to make the difference between
 a pure and a tempered interval as salient as it can be: two notes a ratio `p/q` apart share a
 partial (the `p`-th of the lower is the `q`-th of the upper), which stands still when the interval
@@ -379,7 +378,7 @@ Two of those fields reach the sound: `gainDb`, applied as `peak × 10^(gainDb/20
 - The ratio keys of the old format (`attackTimeRatio` and the like) are not read anywhere.
 - The result passes through the shared floors, 3 ms for the attack and 15 ms for the release.
 
-`PianoInstrument` overrides `getEnvelopeSettings()` (`sample-instruments.js:29`): its release is a
+`PianoInstrument` overrides `getEnvelopeSettings()` (`sample-instruments.js`): its release is a
 damper that follows pitch, `byPitch(f, [32.703 Hz, 0.30 s], [1046.5 Hz, 0.10 s])`, and above 1480 Hz
 (F#6, where a piano has no dampers) it is 1.5 s. The `release` in the piano's manifest is
 therefore never used; its `attack` is.
@@ -461,7 +460,7 @@ audioEngine.registerInstruments(SynthInstruments, SampleInstruments);
 ```
 
 which calls `instrumentManager.registerBuiltInInstruments(SynthInstruments, SampleInstruments)`
-(`instrument-manager.js:304`). It instantiates every class value in both maps, passing the
+(`instrument-manager.js`). It instantiates every class value in both maps, passing the
 `AudioContext` to the constructor.
 
 The single-instrument entry point is **`registerInstrument(instrument)`** — not `register()` — and it
@@ -473,7 +472,7 @@ instrumentManager.getAvailableInstruments();  // registered keys, in registratio
 ```
 
 ::: warning Two different defaults, both spelled `sine-wave`
-`InstrumentManager.defaultInstrument` (`instrument-manager.js:301`) is a **hardcoded** unknown-name fallback. It never
+`InstrumentManager.defaultInstrument` (`instrument-manager.js`) is a **hardcoded** unknown-name fallback. It never
 follows the settings system. `module.js`'s `_defaultInstrumentName` is the **inheritance** fallback,
 and it *does* follow `audio.defaultInstrument`.
 
@@ -482,7 +481,7 @@ Consequence: a module saved with `"instrument": "cello"` always plays as `sine-w
 validated on module import.
 :::
 
-The Settings → Audio dropdown is a **hardcoded list** in `settings-panel.js:103`. It currently matches
+The Settings → Audio dropdown is a **hardcoded list** in `settings-panel.js`. It currently matches
 the registry exactly, but a newly registered instrument will not appear there automatically.
 
 ## Articulation: how a line is played
@@ -495,19 +494,19 @@ Each instrument has an `articulation` (`'sustained'` by default on `SynthInstrum
   a sounding note ending exactly (an exact `Fraction` comparison) where it starts. Such a note, unless it repeats the
   predecessor's pitch, gets an attack of `SLUR_XFADE = 0.04 s` and starts its recording at `voice.bowOffset` (0.15 s
   in, past the bow's onset); the predecessor's voice is faded over the same 40 ms with a quarter-cosine curve
-  (`_fadeVoice(…, true)`, `audio-engine.js:895`). A repeated pitch fades the predecessor in `REBOW_FADE = 0.03 s` and is bowed
+  (`_fadeVoice(…, true)`, `audio-engine.js`). A repeated pitch fades the predecessor in `REBOW_FADE = 0.03 s` and is bowed
   normally. A rest or a silence between them leaves `slur` false.
 - **struck**: every voice of the same instrument still sounding on exactly the same frequency is faded in
   `DAMP_FADE = 0.02 s` from the new note's start.
 
 A fade starts from the gain the voice's envelope has at that instant, `envelopeGainAt(T, peak, t)`
-(`instrument-manager.js:133`), which rebuilds the scheduled curve exactly (the envelope test checks it at every
+(`instrument-manager.js`), which rebuilds the scheduled curve exactly (the envelope test checks it at every
 instrument, length and pitch), so there is no step. A voice that faded another and is then cancelled before it
 sounds (a live tempo change, a loop switched off) restores the release of the voice it faded (`_restoreFaded`).
 
 ## Instrument inheritance
 
-A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:851`)
+A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js`)
 calls `instrumentOf()` in `src/players.js`, which resolves one in this order. A **player** is a line of
 notes, each starting where the previous one ends.
 
@@ -536,7 +535,7 @@ Consequences worth stating plainly:
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1017-1032`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 
@@ -576,7 +575,7 @@ Then register it in **two** places, and list it in a third:
    it is never registered;
 2. the `SynthInstruments` map exported from `src/instruments/synth-instruments.js`, which the app
    itself does not read but `scripts/perf/check-purity.mjs` does;
-3. `INSTRUMENTS` in `src/settings/settings-panel.js:103`, so it appears in the Settings dropdown.
+3. `INSTRUMENTS` in `src/settings/settings-panel.js`, so it appears in the Settings dropdown.
 
 If you need a voice the base class cannot build, override `createOscillator(frequency)` and return
 `makeVoice(sources, output, frequency, onStart)`. Do not return raw nodes unless a bare
@@ -585,13 +584,14 @@ does.
 
 ## Not implemented
 
-- **No velocity or dynamics.** Every note plays at the same peak (0.2). `zones[].velLayers[]` is
-  reserved and unread.
+- Sample zones use one recorded velocity layer. A note’s amplitude expression controls its playback gain.
 - **No custom sample loading**, no user-supplied instruments, no per-instrument volume or mix UI.
 - **No note audition.** Instruments are only heard through transport playback. Clicking or dragging a
   note is silent.
 
 ## See also
+
+- [Local listening room](/developer/contributing/setup#local-listening-room) — compare rendered examples on the prepared development host.
 
 - [Audio Engine](/developer/audio/audio-engine) — how a voice is scheduled and torn down
 - [Audio Graph](/developer/audio/audio-graph) — the per-instrument buses a voice connects into

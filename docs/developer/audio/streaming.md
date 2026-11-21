@@ -9,11 +9,7 @@ The scheduler creates voices up to two seconds before they sound. It shortens th
 window in dense passages to reduce the number of connected Web Audio nodes. A
 large opening chord gets extra preparation time before its common attack.
 
-::: warning There is no `StreamingScheduler` class
-Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
-state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:359-473`). There is no
-scheduler file, no scheduler object, and no `scheduler.debug` flag.
-:::
+The pump is a closure inside `AudioEngine.play()` in `src/player/audio-engine.js`. Each playback owns its state.
 
 ## The state object
 
@@ -59,12 +55,11 @@ note's clock length through the map and its score position.
 
 ## The pump
 
-Each pump checks upcoming density, including repeats that fall inside the
-window. In dense passages it schedules up to 400 ms ahead at normal tempo,
+Each pump checks upcoming density, including repeats inside a two-second horizon. The dense test looks 128 entries beyond the next score entry or projects at least 128 entries from upcoming repeats. In dense passages it schedules up to 400 ms ahead at normal tempo,
 shortening that to a minimum of 180 ms at faster tempos. It checks its time
 budget every 32 score entries. After about 5 ms of work it yields, then resumes
 at the same score entry. Notes in a simultaneous chord keep their shared time
-even when they are submitted in different batches.
+even when they are submitted in different batches. The normal timer wakes after at most 100 ms or one quarter of the window, whichever comes first. At startup the engine counts audible entries in the first 100 ms at the current rate and allows the larger of 100 ms and 0.5 ms per opening voice before the first attack.
 
 **The list is sorted and consumed by index.** `preparePlayback()` sorts by `startTime`, so the inner
 `while` can break the moment it finds a note past the horizon — everything after it is later still.
@@ -89,17 +84,17 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 
 | Constant | Value | Scope |
 |---|---|---|
-| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:367`) |
-| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:368`) — not `SCHEDULE_INTERVAL` |
+| `LOOKAHEAD` | **2.0 s** | local inside `play()` |
+| `BATCH_INTERVAL` | **100 ms** | local inside `play()` — not `SCHEDULE_INTERVAL` |
 | `DENSE_WINDOW_NOTES` | **128** | Density threshold inside the sparse lookahead |
 | `DENSE_LOOKAHEAD` | **0.4 s** | Maximum dense lookahead at normal speed |
 | `PUMP_BUDGET_MS` | **5 ms** | Work budget per turn, checked every 32 entries |
-| `FALLBACK_TAIL` | **0.15 s** | module-level (`:22`); the voice's tail past the note only if its envelope cannot be computed |
-| `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:13`) |
-| `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:17`) |
-| `SEAM_EPS` | **1e-6** | module-level (`:19`) |
-| `DECLICK_FADE` | **0.02 s** | module-level (`:9`) |
-| `RATE_CHANGE_LEAD` | **0.05 s** | module-level (`:37`): how far ahead of the clock a tempo change takes effect |
+| `FALLBACK_TAIL` | **0.15 s** | module-level; the voice's tail past the note only if its envelope cannot be computed |
+| `MIN_LOOP_PERIOD` | **0.05 s** | module-level |
+| `MAX_CYCLES_PER_BATCH` | **64** | module-level |
+| `SEAM_EPS` | **1e-6** | module-level |
+| `DECLICK_FADE` | **0.02 s** | module-level |
+| `RATE_CHANGE_LEAD` | **0.05 s** | module-level: how far ahead of the clock a tempo change takes effect |
 
 There is no `MIN_NOTE_DURATION`. Short notes are handled by the envelope's attack/release floors and
 its 1 ms duration floor — see
@@ -157,8 +152,8 @@ A module may transpose each repeat: its BaseNote's `repeat`, the ratio from one 
 which refuses anything outside 1/16 to 16) and hands
 `play()` a `transpose` option, `{ ratio, fold, offset }`: the ratio, the fold preference (Settings → Audio → Loop →
 Keep within an octave) and the pass the playback starts in (kept across Pause and seeks, 0 after Stop). Without it
-nothing is transposed (`_transposeState`, `audio-engine.js:511`). The pump hands each voice the factor of
-its pass, `_passFactor(s, s.cycle)` (`audio-engine.js:521`): `passTransposition(ratio, offset + cycle, fold)`, exact, folded into one
+nothing is transposed (`_transposeState`, `audio-engine.js`). The pump hands each voice the factor of
+its pass, `_passFactor(s, s.cycle)` (`audio-engine.js`): `passTransposition(ratio, offset + cycle, fold)`, exact, folded into one
 octave (`[1, 2)` rising, `(1/2, 1]` falling) by exact comparison, then made a float once per pass. `_scheduleNote()`
 multiplies the written frequency by it and takes the tempered twin and the stereo place from the transposed pitch.
 `_prepareTransposed()` decodes every zone of the sampled instruments the notes use, so a later pass never falls back
@@ -215,15 +210,15 @@ performance setting outside the notation. The rate is **score seconds per clock 
 twice as fast); frequencies never pass through it. It lives in `audioEngine.rate`, and `player.js`
 resets it to 1 whenever a module is loaded.
 
-Each playback carries a `TimeMap` (`src/player/time-map.js:28`): a chain of segments, each holding one
+Each playback carries a `TimeMap` (`src/player/time-map.js`): a chain of segments, each holding one
 rate from a clock instant on. `scoreAt(c)` and `clockAt(s)` are the only things the scheduler and the
 playhead ask of it, so a tempo curve (an accelerando drawn over time) can later replace a segment's
 linear law by its integral without touching either.
 
-`setRate(rate)` (`src/player/audio-engine.js:627`) does four things:
+`setRate(rate)` (`src/player/audio-engine.js`) does four things:
 
 1. **Splits the map** `RATE_CHANGE_LEAD` (50 ms) ahead of the clock (`TimeMap.setRate`,
-   `time-map.js:61`). Everything before that instant keeps the times it had, so the playhead does not
+   `time-map.js`). Everything before that instant keeps the times it had, so the playhead does not
    jump and nothing already heard moves.
 2. **Cancels the voices that start after it**, by their score position (`entry.scoreStart`), the
    same number the rewind compares, so a note is either kept or rescheduled, never both or neither.
@@ -237,12 +232,12 @@ pair of notes one score interval apart; the clock gap across it is the same as i
 `getLoopEndTime()` recomputes the final seam's clock time from the map, so a tempo change after a
 disarm moves it too, and the playhead stops where the sound does.
 
-**The playhead** follows `scoreElapsed()` (`:610`), the score time through the same map, plus the
+**The playhead** follows `scoreElapsed()`, the score time through the same map, plus the
 time the playback started from. It no longer derives its position from `ctx.currentTime` directly.
 
-**Commit tempo** (`commitLiveTempo()`, `src/player.js:3854`) writes the rate into the piece. The live
+**Commit tempo** (`commitLiveTempo()`, `src/player.js`) writes the rate into the piece. The live
 BPM (60 / `base.d` × rate) is first snapped to the whole number the toolbar shows, then `base.d`
-becomes exactly 60 / BPM (`snapTempo()`, `time-map.js:86`); a float is never written as if it were
+becomes exactly 60 / BPM (`snapTempo()`, `time-map.js`); a float is never written as if it were
 exact. Every time in the module scales with `base.d`, the rate returns to 1, and the commit is one
 undo step. MIDI export reads the module, so it writes the committed tempo, never a live rate.
 
@@ -268,22 +263,22 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 | Pause | `audioEngine.pauseFade()` — The engine stops scheduling and fades the current playback over 200 ms. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
 | The module's end | `audioEngine.finish()` — scheduling stops; the voices still sounding ring out their releases and stop themselves. A new Play cuts what is left. |
-| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:3588`). |
-| Seek | Same: stop, then prepare and play from the new time. |
+| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js`). |
+| Seek | A background click while playing fades the outgoing session and parks at the selected score time. Play prepares a fresh session there. |
 
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.
 
-## Verifying a change
+## Dense-score verification {#verifying-a-change}
 
 For a real score, capture the signal after the master limiter and compare note
 onsets with the loaded score. The following command uses the file picker, sets
-the tempo through the transport, then plays through the reverb tail.
+the tempo through the transport, then plays through the reverb tail. Run this from the repository root with the app running. It uses the shipped canon as a short check and writes a JSON report to the named output path. Substitute another input and a fresh report path to compare a larger score. On Windows the harness selects Chrome by default.
 
 ```sh
-node scripts/perf/check-file-audio.mjs http://localhost:3000 score.json report.json --bpm=300
+node scripts/perf/check-file-audio.mjs http://localhost:3000 public/modules/defaultModule.json canon-report.json --bpm=300
 ```
 
-On a 44,307-note sine score at 300 BPM in Chrome 157, the original build
+The comparison documented in commit `da23273` used a 44,307-note sine score at 300 BPM in Chrome 157. The baseline
 submitted every onset on time but reported 27.27 seconds of output underruns.
 With the revised scheduler and renderer, all 44,307 onsets had at least 90 ms
 of lead. The recorded output contained zero clipped samples or unexpected
@@ -291,8 +286,15 @@ silent 20 ms windows. The device reported one 8.6 ms startup underrun, also
 observed with an idle audio graph. Separate pointer tests parked the playhead
 at score times 54 s and 44 s and resumed through both passages.
 
-Screenshots cannot show that the pump keeps handing out voices past the end of a module. Drive the
-real app instead:
+For comparisons, record the input hash, browser version, BPM, seek position and device statistics from the report. Scheduled onset lead, captured PCM and device underruns measure different stages. Use `--idle-control` on a separate run to check the device baseline. [Performance measurement](/developer/performance)
+
+To check waveform continuity across Play, Pause, Stop, rapid restart and two seeks into sustained chords, run the transport fade harness against a local Vite server. Without a score argument it constructs a 64-voice chord.
+
+```sh
+node scripts/perf/check-transport-fades.mjs http://localhost:3000
+```
+
+To exercise the loop and its transport gestures:
 
 ```bash
 npm run dev
