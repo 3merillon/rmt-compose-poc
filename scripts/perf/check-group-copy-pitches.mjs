@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Run against Vite dev or preview: node scripts/perf/check-group-copy-pitches.mjs [url]
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
 
@@ -59,12 +60,16 @@ async function copyPair(page) {
   return page.locator('.icon[data-category="custom"][data-name="Selection (2 notes)"]');
 }
 
-async function dropTile(page, tile, id) {
+async function openLibrary(page) {
   const pull = await page.locator('.pull-tab').boundingBox();
   await page.mouse.move(pull.x + pull.width / 2, pull.y + pull.height / 2);
   await page.mouse.down();
   await page.mouse.move(pull.x + pull.width / 2, 280, { steps: 10 });
   await page.mouse.up();
+}
+
+async function dropTile(page, tile, id) {
+  await openLibrary(page);
   await tile.scrollIntoViewIfNeeded();
   const target = await pointOfNote(page, id);
   const canvas = page.locator('.myspaceapp');
@@ -93,7 +98,17 @@ for (const [name, baseFrequency, lastFrequency, editId] of [
 
       const tile = await copyPair(page);
       await page.reload();
-      const copy = await tile.evaluate(el => el.moduleData);
+      await tile.waitFor({ state: 'attached' });
+      await openLibrary(page);
+      const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        page.getByText('Save UI', { exact: true }).click(),
+      ]);
+      assert.equal(download.suggestedFilename(), 'ui-state.json');
+      const layout = JSON.parse(await readFile(await download.path(), 'utf8'));
+      const custom = layout.categories.find(category => category.name === 'custom');
+      const copy = custom.modules.find(entry => entry.name === 'Selection (2 notes)').moduleData;
+
       assert.deepEqual(copy.notes.map(n => n.id), [1, 2]);
       await loadFile(page, copy);
       assert.deepEqual(await pitches(page, [1, 2]), [330, 660], 'pitches after reopening the library copy');
