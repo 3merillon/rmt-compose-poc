@@ -12,7 +12,7 @@
  * `appearance.themeId`. Consumers filter by prefix.
  */
 
-import { eventBus } from '../utils/event-bus.js';
+import { eventBus } from '../utils/event-bus.ts';
 import {
   type Settings,
   SETTINGS_VERSION,
@@ -58,8 +58,8 @@ function setAtPath(obj: Settings, path: string, value: unknown) {
 }
 
 class SettingsStore {
-  _settings: Settings;
-  _subscribers: Set<Subscriber>;
+  declare _settings: Settings;
+  declare _subscribers: Set<Subscriber>;
   constructor() {
     this._settings = this._load();
     this._subscribers = new Set();

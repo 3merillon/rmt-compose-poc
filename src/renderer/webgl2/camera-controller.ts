@@ -15,32 +15,32 @@ interface Point { x: number; y: number }
 
 export class CameraController {
   declare onChange?: () => void;
-  containerEl: HTMLElement;
-  canvasOffset: Point;
-  scale: number;
-  minScale: number;
-  maxScale: number;
-  tx: number;
-  ty: number;
-  maintainFocusOnResize: boolean;
-  _lastRect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'> | null;
-  inputEnabled: boolean;
-  singleFingerPanEnabled: boolean;
-  lockX: boolean;
-  _dragging: boolean;
-  _lastX: number;
-  _lastY: number;
-  _touches: Map<number, Point>;
-  _pinching: boolean;
-  _pinchLastDist: number;
-  _pinchCenter: Point;
-  _onWheel: ((event: WheelEvent) => void) | null;
-  _onResize: (() => void) | null;
-  _hasDocListeners: boolean;
-  _onPointerDown: ((event: PointerEvent) => void) | null;
-  _onPointerMove: ((event: PointerEvent) => void) | null;
-  _onPointerUp: ((event: PointerEvent) => void) | null;
-  _onPointerCancel: ((event: PointerEvent) => void) | null;
+  declare containerEl: HTMLElement;
+  declare canvasOffset: Point;
+  declare scale: number;
+  declare minScale: number;
+  declare maxScale: number;
+  declare tx: number;
+  declare ty: number;
+  declare maintainFocusOnResize: boolean;
+  declare _lastRect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'> | null;
+  declare inputEnabled: boolean;
+  declare singleFingerPanEnabled: boolean;
+  declare lockX: boolean;
+  declare _dragging: boolean;
+  declare _lastX: number;
+  declare _lastY: number;
+  declare _touches: Map<number, Point>;
+  declare _pinching: boolean;
+  declare _pinchLastDist: number;
+  declare _pinchCenter: Point;
+  declare _onWheel: ((event: WheelEvent) => void) | null;
+  declare _onResize: (() => void) | null;
+  declare _hasDocListeners: boolean;
+  declare _onPointerDown: ((event: PointerEvent) => void) | null;
+  declare _onPointerMove: ((event: PointerEvent) => void) | null;
+  declare _onPointerUp: ((event: PointerEvent) => void) | null;
+  declare _onPointerCancel: ((event: PointerEvent) => void) | null;
 
   constructor(containerEl: HTMLElement) {
     this.containerEl = containerEl;

@@ -6,23 +6,23 @@ import type { Note } from '../note.ts';
 import type { InspectorHooks, InspectorRow } from './inspector-types.ts';
 import type { ArrowRatio } from '../settings/settings-schema.ts';
 import type { EvaluationRecord } from '../model-types.ts';
-import { setModuleRepeat, moduleRepeatRatio } from '../player/display-transpose.js';
+import { setModuleRepeat, moduleRepeatRatio } from '../player/display-transpose.ts';
 import { validateExpression } from './validation.ts';
-import { eventBus } from '../utils/event-bus.js';
-import { moduleSnapshot } from '../store/history.js';
+import { eventBus } from '../utils/event-bus.ts';
+import { moduleSnapshot } from '../store/history.ts';
 import Fraction from 'fraction.js';
-import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
-import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
-import { decompileToDSL, compileDSL } from '../dsl/index.js';
-import { isIrrational, isApprox, toText as exactText, toNumber as exactToNumber } from '../value/exact.js';
-import { BinaryEvaluator } from '../binary-evaluator.js';
+import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.ts';
+import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.ts';
+import { decompileToDSL, compileDSL } from '../dsl/index.ts';
+import { isIrrational, isApprox, toText as exactText, toNumber as exactToNumber } from '../value/exact.ts';
+import { BinaryEvaluator } from '../binary-evaluator.ts';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.ts';
 import { settingsStore } from '../settings/settings-store.ts';
-import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
-import { toNumber } from '../utils/fraction-num.js';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.ts';
+import { toNumber } from '../utils/fraction-num.ts';
 import { hugeFractionDisplay } from './fraction-display.ts';
-import { EXPRESSION_VARS, isMeasureNote } from '../note.js';
-import { CORRUPT } from '../binary-note.js';
+import { EXPRESSION_VARS, isMeasureNote } from '../note.ts';
+import { CORRUPT } from '../binary-note.ts';
 
 
 // Variables a note may leave unset: an empty Raw removes the expression and the

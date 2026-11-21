@@ -22,12 +22,12 @@
  * reloads).
  */
 
-import { MAX_MODULE_NOTES } from '../limits.js';
+import { MAX_MODULE_NOTES } from '../limits.ts';
 import { settingsStore } from './settings-store.ts';
 import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.ts';
 import { THEME_PRESETS, getPreset } from '../theme/presets.ts';
-import { eventBus } from '../utils/event-bus.js';
-import { moduleSnapshot } from '../store/history.js';
+import { eventBus } from '../utils/event-bus.ts';
+import { moduleSnapshot } from '../store/history.ts';
 import { showConfirmation } from '../utils/confirm-dialog.ts';
 import {
   makeDraggableWidget,
@@ -35,10 +35,10 @@ import {
   MIN_BUFFER,
 } from '../utils/draggable-widget.ts';
 import { raisePanel } from '../utils/panel-stack.ts';
-import { getModule } from '../store/app-state.js';
-import { moduleRepeatRatio, setModuleRepeat, repeatExprForRatio } from '../player/display-transpose.js';
-import { validateLoopRatio } from '../player/loop-transpose.js';
-import { isRational as isRationalValue, toText as exactTextOf } from '../value/exact.js';
+import { getModule } from '../store/app-state.ts';
+import { moduleRepeatRatio, setModuleRepeat, repeatExprForRatio } from '../player/display-transpose.ts';
+import { validateLoopRatio } from '../player/loop-transpose.ts';
+import { isRational as isRationalValue, toText as exactTextOf } from '../value/exact.ts';
 import { viewportWidth, viewportHeight } from '../utils/viewport.ts';
 
 // Themeable color tokens exposed as individual pickers (key + friendly label),

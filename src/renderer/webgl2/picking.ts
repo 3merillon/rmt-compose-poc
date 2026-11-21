@@ -18,15 +18,15 @@ interface PassBindings {
 }
 
 export class Picking {
-  gl: WebGL2RenderingContext | null;
-  fbo: WebGLFramebuffer | null;
-  colorTex: WebGLTexture | null;
-  depthRb: WebGLRenderbuffer | null;
-  canvas: HTMLCanvasElement | null;
-  devicePixelRatio: number;
-  w: number;
-  h: number;
-  _prevBindings: PassBindings | null;
+  declare gl: WebGL2RenderingContext | null;
+  declare fbo: WebGLFramebuffer | null;
+  declare colorTex: WebGLTexture | null;
+  declare depthRb: WebGLRenderbuffer | null;
+  declare canvas: HTMLCanvasElement | null;
+  declare devicePixelRatio: number;
+  declare w: number;
+  declare h: number;
+  declare _prevBindings: PassBindings | null;
 
   constructor() {
     this.gl = null;

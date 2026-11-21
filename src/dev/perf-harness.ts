@@ -23,12 +23,12 @@
 
 import type { EvaluationCache, EvaluationRecord } from '../model-types.ts';
 import type { Module } from '../module.ts';
-import type { Workspace } from '../renderer/webgl2/workspace.js';
-import type { RendererAdapter } from '../renderer/webgl2/renderer.js';
+import type { Workspace } from '../renderer/webgl2/workspace.ts';
+import type { RendererAdapter } from '../renderer/webgl2/renderer.ts';
 import type { AppEvents } from '../utils/event-bus.ts';
-import { getModule, getEvaluatedNotes } from '../store/app-state.js';
-import { eventBus } from '../utils/event-bus.js';
-import { replaceSavedModule, clearSavedModule } from '../store/autosave.js';
+import { getModule, getEvaluatedNotes } from '../store/app-state.ts';
+import { eventBus } from '../utils/event-bus.ts';
+import { replaceSavedModule, clearSavedModule } from '../store/autosave.ts';
 
 
 function percentile(sorted: number[], p: number) {

@@ -7,15 +7,15 @@ import type { RendererConfig, RendererConfigPatch } from './renderer-config.ts';
 import type { Preview, RenderRecord, EvaluatedScene, SyncArgs, Marquee, SceneHit, DragOffset, DragOverlay, ByRelation, InputTheme, ColorCache, GlyphRun, Sprite, TextureEntry, Glyph, AtlasGlyph, Atlas, AtlasScratch, LinkWriter, LinkBasis, Overview, CachedRings } from './render-types.ts';
 import { InstanceRanges } from './instance-ranges.ts';
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.ts';
-import { toNumber } from '../../utils/fraction-num.js';
+import { toNumber } from '../../utils/fraction-num.ts';
 import { noteLabel, LINE_LABEL } from './note-label.ts';
 import { parseCssColor } from '../../utils/css-color.ts';
-import { amplitudeToGain } from '../../player/amplitude.js';
-import { isMeasureNote } from '../../note.js';
-import { envelopeShares } from '../../instruments/instrument-manager.js';
-import { getDisplayTransposition } from '../../player/display-transpose.js';
-import * as X from '../../value/exact.js';
-import { getInstrumentManager } from '../../store/app-state.js';
+import { amplitudeToGain } from '../../player/amplitude.ts';
+import { isMeasureNote } from '../../note.ts';
+import { envelopeShares } from '../../instruments/instrument-manager.ts';
+import { getDisplayTransposition } from '../../player/display-transpose.ts';
+import * as X from '../../value/exact.ts';
+import { getInstrumentManager } from '../../store/app-state.ts';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead

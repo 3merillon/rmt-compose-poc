@@ -3,11 +3,11 @@
 //   - createEvaluateSection(note, measureId, effectiveNoteId, modalsApi) => HTMLElement
 //   - createDeleteSection(note, effectiveNoteId, externalFunctions, modalsApi) => HTMLElement
 //   - createSelectSection(note, effectiveNoteId, externalFunctions) => HTMLElement|null
-import type { Note } from '../note.js';
+import type { Note } from '../note.ts';
 import type { InspectorHooks } from './inspector-types.ts';
-import type { modals } from './index.js';
-import { getModule } from '../store/app-state.js';
-import { isMeasureNote } from '../note.js';
+import type { modals } from './index.ts';
+import { getModule } from '../store/app-state.ts';
+import { isMeasureNote } from '../note.ts';
 
 // SELECT: this note and the notes related to it through one variable, as a group.
 // Dependents read this note (transitively); dependencies are what it reads. The

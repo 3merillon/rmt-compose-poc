@@ -3,12 +3,12 @@
 const BLOCK = 64;
 
 export class InstanceRanges {
-  readonly count: number;
-  readonly leaves: number;
-  readonly left: Float64Array;
-  readonly right: Float64Array;
-  readonly top: Float64Array;
-  readonly bottom: Float64Array;
+  declare readonly count: number;
+  declare readonly leaves: number;
+  declare readonly left: Float64Array;
+  declare readonly right: Float64Array;
+  declare readonly top: Float64Array;
+  declare readonly bottom: Float64Array;
 
   constructor(positions: ArrayLike<number>) {
     this.count = positions.length / 4;

@@ -3,7 +3,7 @@
 // existing exact rendering; larger ones collapse to an 8-significant-digit
 // approximation, with an elided exact n/d form surfaced via the element's
 // title attribute so the exact value stays reachable.
-import { bigDigits, toNumber } from '../utils/fraction-num.js';
+import { bigDigits, toNumber } from '../utils/fraction-num.ts';
 
 const EXACT_DIGIT_LIMIT = 24;
 const EDGE_DIGITS = 12;

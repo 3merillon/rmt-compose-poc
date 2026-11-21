@@ -2,17 +2,17 @@
 // Exports:
 //   - createAddNoteSection(note, isBase, externalFunctions) => HTMLElement
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
-import type { Note } from '../note.js';
+import type { Note } from '../note.ts';
 import type { InspectorHooks } from './inspector-types.ts';
 import type { InputFields, EvaluationRecord } from '../model-types.ts';
-import { eventBus } from '../utils/event-bus.js';
-import { moduleSnapshot } from '../store/history.js';
-import { getModule, setEvaluatedNotes } from '../store/app-state.js';
-import { compileDSL, decompileToDSL } from '../dsl/index.js';
-import { BinaryEvaluator } from '../binary-evaluator.js';
-import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
-import { hugeFractionDisplay } from './fraction-display.js';
-import { EXPRESSION_VARS, isReferenceNote } from '../note.js';
+import { eventBus } from '../utils/event-bus.ts';
+import { moduleSnapshot } from '../store/history.ts';
+import { getModule, setEvaluatedNotes } from '../store/app-state.ts';
+import { compileDSL, decompileToDSL } from '../dsl/index.ts';
+import { BinaryEvaluator } from '../binary-evaluator.ts';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.ts';
+import { hugeFractionDisplay } from './fraction-display.ts';
+import { EXPRESSION_VARS, isReferenceNote } from '../note.ts';
 
 
 function pauseIfPlaying() {

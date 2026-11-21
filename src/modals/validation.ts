@@ -1,10 +1,10 @@
-import { validateDSL, compileDSL } from '../dsl/index.js';
-import { compiler } from '../expression-compiler.js';
-import { isLegacyExpression } from '../migrate/legacy-syntax.js';
-import { findDependencyCycle } from '../variable-deps.js';
+import { validateDSL, compileDSL } from '../dsl/index.ts';
+import { compiler } from '../expression-compiler.ts';
+import { isLegacyExpression } from '../migrate/legacy-syntax.ts';
+import { findDependencyCycle } from '../variable-deps.ts';
 
-import type { Module } from '../module.js';
-import type { BinaryExpression } from '../binary-note.js';
+import type { Module } from '../module.ts';
+import type { BinaryExpression } from '../binary-note.ts';
 
 export function validateExpression(moduleInstance: Module, noteId: number, expression: unknown, variableType: string) {
     const expr = String(expression ?? '').trim();

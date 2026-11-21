@@ -9,7 +9,7 @@
  * - *WU values are world units (pre-transform)
  */
 
-import { DEFAULT_DETAIL_CUTOFF } from '../../limits.js';
+import { DEFAULT_DETAIL_CUTOFF } from '../../limits.ts';
 
 export const defaultRendererConfig = {
   // Time/frequency mapping

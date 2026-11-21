@@ -12,7 +12,7 @@
  * schema grows, bump SETTINGS_VERSION and add a migration in `migrate()`.
  */
 
-import { DEFAULT_DETAIL_CUTOFF, MAX_MODULE_NOTES } from '../limits.js';
+import { DEFAULT_DETAIL_CUTOFF, MAX_MODULE_NOTES } from '../limits.ts';
 
 export const SETTINGS_VERSION = 1;
 

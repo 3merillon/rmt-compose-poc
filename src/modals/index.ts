@@ -4,8 +4,8 @@ import type { ExpressionName } from '../model-types.ts';
 import type { ExactValue } from '../value/exact.ts';
 import type { InspectorHooks, InspectorRow } from './inspector-types.ts';
 import Fraction from 'fraction.js';
-import { getDisplayTransposition, shownFrequency, moduleRepeatRatio } from '../player/display-transpose.js';
-import { isRational, shadow as shadowOf, toText as exactText, toNumber as exactNumber } from '../value/exact.js';
+import { getDisplayTransposition, shownFrequency, moduleRepeatRatio } from '../player/display-transpose.ts';
+import { isRational, shadow as shadowOf, toText as exactText, toNumber as exactNumber } from '../value/exact.ts';
 import { createVariableControls, createMeasureDurationRow } from './variable-controls.ts';
 import { createAddNoteSection, createAddMeasureSection } from './note-creation.ts';
 import { createEvaluateSection, createDeleteSection, createSelectSection } from './note-actions.ts';
@@ -14,13 +14,13 @@ import {
     detectCircularDependency,
     invalidateDependencyGraphCache
 } from './validation.ts';
-import { eventBus } from '../utils/event-bus.js';
-import { moduleSnapshot } from '../store/history.js';
-import { getModule, setEvaluatedNotes } from '../store/app-state.js';
+import { eventBus } from '../utils/event-bus.ts';
+import { moduleSnapshot } from '../store/history.ts';
+import { getModule, setEvaluatedNotes } from '../store/app-state.ts';
 import { escapeHtml } from '../utils/html-escape.ts';
-import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr, valueFactor } from '../utils/value-expr.js';
-import { isMeasureNote, isReferenceNote } from '../note.js';
-import { CORRUPT } from '../binary-note.js';
+import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr, valueFactor } from '../utils/value-expr.ts';
+import { isMeasureNote, isReferenceNote } from '../note.ts';
+import { CORRUPT } from '../binary-note.ts';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.ts';
 import { raisePanel } from '../utils/panel-stack.ts';
 import { viewportHeight } from '../utils/viewport.ts';

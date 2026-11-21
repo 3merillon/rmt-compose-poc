@@ -10,12 +10,12 @@
  * several, the note's current start parent wins, then the one that starts latest,
  * then the lowest id. Only for notes written in the DSL.
  */
-import type { Module } from '../module.js';
-import type { Note } from '../note.js';
-import { isMeasureNote } from '../note.js';
-import { compiler } from '../expression-compiler.js';
-import { findDependencyCycle } from '../variable-deps.js';
-import { toNumber } from './fraction-num.js';
+import type { Module } from '../module.ts';
+import type { Note } from '../note.ts';
+import { isMeasureNote } from '../note.ts';
+import { compiler } from '../expression-compiler.ts';
+import { findDependencyCycle } from '../variable-deps.ts';
+import { toNumber } from './fraction-num.ts';
 
 // A drop compares the separately converted start and duration used by the snap
 // rule. Store only the range of those ends for each occupied block of IDs.

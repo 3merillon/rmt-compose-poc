@@ -1,4 +1,4 @@
-import type { Note } from '../note.js';
+import type { Note } from '../note.ts';
 import type { EvaluationCache } from '../model-types.ts';
 import type { ExactValue } from '../value/exact.ts';
 

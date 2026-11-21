@@ -1,16 +1,16 @@
 import Fraction from 'fraction.js';
-import { Module } from './module.js';
-import { Note } from './note.js';
-import { InstrumentManager, SynthInstrument } from './instruments/instrument-manager.js';
-import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
-import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
-import { initStackClick } from './stack-click.js';
+import { Module } from './module.ts';
+import { Note } from './note.ts';
+import { InstrumentManager, SynthInstrument } from './instruments/instrument-manager.ts';
+import * as SynthInstrumentsModule from './instruments/synth-instruments.ts';
+import * as SampleInstrumentsModule from './instruments/sample-instruments.ts';
+import { initStackClick } from './stack-click.ts';
 import { initViewport } from './utils/viewport.ts';
 import { initNumberSteppers } from './ui/number-stepper.ts';
-import { eventBus } from './utils/event-bus.js';
-import { modals } from './modals/index.js';
-import { audioEngine } from './player/audio-engine.js';
-import './store/history.js';
+import { eventBus } from './utils/event-bus.ts';
+import { modals } from './modals/index.ts';
+import { audioEngine } from './player/audio-engine.ts';
+import './store/history.ts';
 
 
  // Globals are exposed via registerGlobals below to centralize window.* writes
@@ -68,11 +68,9 @@ try {
     console.error('Failed to register instruments in audioEngine', e);
 }
 
- // Ensure legacy player registers its DOMContentLoaded handler before it fires
- import './player.js';
- 
- // Import and initialize the legacy modules
-// These will be loaded as regular scripts since they're too complex to fully convert immediately
+// Register the player's DOMContentLoaded handler before documents finish loading.
+import './player.ts';
+
 async function initApp() {
     // Initialize stack click functionality
     initStackClick();
@@ -86,12 +84,12 @@ async function initApp() {
 
     // Load and initialize menu bar via dynamic import (ensures globals are set first)
     try {
-        const { initMenuBar } = await import('./menu/index.js');
+        const { initMenuBar } = await import('./menu/index.ts');
         if (typeof initMenuBar === 'function') {
             initMenuBar();
         }
     } catch (e) {
-        console.error('Failed to load or initialize ./menu/index.js', e);
+        console.error('Failed to load or initialize ./menu/index.ts', e);
     }
 
     // Settings system: initialize the store (loads persisted settings) and wire the
@@ -99,7 +97,7 @@ async function initApp() {
     // always visible, so the menu entry was a second door to the same room.
     try {
         const { settingsStore } = await import('./settings/settings-store.ts');
-        const { toggleSettingsPanel } = await import('./settings/settings-panel.js');
+        const { toggleSettingsPanel } = await import('./settings/settings-panel.ts');
         // Touch the store so it loads + emits 'settings:loaded' early.
         settingsStore.getAll();
 
