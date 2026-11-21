@@ -605,7 +605,7 @@ export class BinaryEvaluator {
 
         case OP.DUP: {
           const top = this.peek();
-          this.push(this.pool.allocFrom(top));
+          this.pushValue(top);
           break;
         }
 

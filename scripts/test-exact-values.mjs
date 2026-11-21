@@ -69,6 +69,28 @@ console.log('\nExact values: the algebra');
   check(X.shadow(r2) instanceof Fraction && X.toNumber(X.shadow(r2)) === Math.SQRT2, 'shadow is the nearest double as a Fraction');
 }
 
+// DUP must copy a rational out of the pool and preserve exact symbolic and
+// approximate operands. Exercise the bytecode instruction directly.
+{
+  const { OP } = await import('../src/binary-note.js');
+  const { BinaryEvaluator } = await import('../src/binary-evaluator.js');
+  const { compileDSL } = await import('../src/dsl/index.js');
+  for (const [input, expectedKind, expectedText] of [
+    ['2', 'rational', '4'],
+    ['2^(1/12)', 'irrational', '2^(1/6)'],
+    ['~2', 'approximate', '~4'],
+  ]) {
+    const expression = compileDSL(input);
+    expression.writeByte(OP.DUP);
+    expression.writeByte(OP.MUL);
+    const evaluator = new BinaryEvaluator(null);
+    const fraction = evaluator.evaluate(expression);
+    const result = evaluator._lastExact ?? fraction;
+    check(X.kindOf(result) === expectedKind && X.toText(result) === expectedText,
+      `DUP and multiply preserves ${input} as ${expectedText}`);
+  }
+}
+
 console.log('\nExact values: the evaluator');
 {
   const notes = [{ id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f' }];
