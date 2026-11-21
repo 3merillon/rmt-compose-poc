@@ -209,7 +209,7 @@ console.log('\nC. A true cycle is refused\n');
 
   check(refusal(mod, 2, 'frequency', '(5/4) * [1].f') === CIRCULAR,
     'C1 [2].f from [1].f while [1].f reads [2].f: refused as circular');
-  check((refusal(mod, 2, 'frequency', "module.getNoteById(1)!.getVariable('frequency').mul(new Fraction(5, 4))") || '').startsWith('The method-chain syntax was retired'),
+  check((refusal(mod, 2, 'frequency', "module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))") || '').startsWith('The method-chain syntax was retired'),
     'C2 the same typed in the retired method-chain syntax: refused, with its DSL form');
   check(refusal(mod, 1, 'frequency', '[1].f * 2') === SELF,
     'C3 [1].f from [1].f: refused as a self-reference');
@@ -586,7 +586,7 @@ console.log('\nF. Amplitude: ordered, inherited and cycle-checked like the other
 
   check(refusal(mod, 1, 'amplitude', '[2].a * 2') === CIRCULAR,
     'F20 [1].a from [2].a while [2].a reads [1].a: refused as circular');
-  check((refusal(mod, 1, 'amplitude', "module.getNoteById(2)!.getVariable('amplitude').mul(new Fraction(2))") || '').startsWith('The method-chain syntax was retired'),
+  check((refusal(mod, 1, 'amplitude', "module.getNoteById(2).getVariable('amplitude').mul(new Fraction(2))") || '').startsWith('The method-chain syntax was retired'),
     'F21 the same typed in the retired method-chain syntax: refused, with its DSL form');
   check(refusal(mod, 1, 'amplitude', '[1].a * 2') === SELF,
     'F22 [1].a from [1].a: refused as a self-reference');
