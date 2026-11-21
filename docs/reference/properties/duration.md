@@ -5,12 +5,10 @@ description: Reference for the duration property - aliases, defaults, the time u
 
 # duration
 
-`duration` is how long a note lasts, in **seconds**. Like every note property it is stored as an
-expression string, compiled to bytecode, and evaluated with exact rational arithmetic.
+`duration` is how long a note lasts, in **seconds**. The expression can be a rational number of seconds or a relationship to another duration. Symbolic powers and approximate values also work.
 
 It is one of the three variables of the notation, with [frequency](/reference/properties/frequency)
-and [startTime](/reference/properties/start-time). Durations are almost always written against
-other durations, never as seconds: `base.d * (3/4)` is three quarters of the time unit, and
+and [startTime](/reference/properties/start-time). For rhythm that follows the workspace pace, write durations against other durations: `base.d * (3/4)` is three quarters of the time unit, and
 `[1].d * 2` is twice as long as note 1.
 
 ## Aliases
@@ -25,9 +23,7 @@ There is no `l` or `len` alias. `[1].d` and `[1].duration` compile to identical 
 
 ## The time unit
 
-Every duration is measured against one note: the BaseNote. **`base.d` is the time unit**, one beat
-if you count in beats. The BaseNote holds the only absolute time in a module, a start and a duration
-in seconds, and every other start and duration is a relation to a note that leads back to them.
+**`base.d` is the time unit**, one beat if you count in beats. A duration written as `2 * base.d` follows changes of pace. A duration written as `2` stays fixed at two seconds.
 
 ```
 base.d              # one time unit

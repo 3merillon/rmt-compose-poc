@@ -66,7 +66,7 @@ Retune the BaseNote to 220 and all three follow, keeping their intervals exactly
 
 ## The BaseNote
 
-The BaseNote (ID 0) is the root. It depends on nothing, and nearly everything depends on it — directly, or by way of a chain. It carries the only absolute values in the module: a `frequency` in hertz, and a `startTime` and a `duration` in seconds. Its duration is the **time unit**, `base.d`, and every other length is written against it, directly or through a chain. (It can also carry the interpretation variables `amplitude`, `attack` and `release`, which notes without their own read from it.)
+The BaseNote (ID 0) usually provides the starting frequency in hertz and the start and duration in seconds. Its duration, `base.d`, is the time unit. Notes written against it follow changes to the unit. A literal duration on an individual note stays fixed. A BaseNote expression may itself read another value when the dependency is acyclic. Its amplitude, attack and release supply defaults for notes without their own values.
 
 `base.f` and `[0].f` are the same reference.
 
@@ -151,7 +151,7 @@ Use it when you want to break a note out of the middle of a chain while keeping 
 
 Deleting a multi-selection **liberates rather than cascades**. Every dependent that lies *outside* the selection is liberated — the deleted notes' expressions are inlined into it, so it keeps its exact position, length and pitch. Only what you selected is destroyed.
 
-The confirmation dialog describes the delete as irreversible. It isn't: it lands as one undo entry. See [Selecting Notes](/user-guide/notes/selection).
+Undo restores the group in one step. See [Selecting Notes](/user-guide/notes/selection).
 
 ## Two edges the graph will not accept
 
@@ -159,7 +159,7 @@ No property may end up depending on itself. A frequency that reads its own note'
 
 The rule is per property, like everything else on this page. A note's start time may read the same note's duration, and two notes may read each other — one for its pitch, the other for its timing — as long as no property comes back to itself.
 
-A reference to a note that **does not exist** is a different problem: it produces no edge, no line and nothing on screen. The evaluator substitutes 440 Hz and names the reference in the browser console. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
+A reference to a note that **does not exist** is a different problem: it produces no edge, no line and nothing on screen. The evaluator names the reference in the browser console. Its substitute depends on the field, for example 440 Hz for missing frequency, zero for start time, or one second for duration. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
 
 ## Patterns
 

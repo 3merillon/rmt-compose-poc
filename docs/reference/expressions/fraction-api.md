@@ -94,11 +94,10 @@ exact. An irrational value is not turned into a fraction: it is kept exact, as t
 | `2^(1/12)` | `2^(1/12)` (1.059463…) | irrational, exact |
 | `3^(1/13)` | `3^(1/13)` (1.088182…) | irrational, exact |
 
-Values computed from an irrational stay exact: `263 * 2^(7/12)` is an exact value, and twelve
+Multiplication by a rational preserves an exact power: `263 * 2^(7/12)` is an exact value, and twelve
 steps of `2^(1/12)` give exactly 2. A note whose own expression holds an irrational power is drawn
 with a crosshatch, and a note that only *depends* on one is drawn with a single diagonal hatch.
-The hatching means "tempered or approximate, not a pure ratio"; the app's internal word for it is
-*corrupted*. In the note widget an irrational value shows its exact form and its value; the **`≈`**
+In the note widget an irrational value shows its exact form and its value; the **`≈`**
 prefix is used only for an approximate value.
 
 A value is **approximate** when you write it with `~` (see

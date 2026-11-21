@@ -38,7 +38,7 @@ The table's right-hand column is what a module gets when it is constructed with 
 
 ### Every value is a relation; only the BaseNote is absolute
 
-A note has three **language variables**: `frequency` (`f`), `startTime` (`t`) and `duration` (`d`). Each one is an exact expression relating the note to other notes. The BaseNote holds the only absolute values in the module: a frequency in hertz, and a start and a duration in seconds.
+A note has three **language variables**: `frequency` (`f`), `startTime` (`t`) and `duration` (`d`). Each can be an expression relating the note to another note. A literal pitch or time is also valid and stays fixed. The BaseNote usually provides the anchors: a frequency in hertz, and a start and a duration in seconds.
 
 ### The time unit
 
@@ -320,7 +320,7 @@ So two semitones up stays a single exact step of `2^(1/6)`. Evaluation keeps the
 
 | Concept | In one line |
 |---------|-------------|
-| **BaseNote** | Note 0. Silent. The only absolute values: a frequency in Hz, a start and a duration in seconds. |
+| **BaseNote** | Note 0. Silent. The usual anchors: a frequency in Hz, a start and a duration in seconds. |
 | **Time unit** | `base.d`. One beat, if you count in beats. |
 | **Ratio** | An exact fraction. 3/2 is a fifth. |
 | **Expression** | The text that defines a property: `base.f * (3/2)`, `base.d`, `[1].t + [1].d`. |

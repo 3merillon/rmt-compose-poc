@@ -1,15 +1,13 @@
 ---
 title: frequency
-description: Reference for the frequency property - aliases, defaults, valid expressions, the transpose arrows, corruption, instrument inheritance, and worked examples.
+description: Reference for the frequency property - aliases, defaults, valid expressions, the transpose arrows, tempered pitch, instrument inheritance, and worked examples.
 ---
 
 # frequency
 
-`frequency` is the pitch of a note, in Hertz. Like every note property it is stored as an
-**expression string**, compiled to bytecode, and evaluated with exact rational arithmetic.
+`frequency` is the pitch of a note, in Hertz. Its expression may evaluate to an exact ratio, a symbolic irrational value, or an approximate value.
 
-A note with a `duration` but no `frequency` is a **silence** (it occupies time but never sounds). A
-note with a `startTime` but neither `frequency` nor `duration` is a **measure bar**.
+A note with a start and duration but no frequency is a **silence**. A **measure bar** has those time fields plus `"measure": true`. A frequency with no duration defines a silent pitch reference or, if it has a start, a key change.
 
 ## Aliases
 
@@ -51,14 +49,13 @@ turning arrows off in Settings removes both the drawing and the click zones.
 
 ::: warning Edits apply on save
 Typing in `Raw:` changes nothing. The expression is validated, simplified and compiled when you
-press **Save**. If the expression is invalid, the save is silently dropped — the error only reaches
-the browser console, not the screen.
+press **Save**. An invalid expression leaves the saved value in place and displays a red error below the Save button.
 :::
 
 Dragging a note **does not** change its frequency directly (dragging is horizontal only, and moves
 `startTime`). Dragging can still *rewrite* the frequency expression: if a move would leave a note
 referencing a note that now starts after it, the app re-anchors the frequency to an earlier note
-and rewrites the expression so the evaluated pitch is unchanged.
+and rewrites the expression so the evaluated pitch is unchanged. You can intentionally type a forward pitch reference, as in [bar 5 of the canon](/tutorials/workflows/canon-and-cadences).
 
 ## The transpose arrows
 
@@ -141,19 +138,11 @@ Exponents are reduced on save: `base.f * 2^(4/12)` is stored as `base.f * 2^(1/3
 | Major seventh | 15/8 | `base.f * (15/8)` |
 | Octave | 2/1 | `base.f * 2` |
 
-## Irrational frequencies (corruption)
+## Irrational frequencies {#irrational-frequencies-corruption}
 
-A `^` whose result is irrational marks the property **corrupted** (tempered, not a pure ratio), and
-the value stays exact. `2^(1/12)` corrupts;
-`4^(1/2)` does not, because it is exactly 2 — `base.f * 4^(1/2)` is simplified to `base.f * 2` on
-save.
+Select a note at `base.f * 2^(1/12)`. Its exact value contains the semitone power, and the widget also shows a decimal for comparison. A perfect root such as `4^(1/2)` simplifies to 2. Twelve exact semitone steps likewise produce the rational octave.
 
-The widget shows an irrational frequency as its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`); only an approximate one (written with `~`) gets an **`≈`** prefix. In the workspace the
-note is **hatched**: a crosshatch means the note is corrupted at the source, a single diagonal hatch
-means it merely depends on something corrupted. A tempered chain that lands on a rational shows its
-fraction: twelve 12-TET steps are exactly 2.
-
-Simplification merges like bases: `2^(1/12) * 2^(1/12) * base.f` saves as `2^(1/6) * base.f`.
+Crosshatching marks a note whose expression introduces an irrational power or approximation. A single diagonal hatch indicates an inherited contribution. An approximate value in the widget carries ≈. [Exact and approximate values](/getting-started/concepts#the-symbol-approximation)
 
 ## Dependencies
 

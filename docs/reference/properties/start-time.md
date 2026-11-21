@@ -5,15 +5,12 @@ description: Reference for the startTime property - aliases, defaults, valid exp
 
 # startTime
 
-`startTime` is when a note begins, in **seconds from the start of the composition**. Like every
-note property it is stored as an expression string, compiled to bytecode, and evaluated with exact
-rational arithmetic.
+`startTime` is when a note begins, in **seconds from the start of the composition**. Its expression can use rational time units, symbolic powers, or an explicitly approximate number.
 
 It is one of the three variables of the notation, with [frequency](/reference/properties/frequency)
 and [duration](/reference/properties/duration).
 
-Almost every note in a real module expresses its start *relative to another note* rather than as an
-absolute number. That is what makes a composition editable: move one note and everything anchored
+A relative start can follow a sounding note, silence, or measure bar. That is what makes a composition editable: move one note and everything anchored
 to it follows.
 
 ## Aliases

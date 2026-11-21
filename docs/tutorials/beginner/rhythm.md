@@ -18,7 +18,7 @@ Two properties carry the timing:
 | `startTime` | when the note begins | seconds |
 | `duration` | how long it sounds | seconds |
 
-Both are relationships, apart from the BaseNote's own, which are the only absolute times in a module. You almost never write seconds. You write the **time unit**:
+Build both from the **time unit** when a phrase should follow changes of pace:
 
 ```
 base.d

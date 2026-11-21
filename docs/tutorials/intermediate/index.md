@@ -29,7 +29,7 @@ Build bar chains from the note widget, change the meter on one bar, and attach n
 
 ## Recommended order
 
-Dependencies first. Octaves and Measures both lean on it, and neither leans on the other.
+Start with Dependencies. Continue with Octaves to change a chord’s pitch or Measures to rearrange a phrase in time. For a worked example in the opening score, [follow the three voices in bar 5](/tutorials/workflows/canon-and-cadences).
 
 ## What you will be able to do
 

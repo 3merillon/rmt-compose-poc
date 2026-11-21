@@ -137,9 +137,7 @@ A property that holds a tempered or approximate value is hatched, and the displa
 - The value in the note widget shows an irrational value as its exact form and its value, for
   example `(263/4) * 2^(1/4) = 78.190368…`. Only an approximate value is prefixed with **`≈`**.
 
-The hatching means "tempered or approximate, not a pure ratio"; the app's internal word for it is
-*corrupted*. It is not damage: every equal-tempered scale in the module library is built out of
-hatched notes. See [Exact Values](/developer/core/symbolic-power).
+For the arithmetic behind these results, see [Exact Values](/developer/core/symbolic-power).
 
 ::: tip Perfect roots stay clean
 `4^(1/2)` is 2 exactly, so the note is not hatched — and the simplifier will rewrite the
@@ -220,7 +218,7 @@ See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode ru
 | What you write | What happens |
 |---|---|
 | `1 +`, `base.`, `a & b` | Rejected on save; the reason appears in red under the Save button |
-| `5 / 0` | Accepted. Evaluates to **1** with a console warning, and the property is flagged corrupted (crosshatch) |
+| `5 / 0` | Accepted. Evaluates to an **approximate 1** with a console warning and crosshatch |
 | `2^(1/12)` | Accepted. Irrational, kept exact — the property is hatched (crosshatch) |
 | `2^100000` | Accepted. Past the exact-power caps — approximate, and the property is hatched |
 | `[16777216].f` | Rejected on save: `Invalid note ID '16777216'. Note IDs must be integers between 0 and 16777215` |

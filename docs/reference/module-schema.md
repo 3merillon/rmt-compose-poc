@@ -49,7 +49,7 @@ This is `public/modules/intervals/3-2.json`, shipped with the app in full:
 }
 ```
 
-One note, a perfect fifth above the BaseNote, one time unit long, starting where the BaseNote starts. The BaseNote holds the only absolute values: a frequency in Hz, and a start and a duration in seconds.
+One note, a perfect fifth above the BaseNote, one time unit long, starting where the BaseNote starts. In this shipped file the BaseNote supplies the absolute values: a frequency in Hz, and a start and a duration in seconds.
 
 ## The `baseNote` object
 
@@ -67,7 +67,7 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `instrument` | instrument name | none → the `audio.defaultInstrument` setting | See [Instruments](#instruments). |
 | `repeat` | expression string | none | The ratio from one repeat of a loop to the next, e.g. `9/8`, `2^(1/6)` or `[24].f / base.f`, between 1/16 and 16: each repeat sounds that much higher than the last. Playback and display only; see [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round). |
 
-The first three rows are the **language**: the BaseNote's frequency, start and duration are the only absolute values in a module, and every other note relates to them. `amplitude`, `attack` and `release` are **interpretation variables**: how the notes sound, not what they relate to.
+The first three rows are the **language**: the BaseNote provides anchors for frequency, start and duration. An individual note may also use a literal value, and a BaseNote expression may read another property if the dependency is acyclic. `amplitude`, `attack` and `release` are **interpretation variables**: how the notes sound, not what they relate to.
 
 ::: warning There is no tempo, beatsPerMeasure or measureLength
 These three keys were removed. A module that still has them is converted exactly when it loads, see [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions). Typing `tempo`, `bpm` or `ml` in an expression is refused with a message naming the replacement.

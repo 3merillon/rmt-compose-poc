@@ -23,7 +23,7 @@ That is the whole language. Everything else is detail.
 
 `startTime` and `duration` are measured in **seconds**. Frequency is in **Hz**.
 
-Music is not written in seconds, so you write lengths against the BaseNote's duration, `base.d`. That is the **time unit**: one beat, if you count in beats. It is the only absolute length in a module.
+Use the BaseNote’s duration, `base.d`, as your **time unit** when you want changes of pace to carry through a phrase. A literal length such as `1/2` stays fixed at half a second.
 
 ```
 base.d                  # one time unit
@@ -102,7 +102,8 @@ The language has no functions. `beat()`, `tempo()` and `measure()` were removed.
 
 | Old | Write now |
 |---|---|
-| `beat(base)`, `beat([N])` | `base.d` |
+| `beat(base)` or a note inheriting the base tempo | `base.d` |
+| A beat on a note with a different constant tempo | Scale `base.d` by the old base tempo divided by the note tempo. |
 | `measure([N])` on a bar | `[N].d` |
 
 A tempo T is a BaseNote duration of `60/T`; beats per measure B is a measure bar of `base.d * B`. Older files are converted when they load; see [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
@@ -126,7 +127,7 @@ base.f * 3^(1/13)   # one Bohlen-Pierce step
 base.t                    # start with the BaseNote
 [1].t + [1].d             # start the moment note 1 ends
 [1].t                     # start with note 1 (chord)
-[bar].t + [bar].d * (1/4) # a quarter of the way into a measure bar
+[4].t + [4].d * (1/4)     # a quarter into the bar with note ID 4
 base.t + base.d * 3       # three time units in
 ```
 

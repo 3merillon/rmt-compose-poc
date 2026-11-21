@@ -10,7 +10,7 @@ bytecode and evaluated with exact rational arithmetic. They fall in two groups:
 
 | Group | Variables | What they are |
 |---|---|---|
-| **The language** | `f` frequency, `t` startTime, `d` duration | The notation. Each relates the note to other notes, and the BaseNote holds the only absolute values. |
+| **The language** | `f` frequency, `t` startTime, `d` duration | The notation. Use references to relate notes to one another or the BaseNote. A literal pitch or time stands independently. |
 | **Interpretation** | `a` amplitude, `attack`, `release` | How the note sounds. Not part of the notation; the only variables that fall back to the BaseNote when unset. |
 
 This page is the complete grammar of the **DSL**:

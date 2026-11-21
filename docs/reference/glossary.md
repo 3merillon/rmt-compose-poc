@@ -31,7 +31,7 @@ The share of a note's own duration it takes to rise to full level from the note'
 ## B
 
 ### BaseNote
-The reference note of every module, id **0**. It holds the only absolute values: a frequency in Hz, and a start and a duration in seconds (by default 440, 0 and 1). Its duration is the [time unit](#time-unit). It is also where the octave guide lines are anchored. Notes reference it as `base.f`, `base.t`, `base.d`, and so on. `[0].f` means exactly the same thing as `base.f`.
+The reference note of every module, id **0**. It provides the usual pitch and time anchors: a frequency in Hz, and a start and a duration in seconds (by default 440, 0 and 1). Its duration is the [time unit](#time-unit). It is also where the octave guide lines are anchored. Notes reference it as `base.f`, `base.t`, `base.d`, and so on. `[0].f` means exactly the same thing as `base.f`.
 
 ### Beat
 No longer a term of the language. `beat(base)` became `base.d`: one beat is one [time unit](#time-unit). The function was removed, and typing it is refused with a message naming `base.d`.
