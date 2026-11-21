@@ -719,7 +719,7 @@ const menuAPI = (function() {
                 // a file path). Built-ins with a `file` are re-fetched on rehydrate,
                 // keeping both localStorage and the exported file small even with a
                 // large shipped catalog.
-                if (icon.moduleData && (isUploaded || !file)) {
+                if (icon.moduleData && (isUploaded || !file || icon.dataset.keepEmbedded === 'true')) {
                     if (!icon.moduleData.filename) icon.moduleData.filename = moduleName;
                     moduleEntry.moduleData = icon.moduleData;
                     moduleEntry.hasData = true;
@@ -775,14 +775,22 @@ const menuAPI = (function() {
         return null;
     }
 
-    async function restoreEmbeddedTile(m: StoredModule, index: ReturnType<typeof manifestIndex>,
+    async function restoreEmbeddedTile(m: StoredModule, index: ReturnType<typeof manifestIndex> | null,
         currentScores: Map<string, Promise<ModuleData | null>>) {
         if (m.isUploaded) return;
         const score = m.moduleData || m.data;
         if (!isInputScore(score)) return;
-        const item = findManifestItem(m, index);
         const file = m.file || m.meta?.file;
-        if (!item || (file && file !== item.file)) { m.isUploaded = true; return; }
+        // A saved path can identify a revised factory tile even if the manifest
+        // request failed. Other embedded tiles can be verified on the next load.
+        let item: LibraryItem | null = index ? findManifestItem(m, index) : null;
+        if (!index && file && releasedTileFingerprints.has(file)) {
+            item = { ...m.meta, file, name: m.meta?.name || m.name };
+        }
+        if (!item || (file && file !== item.file)) {
+            if (index) m.isUploaded = true;
+            return;
+        }
         const name = m.name.trim().replace(/\.json$/i, '').toLowerCase();
         const stem = item.file.split('/').pop()!.replace(/\.json$/i, '').toLowerCase();
         if (name && name !== item.name.toLowerCase() && name !== stem) {
@@ -853,7 +861,7 @@ const menuAPI = (function() {
     // Build a section container (label + icons + trailing placeholder) from a
     // section-state and append it (plus breaker/separator) to the icons container.
     // Icons fetch their data lazily (same as the cold-load path).
-    function renderSectionState(state: SectionState, index: number, count: number) {
+    function renderSectionState(state: SectionState, index: number, count: number, keepEmbedded: boolean) {
         const iconsContainer = domCache.iconsContainer;
         const sectionContainer = createSectionContainer();
         categoryContainers.push(sectionContainer);
@@ -888,6 +896,7 @@ const menuAPI = (function() {
                 const meta = m.meta || (m.file ? { file: m.file, name: m.name } : null);
                 icon = createModuleIcon(state.id, m.filename, m.moduleData || null, meta);
             }
+            if (keepEmbedded && m.moduleData) icon.dataset.keepEmbedded = 'true';
             if (m.originalCategory) icon.setAttribute('data-original-category', m.originalCategory);
             sectionContainer.appendChild(icon);
         }
@@ -1024,12 +1033,10 @@ const menuAPI = (function() {
         return loadLibraryManifest().then(async manifest => {
             // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
             if (needsMigration && !manifest) return false;
-            if (manifest) {
-                const index = manifestIndex(manifest);
-                const currentScores = new Map<string, Promise<ModuleData | null>>();
-                await Promise.all(uiState.categories.flatMap(cat =>
-                    (cat.modules || []).map(m => restoreEmbeddedTile(m, index, currentScores))));
-            }
+            const index = manifest && manifestIndex(manifest);
+            const currentScores = new Map<string, Promise<ModuleData | null>>();
+            await Promise.all(uiState.categories.flatMap(cat =>
+                (cat.modules || []).map(m => restoreEmbeddedTile(m, index, currentScores))));
 
             let sectionStates = needsMigration && manifest
                 ? buildMigratedSectionStates(uiState, manifest)
@@ -1046,7 +1053,7 @@ const menuAPI = (function() {
 
             domCache.iconsContainer.innerHTML = '';
             categoryContainers = [];
-            sectionStates.forEach((state, i) => renderSectionState(state, i, sectionStates.length));
+            sectionStates.forEach((state, i) => renderSectionState(state, i, sectionStates.length, !manifest));
 
             const actionButtons = createActionButtons();
             domCache.iconsContainer.appendChild(createSectionSeparator());
