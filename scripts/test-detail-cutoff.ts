@@ -74,3 +74,48 @@ renderer.posSize = new Proxy(new Float32Array([0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 
 });
 assert.deepEqual(details(), []);
 console.log('Visible-note cutoff and settings checks passed.');
+
+// A renderer without shader drag offsets uses the CPU preview for both a note
+// and the measure that follows its start. The preview must leave the score intact.
+const { Workspace } = await import('../src/renderer/webgl2/workspace.ts');
+const { Module } = await import('../src/module.ts');
+const { mock } = await import('node:test');
+const score = await Module.loadFromJSON({
+  baseNote: { startTime: '0', duration: '1', frequency: '440' },
+  notes: [
+    { id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f' },
+    { id: 2, startTime: '[1].t + base.d', duration: 'base.d', measure: true },
+  ]
+});
+const fakeContainer = Object.assign(new EventTarget(), {
+  style: {},
+  getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 400 }),
+});
+const workspace = new Workspace();
+const initStub = mock.method(RendererAdapter.prototype, 'init', () => true);
+try {
+  // Only event registration and container bounds are used by these input handlers.
+  assert.ok(workspace.init(fakeContainer as unknown as HTMLElement));
+  workspace._module = score;
+  const legacy = workspace.renderer;
+  assert.ok(legacy);
+  Object.defineProperty(legacy, 'setDragOffsetPreview', { value: undefined });
+  workspace._interaction = {
+    active: true, type: 'move', noteId: 1, region: 'body', direction: null, pointerId: 1,
+    startClient: { x: 0, y: 0 }, lastClient: { x: 0, y: 0 },
+    startWorldX: 0, startWorldRightX: 200, pointerOffsetWorld: 0,
+    origStartSec: 0, origDurationSec: 1, lastPreview: { startSec: 0, durationSec: 1 },
+    cachedDependents: new Set([2]), baselineStartSec: new Map([[1, 0], [2, 1]]),
+  };
+  const movement = Object.assign(new Event('pointermove'), { pointerId: 1, clientX: 100, clientY: 0 });
+  workspace._updateInteraction(movement as PointerEvent);
+  assert.equal(workspace._interaction.lastPreview.startSec, 0.5);
+  assert.equal(legacy._measurePreview?.[2], 1.5);
+  assert.equal(score.getNoteById(2)?.getVariable('startTime')?.valueOf(), 1);
+  console.log('Dependent measure CPU drag preview passed.');
+} finally {
+  workspace.destroy();
+  initStub.mock.restore();
+}
+
+

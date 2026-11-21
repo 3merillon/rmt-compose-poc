@@ -5,11 +5,17 @@
  * - Provides Workspace API: init/destroy/sync/setPlayhead
  */
 
-import { RendererAdapter } from './renderer.js';
-import { CameraController } from './camera-controller.js';
-import { eventBus } from '../../utils/event-bus.js';
-import { toNumber } from '../../utils/fraction-num.js';
-import { isMeasureNote } from '../../note.js';
+import type { Module } from '../../module.ts';
+import type { Note } from '../../note.ts';
+import type { DependencyGraph } from '../../dependency-graph.ts';
+import type { Picking } from './picking.ts';
+import type { SceneHit, SyncArgs, Preview } from './render-types.ts';
+import type { WorkspaceElement } from './player-surface.ts';
+import { RendererAdapter } from './renderer.ts';
+import { CameraController } from './camera-controller.ts';
+import { eventBus } from '../../utils/event-bus.ts';
+import { toNumber } from '../../utils/fraction-num.ts';
+import { isMeasureNote } from '../../note.ts';
 
 // ── Reading the time structure from expression text ───────────────────────────
 // Shared with player.js, which imports these.
@@ -29,7 +35,7 @@ const RE_CHAIN_LINK = new RegExp(
  * BaseNote's duration (the time unit), and `base.t + [3].d` hangs from the BaseNote.
  * @returns {number} note id, 0 for the BaseNote, -1 when the text names no note
  */
-export function startParentIdFromRaw(raw) {
+export function startParentIdFromRaw(raw: unknown) {
   if (!raw || typeof raw !== 'string') return -1;
   let m = raw.match(RE_START_REF);
   if (m) return parseInt(m[1], 10);
@@ -41,7 +47,7 @@ export function startParentIdFromRaw(raw) {
 }
 
 // Set iteration visits newly added IDs. Shared downstream chains are traversed once.
-function expandStartTimeDependents(graph, moving) {
+function expandStartTimeDependents(graph: DependencyGraph, moving: Set<number>) {
   for (const id of moving) {
     for (const dependent of graph.getStartTimeDependents(id)) moving.add(dependent);
   }
@@ -53,7 +59,7 @@ function expandStartTimeDependents(graph, moving) {
  * The caller checks that P is a bar.
  * @returns {number|null} P, or null when `raw` is not a chain link
  */
-export function measureChainLinkParentId(raw) {
+export function measureChainLinkParentId(raw: unknown) {
   if (!raw || typeof raw !== 'string') return null;
   const m = raw.match(RE_CHAIN_LINK);
   if (!m || m[1] !== m[2]) return null;
@@ -61,18 +67,18 @@ export function measureChainLinkParentId(raw) {
 }
 
 /** Whether `note` is a bar chained onto bar `parentId` (see measureChainLinkParentId). */
-function isChainLinkOf(note, parentId) {
+function isChainLinkOf(note: Note | null | undefined, parentId: number): note is Note {
   try {
-    if (!isMeasureNote(note)) return false;
+    if (!note || !isMeasureNote(note)) return false;
     const pid = measureChainLinkParentId(note.variables?.startTimeString || '');
     return pid != null && pid === Number(parentId);
   } catch { return false; }
 }
 
 /** The bar that is chained onto `bar` (earliest start, then lowest id), or null. */
-function nextBarInChain(mod, bar) {
+function nextBarInChain(mod: Module | null, bar: Note | null | undefined): Note | null {
   try {
-    if (!mod || !isMeasureNote(bar)) return null;
+    if (!mod || !bar || !isMeasureNote(bar)) return null;
     let best = null, bestStart = Infinity;
     for (const id in mod.notes) {
       const nn = mod.getNoteById(Number(id));
@@ -91,7 +97,7 @@ function nextBarInChain(mod, bar) {
  * Start-time ancestors of `from`, itself first, ending with the BaseNote when the
  * walk reaches it: [{ id, startSec }].
  */
-function startAncestorChain(mod, from) {
+function startAncestorChain(mod: Module | null, from: Note | undefined | null): ChainEntry[] {
   const out = [];
   try {
     const baseStartSec = () => toNumber(mod?.baseNote?.getVariable?.('startTime'), 0);
@@ -110,7 +116,7 @@ function startAncestorChain(mod, from) {
 }
 
 /** A bar's length in seconds: its own duration. */
-function barLengthSec(bar) {
+function barLengthSec(bar: Note | null | undefined) {
   try { return toNumber(bar?.getVariable?.('duration'), 0) || 0; } catch { return 0; }
 }
 
@@ -121,7 +127,102 @@ function barLengthSec(bar) {
 /**
  * Workspace: hosts a camera and a RendererAdapter instance.
  */
+interface Point { x: number; y: number }
+interface ChainEntry { id: number; startSec: number }
+interface BarEntry extends ChainEntry { endSec: number }
+interface ParentChain { list: BarEntry[]; idx: number; anchorParentId: number }
+interface GestureData {
+  touch?: boolean;
+  groupIds?: number[];
+  groupMode?: boolean;
+  groupMinDeltaSec?: number;
+  baselineStartSec?: Map<number, number> | null;
+  prevPreviewIds?: Set<number> | null;
+  cachedDependents?: Set<number> | null;
+  cachedAffectedIds?: Set<number>;
+  cachedOverlayIds?: number[];
+  cachedMeasureChain?: ChainEntry[];
+  cachedMeasureIndex?: number;
+  cachedMeasureMovingIds?: Set<number>;
+  cachedMeasureMovingIdsArr?: number[];
+  cachedParentChain?: ParentChain | null;
+  cachedAncestorChain?: ChainEntry[] | null;
+  prepareMeasureDrag?: boolean;
+  prepareNoteDrag?: boolean;
+}
+interface PointerState extends GestureData {
+  pointerId: number;
+  startClient: Point;
+  lastClient: Point;
+  lastPreview: { startSec: number; durationSec: number };
+}
+interface DragState extends PointerState {
+  active: true;
+  type: 'measure' | 'move' | 'movePending' | 'resize' | 'octave';
+  noteId: number;
+  region: string;
+  direction: 'up' | 'down' | null;
+  startWorldX: number;
+  startWorldRightX: number;
+  pointerOffsetWorld: number;
+  origStartSec: number;
+  origDurationSec: number;
+}
+interface MarqueeState extends PointerState {
+  active: true;
+  type: 'marquee';
+  noteId: null;
+  region: null;
+  direction: null;
+  marqueeAdditive: boolean;
+  marqueeDragged: boolean;
+  touch: boolean;
+  seedId: number | null;
+  tapId: number | null;
+  heldItem: boolean;
+}
+type IdleState = Partial<Omit<DragState, 'active' | 'type' | 'noteId' | 'region' | 'lastPreview' | 'pointerId'>> & {
+  active: false; type?: null; noteId?: null; region?: null; pointerId?: null;
+  lastPreview?: {startSec: null; durationSec: null};
+};
+type Gesture = IdleState | DragState | MarqueeState;
+type Pointing = Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerId' | 'pointerType'>;
+type PointerHandler = (event: PointerEvent) => void;
+declare global {
+  interface Window { __RMT_PERF?: { measureDrag?: boolean } }
+}
+
 export class Workspace {
+  declare containerEl: WorkspaceElement | null;
+  declare renderer: RendererAdapter | null;
+  declare camera: CameraController | null;
+  declare picking: Picking | null;
+  declare _onCameraChange: (() => void) | null;
+  declare _lastSyncArgs: SyncArgs | null;
+  declare _hoveredId: number | null;
+  declare _currentCursor: string;
+  declare _cursorCache: {up: string | null; down: string | null};
+  declare _interaction: Gesture;
+  declare _interactionEdgeCache?: {xw: number; ww: number} | null;
+  declare _module: Module | null;
+  declare _onPointerMove: PointerHandler | null;
+  declare _onPointerDown: PointerHandler | null;
+  declare _onPointerLeave: (() => void) | null;
+  declare _onDocPointerMove: PointerHandler | null;
+  declare _onDocPointerUp: PointerHandler | null;
+  declare _onDocPointerCancel: PointerHandler | null;
+  declare _onDocClickSuppress: ((event: MouseEvent) => void) | null;
+  declare _touchActiveCount: number;
+  declare _onGlobalTouchDown: PointerHandler | null;
+  declare _onGlobalTouchUp: PointerHandler | null;
+  declare _updateInteraction: PointerHandler;
+  declare _endInteraction: (commit: boolean) => void;
+  declare _onContextMenu?: (event: MouseEvent) => void;
+  declare _postDropClick?: (event: MouseEvent) => void;
+  declare _lp?: {cancel: () => void; onMove: PointerHandler; timer: ReturnType<typeof setTimeout>} | null;
+  declare _perf?: {mdFrames?: number; mdSum?: number};
+  declare _collectMeasureChainFor: (measureId: number) => ChainEntry[];
+
   constructor() {
     this.containerEl = null;
     this.camera = null;
@@ -185,7 +286,7 @@ export class Workspace {
     this._onGlobalTouchUp = null;
   }
 
-  init(containerEl) {
+  init(containerEl: WorkspaceElement) {
     if (!containerEl) throw new Error('Workspace.init: containerEl required');
     this.containerEl = containerEl;
 
@@ -193,7 +294,7 @@ export class Workspace {
     this.camera = new CameraController(containerEl);
     this._onCameraChange = () => {
       try {
-        if (this.renderer) {
+        if (this.renderer && this.camera) {
           this.renderer.updateViewportBasis(this.camera.getBasis());
         }
       } catch {}
@@ -216,6 +317,7 @@ export class Workspace {
 
     // Pointer down to start interactions (move/resize/octave)
     this._onPointerDown = (e) => {
+      if (!this.containerEl) return;
       try {
         // Respect global lock
         let locked = false;
@@ -393,8 +495,8 @@ export class Workspace {
         } catch {}
 
         // Determine interaction type
-        let type = null;
-        let direction = null;
+        let type: DragState['type'];
+        let direction: DragState['direction'] = null;
         if (region === 'tab') type = 'resize';
         else if (region === 'octaveUp') { type = 'octave'; direction = 'up'; }
         else if (region === 'octaveDown') { type = 'octave'; direction = 'down'; }
@@ -559,6 +661,7 @@ export class Workspace {
 
     // Pointer move/leave wiring for hover + cursor (CPU pick now; GPU pick optional when wired)
     this._onPointerMove = (e) => {
+      if (!this.containerEl || !this.renderer) return;
       try {
         // Gate hover when Notes are locked
         let locked = false;
@@ -655,6 +758,7 @@ export class Workspace {
     };
 
     this._onPointerLeave = () => {
+      if (!this.containerEl) return;
       try {
         if (this.renderer?.setHoverNoteId) this.renderer.setHoverNoteId(null);
         if (this.renderer?.setHoverSubRegion) this.renderer.setHoverSubRegion(null);
@@ -670,7 +774,7 @@ export class Workspace {
 
     // Internal: update active interaction (drag/resize preview)
     this._updateInteraction = (e) => {
-      if (!this._interaction || !this._interaction.active) return;
+      if (!this._interaction || !this._interaction.active || !this.renderer) return;
       try {
         // Only honor moves from the initiating pointer to avoid multi-touch interference
         try {
@@ -679,13 +783,13 @@ export class Workspace {
           }
         } catch {}
 
-        if (this._interaction.prepareMeasureDrag) {
+        if (this._interaction.type !== 'marquee' && this._interaction.prepareMeasureDrag) {
           const start = this._interaction.startClient;
           if (Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4) return;
           this._prepareMeasureDrag(this._interaction);
           this._interaction.prepareMeasureDrag = false;
         }
-        if (this._interaction.prepareNoteDrag) {
+        if (this._interaction.type !== 'marquee' && this._interaction.prepareNoteDrag) {
           const start = this._interaction.startClient;
           if (e.clientX === start.x && e.clientY === start.y) return;
           this._prepareNoteDrag(this._interaction);
@@ -792,7 +896,7 @@ export class Workspace {
           } catch {}
           return 1; // the same fallback Module.getTimeUnit() uses
         };
-        const snapSixteenth = (sec) => {
+        const snapSixteenth = (sec: number) => {
           const bl = getBeatLengthSec();
           const beats = sec / bl;
           const snappedBeats = Math.round(beats * 4) / 4;
@@ -839,7 +943,7 @@ export class Workspace {
             ? this._interaction.cachedMeasureIndex
             : -1;
           if (cidx < 0) {
-            cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
+            cidx = chain?.findIndex(m => Number(m.id) === Number(noteId)) ?? -1;
             if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
           }
 
@@ -1002,7 +1106,7 @@ export class Workspace {
         // the ghost stops where the drop will actually land instead of sliding past the
         // base note and snapping back.
         if (this._interaction.groupMode
-            && Number.isFinite(this._interaction.groupMinDeltaSec)) {
+            && this._interaction.groupMinDeltaSec != null && Number.isFinite(this._interaction.groupMinDeltaSec)) {
           const minStart = (this._interaction.origStartSec || 0) + this._interaction.groupMinDeltaSec;
           if (startSec < minStart) startSec = minStart;
         }
@@ -1012,8 +1116,9 @@ export class Workspace {
 
         // Live preview: move entire affected set (dragged note + dependents) to would-drop positions
         if (this.renderer && (type === 'move' || type === 'resize')) {
-          const buildStartDurForId = (id) => {
+          const buildStartDurForId = (id: number) => {
             try {
+              if (!this.renderer?.posSize) return null;
               const idx = this.renderer._noteIdToIndex?.get?.(Number(id));
               if (idx == null || idx < 0) return null;
               const base = idx * 4;
@@ -1029,19 +1134,19 @@ export class Workspace {
 
           // When fast shader path is available, avoid building per-note preview maps (O(N) per frame).
           // The GPU path applies a uniform offset with per-instance flags, so this heavy map is unnecessary.
-          let previewMap = null;
+          let previewMap: Record<number, Preview> | null = null;
           if (!(this.renderer && typeof this.renderer.setDragOffsetPreview === 'function')) {
             previewMap = {};
             // Always include the dragged note with its snapped/clamped preview values
             previewMap[noteId] = { startSec, durationSec };
  
             // PERFORMANCE: Use cached dependents computed at pointerdown instead of recomputing every frame
-            let __depIdsSet = this._interaction.cachedDependents || new Set();
+            const dependentIds = this._interaction.cachedDependents;
             try {
               const baseline = this._interaction.baselineStartSec || null;
               const dxDelta = (type === 'move')   ? ((startSec ?? 0)    - (this._interaction.origStartSec ?? 0))        : 0;
               const ddDelta = (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0))     : 0;
-              const depIds = Array.from(__depIdsSet);
+              const depIds = Array.from(dependentIds || []);
               for (const didRaw of depIds) {
                 const did = Number(didRaw);
                 // Baseline start for this dependent at interaction start
@@ -1107,22 +1212,18 @@ export class Workspace {
           // Avoid recomputing measure previews every frame when fast shader path is active.
           if (!(this.renderer && typeof this.renderer.setDragOffsetPreview === 'function')) {
             try {
-              const measurePreview = {};
-              // Anchor measure
-              if (type === 'measure') {
-                measurePreview[noteId] = startSec;
-              }
-              // Dependents that are measures
-              if (__depIdsSet && __depIdsSet.size) {
+              const measurePreview: Record<number, number> = {};
+              const dependentIds = this._interaction.cachedDependents;
+              if (dependentIds?.size) {
                 const baseline = this._interaction.baselineStartSec || null;
                 const shift = (type === 'move') ? ((startSec ?? 0) - (this._interaction.origStartSec ?? 0))
                             : (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0))
                             : 0;
-                for (const didRaw of __depIdsSet) {
+                for (const didRaw of dependentIds) {
                   const did = Number(didRaw);
                   try {
                     const n = this._module?.getNoteById?.(did);
-                    if (!isMeasureNote(n)) continue;
+                    if (!n || !isMeasureNote(n)) continue;
                     let baseS = 0;
                     if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
                     else baseS = toNumber(n.getVariable('startTime'), 0);
@@ -1155,7 +1256,7 @@ export class Workspace {
               ? this._interaction.cachedMeasureIndex
               : -1;
             if (!this._interaction.groupMode && cidx < 0) {
-              cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
+              cidx = chain?.findIndex(m => Number(m.id) === Number(noteId)) ?? -1;
               if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
             }
 
@@ -1173,14 +1274,14 @@ export class Workspace {
               if (this._interaction && this._interaction.cachedMeasureMovingIds instanceof Set && this._interaction.cachedMeasureMovingIds.size) {
                 moveIds = this._interaction.cachedMeasureMovingIds;
               } else {
-                moveIds = new Set();
+                moveIds = new Set<number>();
                 // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n³) regex scanning
                 try {
                   const mod = this._module;
                   const depGraph = mod && mod._dependencyGraph;
 
                   // Seed measures: downstream along the linear chain (including the anchor)
-                  const seedMeasures = new Set();
+                  const seedMeasures = new Set<number>();
                   if (cidx >= 0 && chain && chain.length) {
                     for (let j = cidx; j < chain.length; j++) seedMeasures.add(Number(chain[j].id));
                   } else {
@@ -1193,7 +1294,7 @@ export class Workspace {
                   // Use DependencyGraph for transitive startTime dependents (fast path)
                   // Include ALL startTime dependents (both chain links AND anchors) for preview
                   // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
-                  if (depGraph?.getStartTimeDependents) {
+                  if (typeof depGraph?.getStartTimeDependents === 'function') {
                     expandStartTimeDependents(depGraph, moveIds);
                   } else if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
                     for (const seedId of seedMeasures) {
@@ -1256,8 +1357,8 @@ export class Workspace {
               } catch {}
             } else {
               // CPU fallback: triangles + dependent notes (previous behavior)
-              const triPreview = {};
-              if (cidx >= 0) {
+              const triPreview: Record<number, number> = {};
+              if (chain && cidx >= 0) {
                 triPreview[noteId] = startSec;
                 for (let j = cidx + 1; j < chain.length; j++) {
                   const origS = Number(chain[j].startSec || 0);
@@ -1277,10 +1378,10 @@ export class Workspace {
 
 
         // PERFORMANCE: Use cached dependents instead of recomputing every frame
-        let movingIds = [];
+        let movingIds: number[] = [];
         try {
           if (type === 'move' || type === 'resize') {
-            const depIdsSet = this._interaction.cachedDependents || new Set();
+            const depIdsSet = this._interaction.cachedDependents || new Set<number>();
             const EPS = 1e-6;
             const shift = (type === 'move') ? dxPreviewSec : ddurPreviewSec;
             
@@ -1357,11 +1458,11 @@ export class Workspace {
         if (st && st.type === 'marquee') {
           try {
             const nowTs = (performance && performance.now) ? performance.now() : Date.now();
-            this.containerEl.__rmtSuppressClickUntil = nowTs + 350;
+            if (this.containerEl) this.containerEl.__rmtSuppressClickUntil = nowTs + 350;
           } catch {}
         }
         if (movedOk) {
-          const suppressOnce = (ev) => {
+          const suppressOnce = (ev: MouseEvent) => {
             try {
               ev.preventDefault();
               ev.stopPropagation();
@@ -1382,7 +1483,7 @@ export class Workspace {
       try { if (this.camera && this.camera.setSingleFingerPanEnabled) this.camera.setSingleFingerPanEnabled(true); } catch {}
 
       // Clear cursor (hover handler will reapply)
-      try { this.containerEl.style.cursor = this._currentCursor || 'default'; } catch {}
+      try { if (this.containerEl) this.containerEl.style.cursor = this._currentCursor || 'default'; } catch {}
 
       // A click on a note/touch tap never published a preview. No geometry,
       // selection or dependent positions need to be restored on release.
@@ -1454,7 +1555,7 @@ export class Workspace {
             if (!dragged && st.tapId != null) {
               if (!st.heldItem) eventBus.emit('workspace:multiSelectToggle', { id: st.tapId });
             } else {
-              const ids = this.renderer.pickRectIds(st.startClient.x, st.startClient.y, st.lastClient.x, st.lastClient.y);
+              const ids = this.renderer!.pickRectIds(st.startClient.x, st.startClient.y, st.lastClient.x, st.lastClient.y);
               if (st.seedId != null && !ids.includes(st.seedId)) ids.push(st.seedId);
               eventBus.emit('workspace:marqueeCommit', {
                 ids,
@@ -1581,7 +1682,7 @@ export class Workspace {
       if (this.containerEl && this._onPointerDown) {
         this.containerEl.removeEventListener('pointerdown', this._onPointerDown, true);
       }
-      this.containerEl?.removeEventListener('contextmenu', this._onContextMenu);
+      if (this._onContextMenu) this.containerEl?.removeEventListener('contextmenu', this._onContextMenu);
       this._cancelLongPress();
       // Detach any doc listeners
       if (this._onDocPointerMove) document.removeEventListener('pointermove', this._onDocPointerMove, true);
@@ -1620,7 +1721,7 @@ export class Workspace {
    * Scene sync (delegates to RendererAdapter)
    * { evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId, tempOverrides }
    */
-  sync(args) {
+  sync(args: SyncArgs) {
     if (!this.renderer) return;
     try {
       const payload = args || {};
@@ -1636,14 +1737,14 @@ export class Workspace {
     } catch {}
   }
 
-  setPlayhead(tSec) {
+  setPlayhead(tSec: number) {
     if (!this.renderer) return;
     try { this.renderer.setPlayhead(tSec || 0); } catch {}
   }
 
   // Utility passthroughs for future sprints
   // Mixed-type picking (measure/base/notes). Returns first/top-most hit.
-  pickAt(clientX, clientY, expandCssPx = 2) {
+  pickAt(clientX: number, clientY: number, expandCssPx = 2): SceneHit | null {
     try {
       if (this.renderer?.pickTopAt) return this.renderer.pickTopAt(clientX, clientY, expandCssPx);
       if (this.renderer && typeof this.renderer.pickAllAt === 'function') {
@@ -1665,7 +1766,7 @@ export class Workspace {
   }
  
   // Mixed-type stack picking: returns array of hits (top-most first)
-  pickStackAt(clientX, clientY, expandCssPx = 2) {
+  pickStackAt(clientX: number, clientY: number, expandCssPx = 2): SceneHit[] {
     try {
       if (this.renderer && typeof this.renderer.pickAllAt === 'function') {
         return this.renderer.pickAllAt(clientX, clientY, expandCssPx) || [];
@@ -1705,11 +1806,11 @@ export class Workspace {
   // down). Reading it here keeps the two in step without a second copy to desync.
   _multiSelIds() {
     const s = this.renderer && this.renderer._multiSelIds;
-    return (s instanceof Set) ? s : new Set();
+    return (s instanceof Set) ? s : new Set<number>();
   }
 
   // Is there any note/measure/base under this point?
-  _pickAny(clientX, clientY) {
+  _pickAny(clientX: number, clientY: number) {
     try { return this.pickAt(clientX, clientY, 3) || null; } catch { return null; }
   }
 
@@ -1739,7 +1840,7 @@ export class Workspace {
     document.addEventListener('pointercancel', this._onDocPointerCancel, true);
   }
 
-  _beginMarquee(e, additive = false, tapId = null, heldItem = false) {
+  _beginMarquee(e: Pointing, additive = false, tapId: number | null = null, heldItem = false) {
     this._cancelLongPress();
 
     // Take the camera out of the gesture for its duration, or we rubber-band and pan at
@@ -1766,7 +1867,7 @@ export class Workspace {
 
     this._attachDocInteractionListeners();
 
-    try { this.containerEl.style.cursor = 'crosshair'; } catch {}
+    try { if (this.containerEl) this.containerEl.style.cursor = 'crosshair'; } catch {}
     // NO preventDefault here. We are called from the pointerdown listener, which is
     // registered { passive: true } — the call would be ignored and would log
     // "Unable to preventDefault inside passive event listener invocation" on every
@@ -1782,7 +1883,7 @@ export class Workspace {
   //
   // Non-committal until it fires: travel beyond the slop, a second finger, or an early
   // release all cancel it, so a pan / pinch / note-drag / plain tap is never stolen.
-  _armLongPress(e, opts = {}) {
+  _armLongPress(e: PointerEvent, opts: {kind?: 'marquee' | 'toggle'; noteId?: number | null; additive?: boolean} = {}) {
     this._cancelLongPress();
 
     const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
@@ -1791,7 +1892,7 @@ export class Workspace {
     const cancel = () => this._cancelLongPress();
 
     // Any travel beyond the slop means this was a pan or a drag, not a press.
-    const onMove = (ev) => {
+    const onMove = (ev: PointerEvent) => {
       try {
         if (ev.pointerId != null && ev.pointerId !== pid) return;
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > slop) cancel();
@@ -1858,7 +1959,7 @@ export class Workspace {
     const stamp = () => {
       try {
         const now = (performance && performance.now) ? performance.now() : Date.now();
-        cont.__rmtSuppressClickUntil = now + 400;
+        if (cont) cont.__rmtSuppressClickUntil = now + 400;
       } catch {}
     };
     stamp();
@@ -1876,7 +1977,7 @@ export class Workspace {
   // Turn a freshly-built single-note move into a GROUP move, if the grabbed note is in
   // the selection. Everything about the gesture stays the same — snapping, clamping,
   // preview — only _endInteraction's commit differs.
-  _decorateAsGroupDrag(st) {
+  _decorateAsGroupDrag(st: DragState) {
     try {
       if (!st || !['move', 'movePending', 'measure'].includes(st.type)) return;
       const sel = this._multiSelIds();
@@ -1938,7 +2039,7 @@ export class Workspace {
   }
 
   // Screen (client) -> world helper via camera controller
-  screenToWorld(clientX, clientY) {
+  screenToWorld(clientX: number, clientY: number) {
     if (!this.camera) return { x: 0, y: 0 };
     // Pass absolute client coordinates; CameraController handles canvas offset internally.
     return this.camera.screenToWorld(clientX, clientY);
@@ -1950,7 +2051,7 @@ export class Workspace {
   // - If current parent is a measure and dragging forward past its end, advance across the measure chain
   // - If dragging backward before current parent start, climb ancestor chain to the first parent that starts <= startSec
   // Returns parent note id, measure id, or 0 (BaseNote). Returns null when no change should be visualized.
-  _resolveProspectiveParentCandidate(noteId, startSec, clientX, clientY) {
+  _resolveProspectiveParentCandidate(noteId: number, startSec: number, clientX: number, clientY: number) {
     try {
       const mod = this._module;
       if (!mod || noteId == null) return null;
@@ -1967,7 +2068,7 @@ export class Workspace {
       if (!note) return null;
 
       // Helper: parse current parent from startTimeString or parentId; fall back to BaseNote
-      const parseParent = (n) => {
+      const parseParent = (n: Note) => {
         try {
           const ref = startParentIdFromRaw(n?.variables?.startTimeString || '');
           if (ref >= 0) return mod.getNoteById(ref) || mod.baseNote;
@@ -2082,7 +2183,7 @@ export class Workspace {
 
   // Build the baseline only on the first movement. Pointerdown also starts a
   // plain selection; on a heavily referenced note that click needs no drag graph.
-  _prepareMeasureDrag(st) {
+  _prepareMeasureDrag(st: DragState) {
     this._decorateAsGroupDrag(st);
     if (st.groupMode) return;
     const measureId = st.noteId;
@@ -2092,13 +2193,13 @@ export class Workspace {
 
     // Build moving-set cache for measure drag: downstream measures + all normal notes whose startTime depends on them
     // OPTIMIZED: Uses DependencyGraph.getAllStartTimeDependents() for O(d) instead of O(N×M) regex scanning
-    const moveSet0 = new Set();
+    const moveSet0 = new Set<number>();
     try {
       const mod = this._module;
-      const depGraph = mod._dependencyGraph;
+      const depGraph = mod?._dependencyGraph;
 
       // 1) Seed measures: downstream along the linear chain (including the anchor)
-      const seedMeasures = new Set();
+      const seedMeasures = new Set<number>();
       for (let j = cidx0; j < chain0.length; j++) {
         const mid = Number(chain0[j].id);
         seedMeasures.add(mid);
@@ -2113,7 +2214,7 @@ export class Workspace {
       // Include ALL dependent measures (both chain links AND anchors) for preview
       // Anchors depend on this measure so they should move in preview
       // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
-      if (depGraph?.getStartTimeDependents) {
+      if (typeof depGraph?.getStartTimeDependents === 'function') {
         expandStartTimeDependents(depGraph, moveSet0);
       } else if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
         // Get all transitive startTime dependents of each seed measure
@@ -2137,7 +2238,7 @@ export class Workspace {
         const isMeasure = isMeasureNote;
 
         // Expand to ALL transitive dependent measures (including anchors)
-        const measureClosure = (seedSet) => {
+        const measureClosure = (seedSet: Set<number>) => {
           const out = new Set(seedSet);
           if (!mod || !mod.notes) return out;
           let changed = true;
@@ -2145,7 +2246,7 @@ export class Workspace {
             changed = false;
             for (const idStr in mod.notes) {
               const nn = mod.getNoteById(Number(idStr));
-              if (!isMeasure(nn)) continue;
+              if (!nn || !isMeasure(nn)) continue;
               const nid = Number(nn.id);
               if (out.has(nid)) continue;
               const sts = nn.variables?.startTimeString || '';
@@ -2169,7 +2270,7 @@ export class Workspace {
         if (mod && mod.notes) {
           const notesObj = mod.notes || {};
           const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-          const getStartTimeStr = (nid) => {
+          const getStartTimeStr = (nid: number) => {
             try {
               const n = mod.getNoteById(Number(nid));
               return n && n.variables && typeof n.variables.startTimeString === 'string'
@@ -2177,14 +2278,14 @@ export class Workspace {
                 : null;
             } catch { return null; }
           };
-          const refersStartOf = (nid, refId) => {
+          const refersStartOf = (nid: number, refId: number) => {
             const s = getStartTimeStr(nid);
             if (!s) return false;
             // [refId].t, [refId].d
             if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`)) return true;
             return false;
           };
-          const closureStartRefs = (seedSet) => {
+          const closureStartRefs = (seedSet: Set<number>) => {
             const affected = new Set(seedSet);
             let changed = true;
             while (changed) {
@@ -2215,7 +2316,7 @@ export class Workspace {
     st.cachedMeasureMovingIds = moveSet0;
   }
 
-  _prepareNoteDrag(st, touch = false) {
+  _prepareNoteDrag(st: DragState, touch = false) {
     const mod = this._module;
     const id = st.noteId, graph = mod?._dependencyGraph;
     this._decorateAsGroupDrag(st);
@@ -2234,17 +2335,17 @@ export class Workspace {
     } else {
       dependents = graph?.getAllStartTimeOnDurationDependents?.(id);
     }
-    st.cachedDependents = dependents || new Set();
+    st.cachedDependents = dependents || new Set<number>();
     st.cachedDependents.delete(id);
     st.baselineStartSec = new Map([[id, st.origStartSec]]);
     for (const did of st.cachedDependents) {
       let startSec = 0;
       try {
-        const note = mod.getNoteById(Number(did));
+        const note = mod?.getNoteById(Number(did));
         startSec = toNumber(note?.getVariable?.('startTime'), 0);
       } catch {
-        const r = this.renderer, index = r._noteIdToIndex?.get(Number(did));
-        if (index != null) startSec = r.posSize[index * 4] / (r._cfgSX() * (r.currentXScaleFactor || 1));
+        const r = this.renderer, index = r?._noteIdToIndex?.get(Number(did));
+        if (r?.posSize && index != null) startSec = r.posSize[index * 4] / (r._cfgSX() * (r.currentXScaleFactor || 1));
       }
       st.baselineStartSec.set(Number(did), Math.max(0, startSec || 0));
     }
@@ -2254,7 +2355,7 @@ export class Workspace {
   // Seed the per-interaction parent caches for a note drag (move/resize): the note's
   // start ancestors up to the BaseNote and, when its start parent is a bar, that
   // bar's chain with each bar's [start, end).
-  _seedParentCaches(noteId) {
+  _seedParentCaches(noteId: number) {
     try {
       const mod = this._module;
       const n0 = mod?.getNoteById?.(Number(noteId));
@@ -2263,7 +2364,7 @@ export class Workspace {
       if (!parent0) parent0 = mod?.baseNote || null;
 
       this._interaction.cachedAncestorChain = startAncestorChain(mod, parent0);
-      this._interaction.cachedParentChain = isMeasureNote(parent0)
+      this._interaction.cachedParentChain = parent0 && isMeasureNote(parent0)
         ? this._parentChainListFor(Number(parent0.id))
         : null;
     } catch {}
@@ -2271,7 +2372,7 @@ export class Workspace {
 
   // A bar's chain as { list: [{ id, startSec, endSec }], idx, anchorParentId }, idx
   // being barId's place in it. A bar ends at its start plus its own duration.
-  _parentChainListFor(barId) {
+  _parentChainListFor(barId: number): ParentChain {
     const mod = this._module;
     const chain = this._collectMeasureChainFor(Number(barId)) || [];
     const list = [];
@@ -2289,7 +2390,7 @@ export class Workspace {
   // Return the bar { id, startSec, endSec } whose [startSec, endSec) contains tSec, a
   // bar lasting its own duration (the latest-starting one if bars overlap). If none
   // contains it, return the nearest bar with startSec <= tSec; otherwise null.
-  _findMeasureAtTime(tSec) {
+  _findMeasureAtTime(tSec: number) {
     try {
       const ms = this._collectMeasureNotes();
       let last = null, containing = null;
@@ -2310,7 +2411,7 @@ export class Workspace {
       const out = [];
       for (const idStr in mod.notes) {
         const n = mod.notes[idStr];
-        if (!isMeasureNote(n)) continue;
+        if (!n || !isMeasureNote(n)) continue;
         try {
           const st = n.getVariable('startTime');
           if (st == null) continue;
@@ -2325,7 +2426,7 @@ export class Workspace {
 
   // Return a custom cursor URL for octave up/down (distinct single-headed arrows).
   // Uses tiny inline SVG, cached after first build.
-  _getArrowCursor(direction) {
+  _getArrowCursor(direction: 'up' | 'down') {
     try {
       if (!this._cursorCache) this._cursorCache = { up: null, down: null };
       const dir = (direction === 'up') ? 'up' : 'down';
@@ -2371,7 +2472,7 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     const mod = this._module;
     if (!mod || !mod.notes) return [];
 
-    const isMeasureById = (id) => {
+    const isMeasureById = (id: number) => {
       try { return isMeasureNote(mod.getNoteById(Number(id))); } catch { return false; }
     };
 
@@ -2379,7 +2480,7 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     if (!note || !isMeasureById(measureId)) return [];
 
     // Get startTime for a note by ID
-    const getStartTime = (id) => {
+    const getStartTime = (id: number) => {
       try {
         const n = mod.getNoteById(Number(id));
         const st = n && n.getVariable && n.getVariable('startTime');
@@ -2391,10 +2492,10 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     };
 
     // Is a dependent a chain link of this parent, or an anchor starting a new chain?
-    const isChainLinkById = (depId, parentId) => isChainLinkOf(mod.getNoteById(Number(depId)), parentId);
+    const isChainLinkById = (depId: number, parentId: number) => isChainLinkOf(mod.getNoteById(Number(depId)), parentId);
 
     // Use DependencyGraph if available (O(d) vs O(N×M))
-    const depGraph = mod._dependencyGraph;
+    const depGraph = mod?._dependencyGraph;
     if (depGraph && typeof depGraph.getMeasureChain === 'function') {
       return depGraph.getMeasureChain(Number(measureId), isMeasureById, getStartTime, isChainLinkById);
     }
@@ -2407,13 +2508,13 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       const pid = measureChainLinkParentId(cur?.variables?.startTimeString || '');
       if (pid == null) break; // Stop at anchors or roots
       const p = mod.getNoteById(pid);
-      if (!isMeasureNote(p)) break;
+      if (!p || !isMeasureNote(p)) break;
       cur = p;
     }
 
     // Helper to push with evaluated start
-    const chain = [];
-    const pushWithStart = (n) => {
+    const chain: ChainEntry[] = [];
+    const pushWithStart = (n: Note) => {
       try {
         const t = toNumber(n.getVariable('startTime'), 0);
         chain.push({ id: Number(n.id), startSec: t });
@@ -2446,7 +2547,7 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
  *   - 'link': chain link `[P].t + [P].d` (subsequent measure in same chain)
  *   - 'anchor': first measure of a dependent chain (starts from another note any other way)
  */
-function getMeasureChainRole(note) {
+function getMeasureChainRole(note: Note | null | undefined) {
   const expr = (note && note.variables && note.variables.startTimeString) || '';
 
   const linkParent = measureChainLinkParentId(expr);
@@ -2464,7 +2565,7 @@ function getMeasureChainRole(note) {
  * @param {Object} parentNote - The potential parent note
  * @returns {boolean} true if depNote is a chain link to parentNote
  */
-function isChainLinkTo(depNote, parentNote) {
+function isChainLinkTo(depNote: Note | null | undefined, parentNote: Note) {
   const role = getMeasureChainRole(depNote);
   return role.role === 'link' && role.parentId === Number(parentNote.id);
 }
