@@ -41,7 +41,7 @@ npm ci
 npm run dev
 ```
 
-Open the address Vite prints (normally `http://localhost:3000`). From the repository root, `npm test` checks the application and shipped modules, `npm run build` builds the app and `npm run docs:build` builds the documentation. The two outputs deploy separately. [Developer setup](docs/developer/contributing/setup.md) · [Build and deployment](docs/developer/contributing/build-and-deploy.md) · [Measured performance and limits](docs/developer/performance.md)
+Open the address Vite prints (normally `http://localhost:3000`). From the repository root, `npm run typecheck` checks the TypeScript projects, `npm test` checks the application and shipped modules, `npm run build` builds the app and `npm run docs:build` builds the documentation. The two outputs deploy separately. [Developer setup](docs/developer/contributing/setup.md) · [Build and deployment](docs/developer/contributing/build-and-deploy.md) · [Measured performance and limits](docs/developer/performance.md)
 
 ## License
 
