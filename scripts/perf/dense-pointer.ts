@@ -3,23 +3,23 @@ import type { Page } from 'playwright';
 // and verifies both hit and miss rows, including note selection and stack cycling.
 export async function checkDensePointer(page: Page, count: number) {
   const points = await page.evaluate(async () => {
-    const ws = window.__rmtWorkspace!, r = ws.renderer;
-    ws.camera.tx = 170;
-    ws.camera.ty = 300;
-    ws.camera.onChange();
+    const ws = window.__rmtWorkspace!, r = ws.renderer!;
+    ws.camera!.tx = 170;
+    ws.camera!.ty = 300;
+    ws.camera!.onChange!();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const points = [], m = r.matrix;
     for (let n = 0; n < 80; n++) {
       const i = Math.min(r.instanceCount - 1, Math.floor((.1 + .8 * n / 80) * r.instanceCount / 8) * 8 + n % 8);
       const o = 4 * i;
-      points.push([m[0] * (r.posSize[o] + r.posSize[o + 2] / 2) + m[6],
-        m[4] * (r.posSize[o + 1] + r.posSize[o + 3] / 2) + m[7]]);
+      points.push([m[0] * (r.posSize![o] + r.posSize![o + 2] / 2) + m[6],
+        m[4] * (r.posSize![o + 1] + r.posSize![o + 3] / 2) + m[7]]);
     }
     const probe = window.pointerProbe = { events: [] as number[], frames: [] as number[], hits: 0, stop: new AbortController() };
     const options = { signal: probe.stop.signal };
     let begin = 0, last = 0;
-    ws.containerEl.addEventListener('pointermove', () => { begin = performance.now(); }, { ...options, capture: true });
-    ws.containerEl.addEventListener('pointermove', () => {
+    ws.containerEl!.addEventListener('pointermove', () => { begin = performance.now(); }, { ...options, capture: true });
+    ws.containerEl!.addEventListener('pointermove', () => {
       probe.events.push(performance.now() - begin);
       if (r._hoveredNoteId != null) probe.hits++;
     }, options);

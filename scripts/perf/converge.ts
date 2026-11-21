@@ -56,9 +56,9 @@ function countDiff(a: Buffer, b: Buffer) {
 
 // Perturb the scene the way a user would (pan), then watch it settle.
 await page.evaluate(() => {
-  const cam = window.__rmtWorkspace!.camera;
+  const cam = window.__rmtWorkspace!.camera!;
   cam.tx -= 250;
-  cam.onChange();
+  cam.onChange!();
 });
 
 const shots = [];

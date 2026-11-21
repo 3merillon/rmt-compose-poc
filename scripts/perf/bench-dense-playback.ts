@@ -48,11 +48,11 @@ try {
   await page.goto(url + '/?perf=1', { waitUntil: 'domcontentloaded', timeout: 240000 });
   await page.waitForFunction(n => window.__rmtRenderer?.instanceCount === n, count, { timeout: 240000 });
   await page.evaluate(async zoom => {
-    const r = window.__rmtRenderer!, cam = window.__rmtWorkspace!.camera;
+    const r = window.__rmtRenderer!, cam = window.__rmtWorkspace!.camera!;
     cam.scale = zoom;
     cam.tx = 24;
     cam.ty = 250;
-    cam.onChange();
+    cam.onChange!();
     const { audioEngine: ae } = await import('/src/player/audio-engine.ts');
     window.engine = ae;
     window.ringUploads = 0;
@@ -122,14 +122,14 @@ try {
         const t = performance.now();
         try { return overlays.apply(this, args); } finally { overlayCPU.push(performance.now() - t); }
       };
-      const cam = window.__rmtWorkspace!.camera;
+      const cam = window.__rmtWorkspace!.camera!;
       let start: number | undefined, last: number | undefined;
       await new Promise<void>(done => requestAnimationFrame(function tick(t) {
         if (last != null) frames.push(t - last);
         start ??= t;
         if (mode === 'pan') {
           cam.tx = 60 + 32 * Math.sin((t - start) / 500);
-          cam.onChange();
+          cam.onChange!();
         }
         last = t;
         if (t - start >= 2400) done();
@@ -184,13 +184,13 @@ try {
   }
   if (shape === 'hub') {
     const group = await page.evaluate(async () => {
-      const r = window.__rmtRenderer!, cam = window.__rmtWorkspace!.camera;
+      const r = window.__rmtRenderer!, cam = window.__rmtWorkspace!.camera!;
       r.syncMultiSelection(new Set(r._instanceNoteIds));
       r._render();
       const before = window.ringUploads;
       for (let i = 0; i < 30; i++) {
         cam.tx += 1;
-        cam.onChange();
+        cam.onChange!();
         await new Promise(resolve => requestAnimationFrame(resolve));
       }
       const result = { group: r._multiSelNoteIdx!.length, uploadedAgain: window.ringUploads - before };
@@ -210,7 +210,7 @@ try {
   }
   const visual = await page.evaluate(async () => {
     document.querySelector<HTMLElement>('#stopButton')!.click();
-    const r = window.__rmtRenderer!, gl = r.gl!, cam = window.__rmtWorkspace!.camera;
+    const r = window.__rmtRenderer!, gl = r.gl!, cam = window.__rmtWorkspace!.camera!;
     const sample = () => {
       r.needsRedraw = true;
       r._render();
@@ -235,7 +235,7 @@ try {
     cam.scale = 2;
     cam.tx = 150;
     cam.ty = 350;
-    cam.onChange();
+    cam.onChange!();
     r.needsRedraw = true;
     r._render();
     const pick = r.pickAt(r.matrix[0] * (r.posSize![0] + r.posSize![2] / 2) + r.matrix[6],
