@@ -158,3 +158,12 @@ test('an approximate origin does not turn an exact pitch derived from time appro
   assert.ok(isRational(result));
   assert.equal(Number(result), 440);
 });
+
+test('a copy beginning at zero can move without changing a pitch derived from time', async () => {
+  const { reopened } = await copy(base, [
+    note(20, '330', '0'), note(21, '330', '3'), note(22, '[21].t * 110', '2 * [21].t'),
+  ], [20, 21, 22]);
+  reopened.baseNote.setVariable('startTimeString', '5');
+  assert.equal(Number(reopened.getNoteById(3).getVariable('startTime')), 11);
+  assert.equal(pitch(reopened, 3), 330);
+});

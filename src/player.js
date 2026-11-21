@@ -14,13 +14,15 @@ import { multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
 import { isMeasureNote, EXPRESSION_VARS } from './note.js';
 import { menuBar } from './menu/menu-bar.js';
-import { ratioToAnchorExpr, valueFactor, startTimeExpr, timeUnitsExpr, amplitudeExpr } from './utils/value-expr.js';
+import { ratioToAnchorExpr, valueFactor, timeUnitsExpr } from './utils/value-expr.js';
 import { compare as compareExact, mul as mulExact } from './value/exact.js';
+import { rewriteNoteReferences } from './dsl/remap-note-ids.js';
 import { PropertyMap } from './dsl/constants.js';
 import { compiler } from './expression-compiler.js';
 import { findDependencyCycle } from './variable-deps.js';
 import { findFollowedNote, followExpr } from './utils/followed-note.js';
 import { escapeHtml, validateColorInput } from './utils/html-escape.js';
+import { buildModuleFromSelection } from './utils/copy-selection.js';
 import * as groupEdit from './utils/group-edit.js';
 import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
@@ -1542,37 +1544,28 @@ if (canvasEl) {
             // Per-import cache to avoid repeating the same string remapping across many notes
             const exprRemapCache = new Map();
 
-            // Every DSL property spelling (src/dsl/constants.js PropertyMap), longest first,
-            // and what each one means. A dropped module takes its start and its pitch from
-            // the target (base.t, base.f map to the target's t and f) and keeps the
-            // workspace's time unit: base.d stays base.d, so its pace does not depend on
-            // the length of the note it is dropped on.
-            const __dslProps = Object.keys(PropertyMap).sort((a, b) => b.length - a.length).join('|');
-            const refPattern = new RegExp(`(?:\\bbase|\\[\\s*(\\d+)\\s*\\])\\s*\\.\\s*(${__dslProps})\\b`, 'g');
+            // A drop takes pitch and start from the target and keeps the receiving time unit.
             const dropAtEnd = menuBar?.getModuleDropMode?.() === 'end' && targetNote.id !== 0;
 
-            function updateExpression(source, variable) {
-                const key = `${variable}:${source}`;
-                if (exprRemapCache.has(key)) return exprRemapCache.get(key);
+            function updateExpression(source) {
+                if (exprRemapCache.has(source)) return exprRemapCache.get(source);
                 // One pass over the source: a target id may also have been an id
                 // in the imported phrase. Never remap a replacement a second time.
-                const result = source.replace(refPattern, (match, oldId, prop) => {
-                    if (oldId != null && Number(oldId) !== 0) {
-                        const newId = mapping[Number(oldId)];
-                        return newId === undefined ? match : `[${newId}].${prop}`;
-                    }
+                const result = rewriteNoteReferences(source, (id, prop, match) => {
+                    if (id !== 0) return mapping[id] ?? id;
                     const property = PropertyMap[prop];
                     if (targetNote.id === 0 || property === 'duration' ||
                         (targetIsMeasure && property !== 'startTime')) return `base.${prop}`;
                     const anchor = `[${targetNote.id}].${prop}`;
-                    if (dropAtEnd && variable === 'startTime' && property === 'startTime') {
+                    if (dropAtEnd && property === 'startTime') {
+                        // Every field reads the same placed origin, including pitches derived from time.
                         const end = `${anchor} + [${targetNote.id}].d`;
                         // Keep a bare end anchor recognizable as a chain link.
                         return source.trim() === match ? end : `(${end})`;
                     }
                     return anchor;
                 });
-                exprRemapCache.set(key, result);
+                exprRemapCache.set(source, result);
                 return result;
             }
 
@@ -1599,7 +1592,7 @@ if (canvasEl) {
                 for (const key of EXPRESSION_VARS) {
                     if (!impNote.hasExpression(key)) continue;
                     const source = impNote.getExpressionSource(key);
-                    const remapped = updateExpression(source, key);
+                    const remapped = updateExpression(source);
                     if (remapped !== source) impNote.setVariable(key + 'String', remapped);
                 }
                 impNote.module = myModule;
@@ -3028,185 +3021,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return false;
     }
 
-    // Partition a selection for a group move:
-    //   MOVERS – no selected note anywhere in their startTime ancestor chain, so
-    //            nothing else displaces them. These get the delta applied.
-    //   RIDERS – anchored (transitively) to a selected note. Left completely
-    //            untouched; they inherit the delta for free.
-    // Notes OUTSIDE the selection are never touched either: they follow their anchors,
-    // exactly as they do for a single-note drag.
-    // Every note id an expression names (`[N]`).
-    // __extractNoteRefFromRaw() returns only the FIRST; for export we need all of them,
-    // because an expression is only safe to copy verbatim if EVERY note it names travels
-    // with it.
-    function __extractAllNoteRefsFromRaw(raw) {
-        const out = new Set();
-        if (!raw || typeof raw !== 'string') return out;
-        for (const m of raw.matchAll(/\[(\d+)\]/g)) out.add(parseInt(m[1], 10));
-        return out;
-    }
-
-    // Build a self-contained module JSON from a selection, preserving its tree.
-    //
-    // The copy is ROOTED at the earliest selected note, which lands exactly on the new
-    // module's baseNote (`base.t`). Everything else keeps its offset from that note, so
-    // dropping the module somewhere else reproduces the layout verbatim — which is what
-    // the import path expects, since it maps the module's baseNote onto the drop target.
-    //
-    // WHICH EXPRESSIONS SURVIVE VERBATIM, AND WHICH ARE REBUILT:
-    //
-    //   An expression is copied verbatim (ids renumbered) iff every note it names is also
-    //   in the selection. THAT is what conserves the branching — `[A].t + [A].d` stays
-    //   `[A].t + [A].d`, so the copy keeps the same relationships, not just the same
-    //   coordinates. If it reaches outside the selection the reference would dangle, so
-    //   it is rebuilt from the note's EVALUATED value against the new baseNote instead:
-    //   the note keeps its position/pitch/length even though it lost its anchor.
-    //
-    //   startTime is stricter. A note whose start-anchor chain LEAVES the selection is a
-    //   root and is always rebuilt as `base.t + base.d * k`, even when its expression
-    //   names no note at all (e.g. `base.t + base.d * 4`). Copied verbatim that would
-    //   pin it to its original absolute time instead of to wherever the module is dropped.
-    //   This is the same MOVER/RIDER split group move uses — a root is a mover.
-    //
-    // The new baseNote is a COPY of the current one (same frequency, same duration — the
-    // time unit — and the same interpretation), so `base.f` and `base.d` keep meaning
-    // exactly what they meant: pitches survive as ratios and rhythms as multiples of the
-    // unit rather than as frozen numbers.
-    function buildModuleFromSelection(ids) {
-        const S = new Set([...(ids || [])].map(Number).filter((id) => Number.isFinite(id) && id !== 0));
-        const notes = [...S]
-            .map((id) => myModule.getNoteById(id))
-            .filter(Boolean);
-        if (!notes.length) return null;
-
-        const startOf = (n) => toNumber(n.getVariable('startTime'), 0);
-        notes.sort((a, b) => (startOf(a) - startOf(b)) || (Number(a.id) - Number(b.id)));
-        // The copy's time origin is the earliest note that HAS a start: a reference
-        // (a frequency alone) lies outside time and must not pull it to 0.
-        const firstTimed = notes.find((n) => n.hasExpression('startTime')) || notes[0];
-        const t0 = startOf(firstTimed);
-
-        // Renumber 1..N in time order; 0 stays reserved for the baseNote.
-        const idMap = new Map();
-        notes.forEach((n, i) => idMap.set(Number(n.id), i + 1));
-
-        const base = myModule.baseNote;
-        const unitFrac = myModule.getTimeUnit();
-        const baseFreqFrac = base.getVariable('frequency');
-        const baseFreq = toNumber(baseFreqFrac, 0);
-        const baseAmpFrac = myModule.findAmplitude(base);
-        const t0Exact = firstTimed.getExactVariable('startTime');
-        const unitExact = base.getExactVariable('duration') ?? unitFrac;
-
-        const renumber = (raw) => String(raw)
-            .replace(/\[(\d+)\]/g, (m, d) => {
-                const nid = idMap.get(parseInt(d, 10));
-                return nid ? `[${nid}]` : m;
-            });
-
-        // Does this expression name only notes that are coming with us? (base — id 0 — is
-        // always fine: the copy carries its own base.)
-        const selfContained = (raw) => {
-            if (!raw) return false;
-            for (const ref of __extractAllNoteRefsFromRaw(raw)) {
-                if (ref !== 0 && !S.has(ref)) return false;
-            }
-            return true;
-        };
-
-        const outNotes = [];
-        for (const n of notes) {
-            const e = { id: idMap.get(Number(n.id)) };
-            if (isMeasureNote(n)) e.measure = true;
-            const sRaw = n.variables?.startTimeString || '';
-            const dRaw = n.variables?.durationString || '';
-            const fRaw = n.variables?.frequencyString || '';
-
-            // startTime — verbatim only for a RIDER whose expression stays inside the set.
-            // A note without a start (a reference) stays without one.
-            if (!n.hasExpression('startTime')) {
-                // nothing: outside time
-            } else if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
-                e.startTime = renumber(sRaw);
-            } else {
-                // From the exact values (an irrational start stays exact, an
-                // approximate one is written with ~)
-                e.startTime = startTimeExpr(n.getExactVariable('startTime'), t0Exact, unitExact) ?? 'base.t';
-            }
-
-            // duration
-            if (dRaw && selfContained(dRaw)) {
-                e.duration = renumber(dRaw);
-            } else if (n.getVariable('duration') != null) {
-                const durSec = toNumber(n.getVariable('duration'), 0);
-                if (isFinite(durSec) && durSec > 0) {
-                    e.duration = timeUnitsExpr(n.getExactVariable('duration'), unitExact);
-                }
-            }
-
-            // frequency — silences legitimately have none, so only emit when there is one.
-            if (fRaw && selfContained(fRaw)) {
-                e.frequency = renumber(fRaw);
-            } else if (n.getVariable('frequency') != null) {
-                const f = toNumber(n.getVariable('frequency'), 0);
-                if (isFinite(f) && f > 0 && baseFreq > 0) {
-                    e.frequency = ratioToAnchorExpr(n.getExactVariable('frequency'), base.getExactVariable('frequency'), 'base.f');
-                }
-            }
-
-            // amplitude — only a note that defines its own carries one; the rest go on
-            // inheriting the copied base's. Verbatim when self-contained, otherwise
-            // rebuilt as a ratio of base.a so it still follows the piece-wide gain.
-            const aRaw = n.variables?.amplitudeString || '';
-            if (aRaw && selfContained(aRaw)) {
-                e.amplitude = renumber(aRaw);
-            } else if (aRaw && n.getVariable('amplitude') != null) {
-                const baseA = base.hasExpression('amplitude') ? base.getExactVariable('amplitude') : baseAmpFrac;
-                e.amplitude = amplitudeExpr(n.getExactVariable('amplitude'), baseA);
-            }
-
-            // attack and release — shares of the note's own duration, so a plain number
-            // stands for them when the expression reaches outside the selection.
-            for (const v of ['attack', 'release']) {
-                const vRaw = n.variables?.[v + 'String'] || '';
-                if (!vRaw) continue;
-                if (selfContained(vRaw)) {
-                    e[v] = renumber(vRaw);
-                } else {
-                    const vExact = n.getExactVariable(v);
-                    if (vExact != null) e[v] = valueFactor(vExact);
-                }
-            }
-
-            if (n.properties.color) e.color = n.properties.color;
-            if (n.properties.instrument) e.instrument = n.properties.instrument;
-            outNotes.push(e);
-        }
-
-        // Copy the current baseNote's own expressions — it is the tree's root, so it can
-        // never reference a note, which makes them safe to reuse as-is. Its duration is
-        // the time unit every `base.d` above reads. startTime is forced to 0: the
-        // earliest copied note sits ON the base.
-        const baseOut = {};
-        for (const v of EXPRESSION_VARS.filter((name) => name !== 'startTime')) {
-            const raw = base.variables?.[v + 'String'];
-            if (typeof raw === 'string' && raw.trim()) {
-                baseOut[v] = raw;
-            } else {
-                const bv = base.getExactVariable(v);
-                if (bv != null) baseOut[v] = valueFactor(bv);
-            }
-        }
-        baseOut.startTime = '0';
-        if (base.properties.instrument) baseOut.instrument = base.properties.instrument;
-
-        return { baseNote: baseOut, notes: outNotes };
-    }
-
     // Group action: copy the selection into the module library's Custom section.
     function copySelectionToModules() {
         try {
-            const data = buildModuleFromSelection(multiSelection);
+            const data = buildModuleFromSelection(myModule, multiSelection);
             if (!data) return;
             const n = data.notes.length;
             const name = menuBar.addCustomModule(`Selection (${selectionLabel(n, selectedMeasureCount(multiSelection))})`, data);
@@ -4916,12 +4734,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           // is a relation the move does not break, and is kept as written.
           try {
             if (n && n.variables && n.variables.duration) {
-              const dRaw0 = (n.variables && n.variables.durationString) ? n.variables.durationString : null;
-
               let refsLaterNote = false;
               try {
                 const tol = 1e-6;
-                for (const ref of __extractAllNoteRefsFromRaw(dRaw0)) {
+                for (const ref of n.getExpression('duration').getDependencySet()) {
                   if (ref === 0) continue;
                   const rn = myModule.getNoteById(ref);
                   if (rn && toNumber(rn.getVariable('startTime'), 0) > Number(newStartSec) + tol) {

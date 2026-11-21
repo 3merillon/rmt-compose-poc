@@ -43,8 +43,10 @@ function copiedExpression(note, key, lookup, origin, baseStart, sourceModule) {
   if (isStart && !refs.some(ref => (ref >> 3) !== 0)) return null;
   const readsStart = refs.some(ref => (ref & 7) === VAR.START_TIME);
   if (!isStart && !readsStart) return remapped;
-  if ((!refs.includes(VAR.START_TIME) || isZero(baseStart)) &&
-      (isRational(origin) && (isZero(origin) || startShift(parse(tokenize(source))) === Number(isStart)))) return remapped;
+  // A tile initially at zero can later be dropped anywhere. Keep the raw
+  // formula only if moving its time origin shifts it by the right amount.
+  if (!refs.includes(VAR.START_TIME) && isRational(origin) &&
+      startShift(parse(tokenize(source))) === Number(isStart)) return remapped;
 
   // Read start variables in the source coordinate system before applying
   // arbitrary operations (e.g. twice a start, or a pitch derived from time).
