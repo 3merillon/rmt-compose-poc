@@ -187,6 +187,8 @@ const restored = await page.evaluate(async () => {
     { name: 'My edited cadence', file: half, moduleData: edit },
     { name: 'Major', moduleData: edit },
     { name: 'Major', moduleData: freshMajor },
+    { name: 'My former catalog entry', file: 'retired/old.json', moduleData: edit },
+    { name: 'My renamed cadence', file: half, meta: {file: half, name: 'Half (I–V)'}, data: oldScore },
   ];
   localStorage.setItem('ui-state', JSON.stringify({libraryVersion: 2, categories: [
     { name: 'test-layout', label: 'My tiles', collapsed: true, modules: entries }
@@ -214,13 +216,14 @@ const restored = await page.evaluate(async () => {
   const ui: unknown = JSON.parse(localStorage.getItem('ui-state') || 'null');
   if (!isLibraryLayout(ui)) throw Error('Invalid saved library');
   const layout = ui.categories.find(cat => cat.name === 'test-layout')!;
-  return { payloads, expected: [freshHalf.notes, oldScore.notes, edit.notes, edit.notes, freshMajor.notes],
+  return { payloads, expected: [freshHalf.notes, oldScore.notes, edit.notes, edit.notes, freshMajor.notes, edit.notes, oldScore.notes],
     names: layout.modules?.map(m => m.name), flags: layout.modules?.map(m => [m.isUploaded, !!m.moduleData]),
     label: layout.label, collapsed: layout.collapsed };
 });
 for (const payload of restored.payloads) assert.deepEqual(payload, restored.expected);
-assert.deepEqual(restored.flags, [[false, false], [true, true], [true, true], [true, true], [false, false]]);
-assert.deepEqual(restored.names, ['Half (I–V)', 'My copied cadence', 'My edited cadence', 'Major', 'Major']);
+assert.deepEqual(restored.flags, [[false, false], [true, true], [true, true], [true, true], [false, false], [true, true], [true, true]]);
+assert.deepEqual(restored.names, ['Half (I–V)', 'My copied cadence', 'My edited cadence', 'Major', 'Major',
+  'My former catalog entry', 'My renamed cadence']);
 assert.equal(restored.label, 'My tiles');
 assert.equal(restored.collapsed, true);
 console.log('Revised stock, same-name legacy edits and explicit copies survived drag and two UI restores.');
