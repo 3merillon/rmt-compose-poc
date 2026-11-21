@@ -1,43 +1,11 @@
----
-title: Getting Started
-description: Try RMT Compose in your browser or run it locally, then build your first three-note composition.
----
+# Getting started
 
-# Getting Started
+[Open RMT Compose](https://www.rmt.world/) in a browser with WebGL2 and sound. Press **Play** at the top left. Follow the first blue bass line until the green bass answers it a bar later. Press **Stop** to go back to the opening.
 
-RMT Compose runs in the browser. You can use the hosted app immediately, or clone the repository and run it locally.
+If you hear a different piece, the app has restored your browser’s saved session. Download it with **+ → Save Module**, then choose **+ → Load Module ▾ → Reset Default Module → Yes, Reset**. You can undo the reset.
 
-## Quick start
+1. [Make your first change](/getting-started/first-composition). Lengthen a bass note, listen for the next entrance and save your version.
+2. [Learn the musical model](/getting-started/concepts). Find out what the BaseNote supplies and how two voices can share a pitch or a rhythm.
+3. [Follow the canon and its cadences](/tutorials/workflows/canon-and-cadences). Tune an A from a later E, then hear how octave placement changes a chord progression.
 
-The fastest way to try RMT Compose is the hosted app:
-
-**[https://rmt.world](https://rmt.world)**
-
-Nothing to install, and it has every feature the local build has — the whole thing runs client-side. You need a browser with **WebGL2**: the workspace is a WebGL2 canvas and will not initialise without it.
-
-To run it locally instead:
-
-```bash
-git clone https://github.com/3merillon/rmt-compose-poc.git
-cd rmt-compose-poc
-npm install
-npm run dev
-```
-
-Vite serves on **`http://localhost:3000`** and opens your browser for you. You need **Node.js 20.19+ or 22.12+**; Node 18 will not start the dev server. [Installation](/getting-started/installation) has the full prerequisites, the production build, and troubleshooting.
-
-## The first thing to find
-
-Once the app is open, the **gear** in the top bar opens the [Settings panel](/user-guide/interface/settings). It is a floating, non-modal card you can leave open while you compose, with five tabs: **Appearance**, **Arrows**, **Audio**, **Library** and **Scale**. Theme, the interval the transpose arrows use, reverb, and how densely the workspace is packed all live there, and all of them persist across reloads.
-
-## Read these in order
-
-1. **[Installation](/getting-started/installation)** — run it locally, build it, and rebuild the Rust/WASM core
-2. **[Your First Composition](/getting-started/first-composition)** — three notes, played, saved, in five minutes
-3. **[Core Concepts](/getting-started/concepts)** — ratios, the BaseNote, expressions, dependencies and modules
-
-If you are using the hosted app, skip straight to [Your First Composition](/getting-started/first-composition).
-
-## Next steps
-
-Once you have three notes on screen, the [User Guide](/user-guide/) covers every feature in detail, and the [Tutorials](/tutorials/) walk single paths to a result.
+If you used the previous release, see [What’s new in v2](/release-notes). For a local copy, see [Installation](/getting-started/installation).

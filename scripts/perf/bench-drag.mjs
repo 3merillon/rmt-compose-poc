@@ -16,15 +16,12 @@ const MODULE = flag('--module', 'hub-5000');
 const PROFILE = argv.includes('--profile');
 const STEPS = Number(flag('--steps', 140));
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=default', '--enable-gpu'] });
+const browser = await chromium.launch({ channel: process.env.PW_CHANNEL || 'msedge', headless: true, args: ['--use-angle=default', '--enable-gpu'] });
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 const page = await ctx.newPage();
 await page.addInitScript(() => { try { localStorage.removeItem('rmt:moduleSnapshot:v1'); } catch {} });
-const res = await page.request.get(`${URL_BASE}/modules/perf/${MODULE}.json`);
-if (!res.ok()) throw new Error(`fetch ${MODULE}: ${res.status()}`);
-const body = await res.text();
 await page.route('**/modules/defaultModule.json', (r) =>
-  r.fulfill({ status: 200, contentType: 'application/json', body }));
+  r.fulfill({ status: 302, headers: { location: `/modules/perf/${MODULE}.json` } }));
 
 await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!(window.__rmtRenderer?.instanceCount > 0), null, { timeout: 300_000 });

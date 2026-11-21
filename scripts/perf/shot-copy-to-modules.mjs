@@ -73,7 +73,7 @@ const sel = await page.evaluate(() => {
     const m = raw.match(/\[(\d+)\]\./);
     return m ? Number(m[1]) : (/\bbase\./.test(raw) ? 0 : null);
   };
-  const isMeasure = (n) => !!(n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency);
+  const isMeasure = (n) => !!n.properties?.measure;
   const ids = Object.keys(mod.notes).map(Number).filter((i) => i !== 0)
     .filter((i) => { const n = mod.getNoteById(i); return n && !isMeasure(n); });
   // longest run of consecutively-chained notes we can find, capped at 5

@@ -12,6 +12,8 @@
  * schema grows, bump SETTINGS_VERSION and add a migration in `migrate()`.
  */
 
+import { DEFAULT_DETAIL_CUTOFF, MAX_MODULE_NOTES } from '../limits.js';
+
 export const SETTINGS_VERSION = 1;
 
 // Outer rails for the workspace scale factors AND for the user-editable limits
@@ -20,6 +22,27 @@ export const SETTINGS_VERSION = 1;
 // density far from the default one.
 export const SCALE_HARD_MIN = 0.001;
 export const SCALE_HARD_MAX = 1000;
+
+// The rails a live-tempo range may span, in whole BPM.
+export const TEMPO_HARD_MIN = 1;
+export const TEMPO_HARD_MAX = 1000;
+
+/**
+ * The live-tempo slider's span for a piece written at `notatedBpm`: the user's
+ * range, kept within the engine's 0.1x-10x rate rails, and always reaching the
+ * written tempo (so the slider can return to it). Whole BPM.
+ * @returns {[number, number]}
+ */
+export function tempoSliderBounds(range, notatedBpm) {
+  const r = range || { min: 20, max: 300 };
+  const base = notatedBpm > 0 ? notatedBpm : 60;
+  let lo = Math.max(Number(r.min) || 20, Math.ceil(base * 0.1));
+  let hi = Math.min(Number(r.max) || 300, Math.floor(base * 10));
+  lo = Math.min(lo, Math.floor(base));
+  hi = Math.max(hi, Math.ceil(base));
+  if (hi <= lo) hi = lo + 1;
+  return [lo, hi];
+}
 
 /**
  * Slider detent for a scale range: about a fiftieth of the span, snapped to a
@@ -42,6 +65,10 @@ export function scaleStep(lo, hi) {
  * Factory for a fresh defaults object (never share a mutable reference).
  * @returns {object}
  */
+
+/** The voice limits Settings → Audio offers (audio.maxVoices). */
+export const VOICE_LIMITS = [128, 256, 512, 1024, 2048, 4096];
+
 export function defaultSettings() {
   return {
     version: SETTINGS_VERSION,
@@ -55,6 +82,16 @@ export function defaultSettings() {
         borderPxAtZoom1: 1,
         roundedCornerPxAtZoom1: 6,
       },
+      // Which notes draw the envelope they sound with inside them: 'own' the notes
+      // that set an attack or a release (or inherit one from the BaseNote), 'all'
+      // every sounding note, 'none' no note. 'own' is the app's behavior before the
+      // setting existed. (Replaces the boolean `showEnvelopes`: true reads as 'all'.)
+      envelopes: 'own',
+      // Draw each note's release past its end: what rings after the note-off.
+      // Display only; off by default.
+      showTails: false,
+      detailCutoff: DEFAULT_DETAIL_CUTOFF,
+      neverReduceDetail: false,
     },
     arrows: {
       enabled: true,
@@ -67,6 +104,19 @@ export function defaultSettings() {
     audio: {
       masterVolume: 1,
       defaultInstrument: 'sine-wave',
+      // Playback only: each frequency is moved to the nearest of twelve equal
+      // steps to the octave, counted from the BaseNote — the module as a
+      // keyboard tuned from that note would play it, to compare with the pure
+      // intervals. The module itself is never touched. Off is the app's
+      // behavior before the setting existed.
+      tempered: { enabled: false },
+      // At most this many voices sound at once; above it the quietest voice
+      // already ringing after its note's end fades out (audio-engine.js).
+      maxVoices: 256,
+      // Loop playback (long-press Play): a module that transposes each repeat (its
+      // BaseNote's `repeat`) is kept within one octave when `fold` is on. The
+      // transposition itself is the module's, not a setting.
+      loop: { fold: true },
       reverb: {
         // On by default (user decision 2026-07-12): a touch of room ambience is
         // the nicer out-of-box sound. Stereo stays off; limiter stays on.
@@ -82,6 +132,10 @@ export function defaultSettings() {
         width: 0.6,
       },
       limiter: { enabled: true },
+      // The span of the live-tempo slider (module bar toolbar), in BPM. The slider
+      // also stays within 0.1x-10x of the written tempo (the engine's rate rails)
+      // and always reaches the written tempo itself.
+      tempoRange: { min: 20, max: 300 },
     },
     library: {
       iconSizePx: 56,
@@ -163,6 +217,12 @@ export function validateSettings(raw, prev) {
   d.appearance.note.heightWU = clampNum(an.heightWU, 8, 60, d.appearance.note.heightWU);
   d.appearance.note.borderPxAtZoom1 = clampNum(an.borderPxAtZoom1, 0, 6, d.appearance.note.borderPxAtZoom1);
   d.appearance.note.roundedCornerPxAtZoom1 = clampNum(an.roundedCornerPxAtZoom1, 0, 20, d.appearance.note.roundedCornerPxAtZoom1);
+  d.appearance.envelopes = ['own', 'all', 'none'].includes(a.envelopes)
+    ? a.envelopes
+    : (a.showEnvelopes === true ? 'all' : d.appearance.envelopes);
+  if (isPosInt(a.detailCutoff)) d.appearance.detailCutoff = Math.min(a.detailCutoff, MAX_MODULE_NOTES);
+  d.appearance.neverReduceDetail = asBool(a.neverReduceDetail, false);
+  d.appearance.showTails = asBool(a.showTails, d.appearance.showTails);
 
   const ar = src.arrows || {};
   const prevAr = (prev && prev.arrows) || {};
@@ -176,11 +236,16 @@ export function validateSettings(raw, prev) {
   }
 
   const au = src.audio || {};
+  const tp = au.tempered || {};
   const rv = au.reverb || {};
   const st = au.stereo || {};
   const lm = au.limiter || {};
   d.audio.masterVolume = clampNum(au.masterVolume, 0, 1, d.audio.masterVolume);
   d.audio.defaultInstrument = typeof au.defaultInstrument === 'string' ? au.defaultInstrument : d.audio.defaultInstrument;
+  d.audio.tempered.enabled = asBool(tp.enabled, d.audio.tempered.enabled);
+  d.audio.maxVoices = VOICE_LIMITS.includes(Number(au.maxVoices)) ? Number(au.maxVoices) : d.audio.maxVoices;
+  const lp = au.loop || {};
+  d.audio.loop.fold = asBool(lp.fold, d.audio.loop.fold);
   d.audio.reverb.enabled = asBool(rv.enabled, d.audio.reverb.enabled);
   d.audio.reverb.roomSize = clampNum(rv.roomSize, 0, 1, d.audio.reverb.roomSize);
   d.audio.reverb.decaySec = clampNum(rv.decaySec, 0.1, 12, d.audio.reverb.decaySec);
@@ -190,6 +255,10 @@ export function validateSettings(raw, prev) {
   d.audio.stereo.enabled = asBool(st.enabled, d.audio.stereo.enabled);
   d.audio.stereo.width = clampNum(st.width, 0, 1, d.audio.stereo.width);
   d.audio.limiter.enabled = asBool(lm.enabled, d.audio.limiter.enabled);
+  const tr = au.tempoRange || {};
+  const tLo = clampNum(Math.round(tr.min), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.min);
+  const tHi = clampNum(Math.round(tr.max), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.max);
+  if (tHi > tLo) d.audio.tempoRange = { min: tLo, max: tHi };
 
   const lib = src.library || {};
   d.library.iconSizePx = clampNum(lib.iconSizePx, 32, 96, d.library.iconSizePx);

@@ -46,10 +46,6 @@ Power terms are left alone, so a TET note keeps its shape:
 
 The `2^(7/12)` is untouched, so the note stays a 12-TET fifth — it just moved up an octave.
 
-::: warning
-This folding applies to DSL expressions. A note stored in the old method-chain format *and* containing a `.pow(` call is instead wrapped on every press, so repeated arrow clicks genuinely nest multipliers in it. That is deliberate — folding would destroy the power term — but it means "up then down restores the expression" holds for DSL notes, not for legacy TET ones. Everything the app writes today is DSL.
-:::
-
 ## Arrows move whole structures
 
 Because dependents follow their parents, an arrow on a *root* moves everything anchored to it.
@@ -156,7 +152,7 @@ Now move, resize or transpose Note 4. The bass tracks all three.
 
 ### 2. Arpeggiated octaves
 
-Four sixteenth notes climbing by octaves and falling back. Set every duration to `beat(base) * (1/4)`.
+Four sixteenth notes climbing by octaves and falling back. Set every duration to `base.d * (1/4)`.
 
 | Note | Frequency | Start time |
 |---|---|---|
@@ -173,7 +169,7 @@ Click **Octave 2/1** to put it back.
 
 ### 4. Prove the round trip
 
-Select a note and press ▲ five times, then ▼ five times. Read the `Raw:` field. It should be the expression you started with, character for character.
+Select a note and press ▲ five times, then ▼ five times. Read the `Raw:` field. The evaluated pitch should equal the starting pitch exactly. The saved expression may have been simplified.
 
 ## What you learned
 

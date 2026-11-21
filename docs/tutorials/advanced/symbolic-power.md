@@ -1,95 +1,108 @@
 ---
 title: Understanding SymbolicPower
-description: What "exact" means in RMT Compose - which powers resolve exactly, which are approximated and flagged, and how much error a chain of TET steps accumulates.
+description: How RMT Compose keeps equal-temperament values exact - rational, irrational and approximate values, what hatching means, and why twelve semitones give exactly an octave.
 ---
 
 # Understanding SymbolicPower
 
-Equal temperament produces irrational numbers. `2^(1/12)` = 1.0594630943592953… cannot be written
-as a fraction. This page shows you exactly what RMT Compose does with such a value — where it is
-exact, where it is not, and how to tell which you are looking at.
+Equal temperament needs irrational numbers. `2^(1/12)` = 1.0594630943592953… cannot be written as a
+fraction. RMT Compose does not turn it into one: it keeps the power **exactly** through evaluation.
+This page shows what that means, what stays exact, and how to tell the three kinds of value apart.
 
 **Prerequisites:** [Microtonal Composition](/tutorials/advanced/microtonal), or equivalent comfort
 with `^` expressions.
 
-::: danger Read this before you rely on exactness
-The headline you may have heard — *"chain twelve semitones and you get a perfect octave"* — is
-**not true** on the evaluator that ships. It is true for `2^(12/12)`. It is false for
-`2^(1/12) * 2^(1/12) * … ` twelve times. The rest of this page explains the difference, because the
-difference is the whole story.
+::: tip Twelve semitones are exactly an octave
+`2^(1/12)` multiplied by itself twelve times is exactly 2. With a base frequency of 263/4, twelve
+12-TET steps give exactly 263/2, with no error to accumulate. The rest of this page explains why.
 :::
 
-## Two kinds of power
+## Three kinds of value
 
-The `^` operator hands its result to a rational-power check before anything else. That check has
-two ways to succeed.
+Every value the evaluator computes is one of three kinds.
 
-**1. The exponent resolves to an integer.**
+| Kind | Meaning | Examples |
+|---|---|---|
+| **Rational** | An exact fraction | `3/2`, `263`, `1.5` (exactly 3/2) |
+| **Irrational** | Exact, but not a fraction: a sum of rational multiples of powers | `2^(1/12)`, `263 * 2^(7/12)` |
+| **Approximate** | A number that stands for a value it is not exactly | `~261.63` |
 
-```
-2^(12/12)               # 12/12 = 1  ->  exactly 2
-2^3                     # exactly 8
-2^(-1)                  # exactly 1/2
-```
+An irrational value is a relation, kept as the power it is. An approximate value is a measurement:
+a rational number marked as not exact. The two are never confused.
 
-**2. The result is a perfect n-th root.**
+## What stays exact
 
-```
-4^(1/2)                 # exactly 2
-8^(1/3)                 # exactly 2
-```
-
-In both cases you get an exact rational. The note is **not** flagged, **not** hatched, and its
-`Evaluated:` line shows a plain value with no `≈`.
-
-**Everything else is irrational**, and irrational is where the guarantees stop:
+Powers are reduced to a canonical form, so equal values are always equal:
 
 ```
-2^(1/12)                # irrational
-3^(1/13)                # irrational
-2^(7/12)                # irrational
+2^(1/12) * 2^(1/12)     # 2^(1/6): like bases merge
+2^(13/12)               # 2 * 2^(1/12): the whole part leaves the exponent
+4^(1/2)                 # exactly 2: a perfect root is rational
+6^(1/2)                 # 2^(1/2) * 3^(1/2): bases are factored into primes
+2^(12/12)               # exactly 2
 ```
 
-When `^` yields an irrational, the evaluator does one thing: it converts the result to an
-**approximating fraction** and sets a corruption flag on the property. There is no symbolic value
-sitting on the stack afterwards. The approximation *is* the value from that point on.
+Sums and products of such values stay exact, and so does dividing by a single power term. When no
+power is left, the value becomes a fraction again. That is why twelve semitones are exactly 2, and
+why `4^(1/2)` is a plain rational.
 
-## What corruption looks like
+## What becomes approximate
 
-| Where | Directly corrupted | Transitively corrupted |
+A few operations cannot be kept exact. Their result is **approximate**, and it is flagged:
+
+- dividing by a sum of irrational terms,
+- a non-integer power of a sum,
+- a value with more than 64 terms,
+- a division by zero,
+- an integer exponent above 65 536, or a result far beyond a million bits.
+
+Anything computed from an approximate value is approximate as well, and it never equals an exact
+value: `~1.5` is not `3/2`. You can also write an approximation yourself with `~`, as in `~261.63`;
+see [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
+
+A plain decimal stays exact: `1.5` is exactly 3/2. Only `~` marks an approximation.
+
+## What the hatching means
+
+| Where | Own expression is tempered or approximate | Depends on a tempered or approximate note |
 |---|---|---|
 | Note rectangle | **Crosshatch** (two diagonals) | **Single diagonal** hatch |
-| Note widget `Evaluated:` | `≈<value>`, italic amber | `≈<value>`, italic amber |
 
-"Directly corrupted" means this note's own expression produced the irrational.
-"Transitively corrupted" means it inherited one from something it references. Both show `≈`; only
-the hatching distinguishes them.
+The hatching means "tempered or approximate, not a pure ratio". A note whose own expression holds an
+irrational power, a `~` number or a division by zero is crosshatched; a note that depends on one has
+a single diagonal hatch.
 
-The flag propagates: give note 1 a TET frequency, write note 2 as `[1].f * (3/2)`, and note 2 is
-hatched too — its value is rational arithmetic performed on an approximation.
+The note widget's `Evaluated:` line says which kind of value you have:
 
-## How much error, exactly
+| Kind | `Evaluated:` shows |
+|---|---|
+| Irrational | The exact form and its value: `(263/4) * 2^(1/4) = 78.190368…` |
+| Approximate | `≈493.12500` |
+| Rational | The fraction, also when a tempered chain lands on one: the 12-TET octave note shows `263/2` |
 
-This is measurable, so measure it. Base frequency 263 Hz:
+The `≈` sign means only "approximate". A very long exact fraction is still shortened for display,
+with the full value in the tooltip; that affects the display only.
 
-| Expression | Evaluates to | Exact? | Flagged? |
-|---|---|---|---|
-| `base.f * 2^(12/12)` | 526 | yes — exactly | no |
-| `base.f * 4^(1/2)` | 526 | yes — exactly | no |
-| `base.f * 2^(1/12) * 2^(1/12) * …` (×12) | 525.999999999985675 | **no** | yes |
-| `base.f * 2^(1/12)` | 278.6387938165… | no | yes |
+## Measuring the error: there is none
 
-Twelve chained semitones land **1.4 × 10⁻¹¹ short** of the octave. Each `^` rounds once, and twelve
-roundings accumulate. It is a small error and it will never be audible — but it is an error, and a
-page that promises "no drift" is lying to you.
+Base frequency 263 Hz:
 
-The lesson is not "avoid TET". It is: **write the power you mean.** `2^(7/12)` rounds once.
-`2^(1/12)` seven times rounds seven times. Prefer the closed form.
+| Expression | Evaluates to | Kind |
+|---|---|---|
+| `base.f * 2^(12/12)` | 526 | rational |
+| `base.f * 4^(1/2)` | 526 | rational |
+| `base.f * 2^(1/12) * 2^(1/12) * …` (×12) | exactly 526 | rational |
+| `base.f * 2^(7/12)` | `263 * 2^(7/12)` = 394.05… | irrational |
 
-## What the simplifier does — and refuses to do
+Twelve chained semitones give the octave exactly, because the evaluator never rounds an irrational
+power. Writing `2^(7/12)` or `2^(1/12)` seven times gives the same exact value.
 
-Saving a variable runs the expression through a simplifier. It has real symbolic algebra in it, and
-it does merge like bases:
+Sound, drawing and MIDI export need a number, so they use the nearest double of the exact value,
+computed from the powers directly. The exact value is never replaced by that number.
+
+## What the simplifier does
+
+Saving a variable runs the expression through a simplifier that merges like bases:
 
 | You type | Saved as |
 |---|---|
@@ -98,20 +111,13 @@ it does merge like bases:
 | `4^(1/2) * base.f` | `2 * base.f` |
 | `base.f * 2^(1/12) * 2^(1/12)` | `base.f * 2^(1/6)` |
 
-So `2^(1/12) × 2^(1/12) = 2^(1/6)` — the like-base merge — is real. It happens **at save time**, in
-the simplifier, not during evaluation.
+A rewrite is kept only if it evaluates to exactly the same value, with the same hatching. The
+twelve-fold chain has the value `base.f * 2`, but rewriting it would remove the hatching from a note
+whose expression holds powers, so the simplifier keeps what you wrote.
 
-But now try the twelve-fold chain. The simplifier *can* fold it to `base.f * 2`… and then throws
-that result away and keeps what you wrote.
-
-Why: a rewrite is rejected if it **flips the corruption flag**. The chain is irrational (hatched);
-`base.f * 2` is rational (clean). Silently swapping one for the other would repaint your note and
-quietly change what the app is telling you about the value. So the simplifier declines.
-
-::: tip This is a feature, not a bug
-The app will not launder an approximation into an exact value behind your back. If you want the
-exact octave, write `base.f * 2` or `base.f * 2^(12/12)` and get a clean note. If you write twelve
-irrational steps, you keep twelve irrational steps — hatching and all.
+::: tip The app does not hide tempering
+If you want a note that is not hatched, write `base.f * 2` or `base.f * 2^(12/12)`. If you write
+twelve tempered steps, you keep them, hatching included, and the value is still exactly 2.
 :::
 
 ## The ▲/▼ arrows and TET
@@ -125,84 +131,58 @@ a new multiplier on the front:
 | `base.f` | `2 * base.f` |
 | `(1/2) * base.f` | `base.f` |
 | `base.f * 2^(7/12)` | `2 * base.f * 2^(7/12)` |
+| `base.f * ~1.5` | `2 * base.f * ~1.5` |
 
-Note the third row. The coefficient absorbs the ×2; the power term is left alone. **A TET note stays
-a TET note** — the arrows will never quietly rationalise it, and up-then-down returns you to exactly
-`base.f` rather than `(1/2) * 2 * base.f`.
+The coefficient absorbs the ×2; the power term and the `~` are left as written. **A TET note stays
+a TET note**, and up-then-down returns you to exactly what you wrote.
 
-## SymbolicPower, the class
+## Evaluate to BaseNote
 
-The name on this page comes from a class in the evaluator. Its real shape is:
+Evaluate to BaseNote and Evaluate Module write the exact relation: a 12-TET fifth becomes
+`base.f * 2^(7/12)`, an octave `base.f * 2`. They never write a fraction derived from a float. An
+approximate value is written with `~`, for example `base.f * ~(14983/8000)`. Moving a note before its
+parent re-anchors its frequency with the exact ratio (`2^(5/6) * [1].f`), with the same value.
 
-```javascript
-class SymbolicPower {
-  coefficient  // Fraction
-  powers       // Array<{ base: number, exp: Fraction }>
-}
-```
-
-It models `coefficient × base₁^exp₁ × base₂^exp₂ × … × baseₙ^expₙ` — a **list** of power terms, not a
-single base/exponent pair. That is what lets a value carry a base-2 term and a base-3 term at once,
-which is what the shipped **Mixed-Base** scale needs:
-
-```
-[7].f * 2 ^ (-1/12) * 3 ^ (-1/13)
-```
-
-::: warning The class is not what evaluates your notes
-On the evaluator that ships, the stack holds plain rational fractions. `^` reaches
-`SymbolicPower`, gets an irrational back, and immediately approximates it to a `Fraction`. The
-like-base merging the class advertises is performed by the **simplifier** at save time, not by the
-evaluator at run time.
-
-A statement like "the evaluator preserves symbolic form end to end" is false. Do not build on it.
-:::
-
-For the class internals and the bytecode, see
-[SymbolicPower (developer)](/developer/core/symbolic-power) and
-[Binary Evaluator](/developer/core/binary-evaluator).
+The [exact-value reference](/developer/core/symbolic-power) describes how the evaluator represents mixed bases.
 
 ## Different bases
 
 Any positive integer base works.
 
 ```
-2^(1/12)                # 12-TET step   — octave-based
-3^(1/13)                # Bohlen-Pierce — tritave-based
+2^(1/12)                # 12-TET step   - octave-based
+3^(1/13)                # Bohlen-Pierce - tritave-based
 5^(1/7)                 # a 5-based step, as used in Mixed-Base
 ```
 
 ### Twelve fifths, three ways
 
-The circle of fifths is the cleanest demonstration of everything above. Base frequency 263 Hz;
-seven octaves up is 33664 Hz.
+The circle of fifths is the cleanest demonstration. Base frequency 263 Hz; seven octaves up is
+33664 Hz.
 
-| Written as | Evaluates to | Exact? | Flagged? |
-|---|---|---|---|
-| `base.f * 2^(84/12)` | 33664 | yes | no |
-| `base.f * 2^(7/12) * 2^(7/12) * …` (×12) | 33663.999999999163265 | **no** | yes |
-| `base.f * (3/2)^12` | 34123.286865234375 | yes (and *not* an octave) | no |
+| Written as | Evaluates to | Kind |
+|---|---|---|
+| `base.f * 2^(84/12)` | 33664 | rational |
+| `base.f * 2^(7/12) * 2^(7/12) * …` (×12) | exactly 33664 | rational |
+| `base.f * (3/2)^12` | 34123.286865234375 | rational (and *not* an octave) |
 
-Row 1 is the closed form: `84/12` reduces to the integer 7, so the power resolves exactly and the
-note is clean. Row 2 is the same music written as twelve separate irrational steps — twelve
-roundings, drifting 8 × 10⁻¹⁰ off, permanently hatched. Row 3 is twelve *pure* fifths, which is
-exact rational arithmetic that simply does not land on an octave: it overshoots by the Pythagorean
-comma (531441/524288, about 23.5 cents).
+Rows 1 and 2 agree exactly: twelve tempered fifths are seven octaves. Row 3 is twelve *pure* fifths,
+which overshoots by the Pythagorean comma (531441/524288, about 23.5 cents).
 
-Three different answers, and all three are correct — they are answers to three different questions.
-Equal temperament exists to make rows 1 and 3 agree; the evaluator's rounding is what separates
-rows 1 and 2.
+Equal temperament exists to make rows 1 and 3 agree, by tempering each fifth slightly; the exact
+evaluation means the tempering is the only difference.
 
 ## Debugging checklist
 
-**Is this note exact?** Look at the rectangle. Clean = exact rational. Crosshatched = its own
-expression produced an irrational. Single-diagonal = it inherited one.
+**Is this note a pure ratio?** Look at the rectangle. Clean means every value is an exact fraction.
+Crosshatched means its own expression is tempered or approximate. Single-diagonal means it depends
+on one that is.
 
-**Did my power resolve?** Write it and read `Evaluated:`. No `≈` means the rational-power check
-succeeded and you have an exact value.
+**Is it irrational or approximate?** Read `Evaluated:`. An exact form with a value is irrational;
+`≈` followed by a decimal is approximate; a fraction is rational.
 
-**Is my chain drifting?** Replace `2^(1/12)` repeated `k` times with a single `2^(k/12)`. One
-rounding instead of `k`.
+**Is my chain exact?** It is, if it uses only powers, sums and products. Look for `~`, a division
+by a sum of powers, or a non-integer power of a sum: these make the value approximate.
 
 **Did my edit save?** The `Save` button next to the `Raw:` field only appears once you start typing,
 and the value does not change until you press it. An invalid expression is rejected with its reason
@@ -210,6 +190,6 @@ shown in red under the Save button.
 
 ## Next
 
-- [Microtonal Composition](/tutorials/advanced/microtonal) — put the temperaments to work
-- [Complex Dependencies](/tutorials/advanced/complex-dependencies) — how corruption spreads through a graph
-- [Expression Compiler](/developer/core/expression-compiler) — text to bytecode
+- [Microtonal Composition](/tutorials/advanced/microtonal) - put the temperaments to work
+- [Complex Dependencies](/tutorials/advanced/complex-dependencies) - how hatching spreads through a graph
+- [Expression Compiler](/developer/core/expression-compiler) - text to bytecode

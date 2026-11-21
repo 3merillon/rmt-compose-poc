@@ -53,7 +53,7 @@ const GROUP_ACTIONS = [
   {
     id: 'copy-to-modules',
     label: 'Copy to Modules',
-    hint: 'Saves the selection as a module in the library’s Custom section, rooted at its earliest note and keeping the tree intact.',
+    hint: 'Saves the selection as a module in the library’s Custom section, rooted at its earliest timed item and keeping the tree intact.',
     handler: (ctx) => {
       if (typeof ctx.callbacks.onCopyToModules === 'function') ctx.callbacks.onCopyToModules();
       // Non-destructive: keep the selection so the user can copy, then keep working
@@ -64,7 +64,7 @@ const GROUP_ACTIONS = [
     id: 'delete-all',
     label: 'Delete all',
     danger: true,
-    hint: 'Dependent notes are liberated, not deleted — they keep their positions.',
+    hint: 'Dependent notes and measures keep their positions.',
     handler: confirmDeleteAll,
   },
 ];
@@ -81,8 +81,40 @@ let built = false;      // listeners + actions wired exactly once
 let placed = false;     // has it been given its first position?
 
 let count = 0;
+let measureCount = 0;
+
+export function selectionLabel(total, measures) {
+  const notes = total - measures;
+  const parts = [];
+  if (notes || !measures) parts.push(`${notes} note${notes === 1 ? '' : 's'}`);
+  if (measures) parts.push(`${measures} measure${measures === 1 ? '' : 's'}`);
+  return parts.join(' and ');
+}
 // The caller (player.js) owns the selection; we only hold its callbacks.
-const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null };
+const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null, onGroupEdit: null };
+let instrumentSelect = null;   // filled from the caller's instrument list
+
+// ---- the CHANGE section -------------------------------------------------
+//
+// One variable, one expression, three ways to apply it (src/utils/group-edit.js):
+//   Set      the same expression on every selected note
+//   ×        each note's own value times a ratio; notes that read the value from
+//            another selected note follow it instead of being changed twice
+//   Inherit  remove the notes' own value (amplitude, attack, release only)
+const CHANGE_VARS = [
+  { name: 'amplitude', placeholder: '3/4', inherits: true },
+  { name: 'attack', placeholder: '1/8', inherits: true },
+  { name: 'release', placeholder: '1/4', inherits: true },
+  { name: 'frequency', placeholder: '3/2  or  2^(1/12)', inherits: false },
+  { name: 'duration', placeholder: '2', inherits: false },
+];
+const CHANGE_HINT = {
+  amplitude: 'Set writes the expression to every note. × multiplies each note’s own value; notes that read it from a selected note follow. Inherit removes the notes’ own value.',
+  attack: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
+  release: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
+  frequency: '× transposes: each note not read from another selected note is multiplied, the others follow, so the group keeps its intervals.',
+  duration: 'Set or scale the length of selected notes and measures. Items linked to their ends follow.',
+};
 
 // ---- public API ---------------------------------------------------------
 
@@ -96,14 +128,19 @@ const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null };
  * @param {() => void} o.onDeleteAll  run ONLY after the user confirms the delete
  * @param {() => void} o.onClear    deselect everything (the × / "Clear selection")
  * @param {() => void} o.onCopyToModules  export the selection to the Custom library
+ * @param {(edit: {op: string, varName?: string, text?: string}) => void} o.onGroupEdit
+ *        apply one edit to the selection: op 'set' | 'scale' | 'inherit' | 'instrument' | 'color'
+ * @param {string[]} o.instruments  the instruments the INSTRUMENT list offers
  */
-export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = null, onCopyToModules = null } = {}) {
+export function showGroupWidget({ count: n = 0, measureCount: bars = 0, onDeleteAll = null, onClear = null, onCopyToModules = null, onGroupEdit = null, instruments = null } = {}) {
   if (!ensureRoot()) return;
 
   callbacks.onCopyToModules = onCopyToModules;
+  callbacks.onGroupEdit = onGroupEdit;
+  if (Array.isArray(instruments)) fillInstruments(instruments);
   callbacks.onDeleteAll = onDeleteAll;
   callbacks.onClear = onClear;
-  setCount(n);
+  setCount(n, bars);
 
   root.classList.add('visible');
   if (!placed) { placeDefault(); placed = true; }
@@ -124,9 +161,9 @@ export function hideGroupWidget() {
  * A count of 0 means the selection is gone: the widget hides itself rather than
  * offering actions on nothing.
  */
-export function updateGroupWidgetCount(n) {
+export function updateGroupWidgetCount(n, bars = 0) {
   if (!root) return;
-  setCount(n);
+  setCount(n, bars);
   if (count === 0) { hideGroupWidget(); return; }
   if (isGroupWidgetVisible()) fitHeight();
 }
@@ -143,15 +180,12 @@ export function isGroupWidgetVisible() {
 function confirmDeleteAll(ctx) {
   const n = ctx.count;
   if (n <= 0) return;
-  const plural = n === 1 ? '' : 's';
+  const description = selectionLabel(n, measureCount);
   showConfirmation({
     messageHtml:
-      `Delete <span style='color: var(--rmt-danger, #ff0000);'>${n} selected note${plural}</span>? `
-      + `Notes that depend on them will be <span style='color: var(--rmt-accent, #ffa800);'>liberated</span> `
-      + `(their expressions are inlined so they keep their positions). `
-      + `This action is <span style='color: var(--rmt-danger, #ff0000);'>irreversible</span>, `
-      + `are you sure you wish to proceed?`,
-    confirmLabel: `Yes, Delete ${n} Note${plural}`,
+      `Delete <span style='color: var(--rmt-danger, #ff0000);'>${description}</span>? `
+      + 'Items that depend on this selection keep their positions.',
+    confirmLabel: `Yes, Delete ${description}`,
     onConfirm: () => {
       if (typeof ctx.callbacks.onDeleteAll === 'function') ctx.callbacks.onDeleteAll();
       // The notes are gone, so the selection is too — never leave a stale count
@@ -170,11 +204,25 @@ function clearSelection() {
 
 // ---- DOM ----------------------------------------------------------------
 
-function setCount(n) {
-  count = Math.max(0, Number(n) || 0);
-  if (countEl) countEl.textContent = String(count);
-  if (labelEl) labelEl.textContent = count === 1 ? 'note selected' : 'notes selected';
-  if (root) root.setAttribute('aria-label', `${count} notes selected`);
+function setCount(n, bars) {
+  count = n;
+  measureCount = bars;
+  const description = selectionLabel(count, measureCount);
+  const space = description.indexOf(' ');
+  countEl.textContent = description.slice(0, space);
+  labelEl.textContent = description.slice(space + 1) + ' selected';
+  root.setAttribute('aria-label', description + ' selected');
+
+  const onlyMeasures = count > 0 && count === measureCount;
+  const variable = bodyEl.querySelector('[data-section="change"] select');
+  for (const option of variable.options) option.disabled = onlyMeasures && option.value !== 'duration';
+  if (variable.selectedOptions[0]?.disabled) {
+    variable.value = 'duration';
+    variable.dispatchEvent(new Event('change'));
+  }
+  for (const section of bodyEl.querySelectorAll('[data-section="instrument"], [data-section="color"]')) {
+    section.hidden = onlyMeasures;
+  }
 }
 
 function ensureRoot() {
@@ -206,8 +254,134 @@ function ensureRoot() {
   return true;
 }
 
+function edit(op, varName, text) {
+  if (typeof callbacks.onGroupEdit === 'function') callbacks.onGroupEdit({ op, varName, text });
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function smallButton(label, action, onClick, title) {
+  const b = el('button', 'group-widget-btn group-widget-btn-small', label);
+  b.type = 'button';
+  b.dataset.action = action;
+  if (title) b.title = title;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+// CHANGE: variable, expression, Set / × / Inherit
+function renderChangeSection() {
+  const sec = el('div', 'group-widget-section');
+  sec.dataset.section = 'change';
+  sec.appendChild(el('div', 'group-widget-section-title', 'CHANGE'));
+
+  const varSel = el('select', 'group-widget-field');
+  varSel.setAttribute('aria-label', 'Variable to change');
+  for (const v of CHANGE_VARS) { const o = el('option', null, v.name); o.value = v.name; varSel.appendChild(o); }
+  sec.appendChild(varSel);
+
+  const input = el('input', 'group-widget-field');
+  input.type = 'text';
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', 'Expression or ratio');
+  sec.appendChild(input);
+
+  const row = el('div', 'group-widget-row');
+  const value = () => input.value.trim();
+  const setBtn = smallButton('Set', 'group-set', () => { if (value()) edit('set', varSel.value, value()); else input.focus(); },
+    'Write this expression to every selected note');
+  const scaleBtn = smallButton('×', 'group-scale', () => { if (value()) edit('scale', varSel.value, value()); else input.focus(); },
+    'Multiply each note’s own value by this ratio');
+  const inheritBtn = smallButton('Inherit', 'group-inherit', () => edit('inherit', varSel.value),
+    'Remove the notes’ own value, so they inherit');
+  row.append(setBtn, scaleBtn, inheritBtn);
+  sec.appendChild(row);
+
+  const hint = el('div', 'group-widget-hint');
+  sec.appendChild(hint);
+
+  const sync = () => {
+    const v = CHANGE_VARS.find((x) => x.name === varSel.value) || CHANGE_VARS[0];
+    input.placeholder = v.placeholder;
+    inheritBtn.hidden = !v.inherits;
+    hint.textContent = CHANGE_HINT[v.name];
+    fitHeight();
+  };
+  varSel.addEventListener('change', sync);
+  input.addEventListener('keydown', (e) => {
+    // Enter scales (the usual group edit); Escape is left to the panel
+    if (e.key === 'Enter' && value()) { e.preventDefault(); edit('scale', varSel.value, value()); }
+  });
+  sync();
+  return sec;
+}
+
+// INSTRUMENT: one list and two ways to apply it (Phase I): every selected note
+// its own player (the instrument set on each), or one player (set on the notes
+// that start the selection's lines, the others inherit along them). The first
+// entry, "inherited", makes the notes inherit again either way.
+function renderInstrumentSection() {
+  const sec = el('div', 'group-widget-section');
+  sec.dataset.section = 'instrument';
+  sec.appendChild(el('div', 'group-widget-section-title', 'INSTRUMENT'));
+  const row = el('div', 'group-widget-row');
+  instrumentSelect = el('select', 'group-widget-field group-widget-field-inline');
+  instrumentSelect.setAttribute('aria-label', 'Instrument');
+  fillInstruments(['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone']);
+  row.append(instrumentSelect);
+  sec.appendChild(row);
+  const row2 = el('div', 'group-widget-row');
+  row2.append(
+    smallButton('Each note its own player', 'group-instrument', () => edit('instrument', null, instrumentSelect.value),
+      'Sets the instrument on every selected note: each becomes the first note of a player of its own.'),
+    smallButton('One player', 'group-instrument-one', () => edit('instrumentOnePlayer', null, instrumentSelect.value),
+      'Sets the instrument on the notes that start the selection\'s lines; the others inherit it along them.'));
+  sec.appendChild(row2);
+  return sec;
+}
+
+function fillInstruments(list) {
+  if (!instrumentSelect) return;
+  const keep = instrumentSelect.value;
+  instrumentSelect.innerHTML = '';
+  const inherit = el('option', null, 'inherited');
+  inherit.value = '';
+  instrumentSelect.appendChild(inherit);
+  for (const name of list) { const o = el('option', null, name); o.value = name; instrumentSelect.appendChild(o); }
+  if ([...instrumentSelect.options].some((o) => o.value === keep)) instrumentSelect.value = keep;
+}
+
+// COLOUR: any CSS colour the note widget accepts
+function renderColorSection() {
+  const sec = el('div', 'group-widget-section');
+  sec.dataset.section = 'color';
+  sec.appendChild(el('div', 'group-widget-section-title', 'COLOUR'));
+  const row = el('div', 'group-widget-row');
+  const input = el('input', 'group-widget-field group-widget-field-inline');
+  input.type = 'text';
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.placeholder = '#ff8800 or rgba(…)';
+  input.setAttribute('aria-label', 'Colour');
+  const apply = () => { if (input.value.trim()) edit('color', null, input.value.trim()); else input.focus(); };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+  row.append(input, smallButton('Apply', 'group-color', apply));
+  sec.appendChild(row);
+  return sec;
+}
+
 function renderActions() {
   bodyEl.innerHTML = '';
+
+  bodyEl.appendChild(renderChangeSection());
+  bodyEl.appendChild(renderInstrumentSection());
+  bodyEl.appendChild(renderColorSection());
 
   for (const action of GROUP_ACTIONS) {
     const wrap = document.createElement('div');

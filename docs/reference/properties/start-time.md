@@ -5,12 +5,12 @@ description: Reference for the startTime property - aliases, defaults, valid exp
 
 # startTime
 
-`startTime` is when a note begins, in **seconds from the start of the composition**. Like every
-note property it is stored as an expression string, compiled to bytecode, and evaluated with exact
-rational arithmetic.
+`startTime` is when a note begins, in **seconds from the start of the composition**. Its expression can use rational time units, symbolic powers, or an explicitly approximate number.
 
-Almost every note in a real module expresses its start *relative to another note* rather than as an
-absolute number. That is what makes a composition editable: move one note and everything anchored
+It is one of the three variables of the notation, with [frequency](/reference/properties/frequency)
+and [duration](/reference/properties/duration).
+
+A relative start can follow a sounding note, silence, or measure bar. That is what makes a composition editable: move one note and everything anchored
 to it follows.
 
 ## Aliases
@@ -50,17 +50,26 @@ hard-coded `0`, it does not walk up to a parent.
 
 ### What a drag writes
 
-Dragging snaps the start to a **quarter of a beat** — a sixteenth note, when a beat is a quarter —
-and clamps it so it can never land before the
+Dragging snaps the start to a **quarter of a time unit** (`base.d`, one beat if you count in beats;
+a sixteenth note, when the unit is a quarter note) and clamps it so it can never land before the
 BaseNote. The app then picks the nearest suitable **anchor** — the ancestor (or, going forward
 along a measure chain, the next measure) that starts at or before the new position — and writes the
 start relative to it:
 
 | Situation | Expression written |
 |---|---|
+| Dropped exactly at the end of **any** note (it now follows that note) | `[P].t + [P].d`, P being that note |
 | Dropped exactly at the anchor's start | `[P].t` |
 | Dropped exactly at the anchor's end | `[P].t + [P].d` |
-| Dropped elsewhere | `[P].t + beat([P]) * (n/d)` (or `- beat([P]) * (n/d)`) |
+| Dropped elsewhere | `[P].t + base.d * (n/d)` (or `- base.d * (n/d)`) |
+
+The first row is a relation, not an offset: the moved note now starts wherever P ends, so it moves
+when P's start or length changes. It applies to a single-note move. P can be any sounding note or
+silence, not a measure bar (a bar's end is the next bar's start, which the bar chain already offers),
+and not a note that depends on the moved one (that would be a cycle). When several notes end there,
+the note's current anchor wins, then the one that starts latest. A group move keeps the anchor rule,
+because the other notes in the group are still moving while each commits. Offsets that land anywhere
+else stay in time units (`base.d`): time is the workspace's, not the followed note's.
 
 When the anchor is the BaseNote, `[P]` is written as `base`. Moving a note can also rewrite *other*
 notes' expressions: if a move would leave a note referencing a note that now starts after it, the
@@ -76,32 +85,13 @@ app re-anchors that dependent to an earlier note.
 (5/2)    # 2.5 seconds in
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(0)
-new Fraction(1)
-new Fraction(5, 2)
-```
-</details>
-
 ### Relative to the BaseNote
 
 ```
 base.t                       # same start as the BaseNote
 base.t + 1                   # one second after it
-base.t + beat(base) * (1/4)  # a quarter of a beat after it (a sixteenth note)
+base.t + base.d * (1/4)      # a quarter of a time unit after it (a sixteenth note)
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('startTime')
-module.baseNote.getVariable('startTime').add(new Fraction(1))
-```
-</details>
 
 ### Sequential notes
 
@@ -111,42 +101,18 @@ The single most common pattern — start when note 1 ends:
 [1].t + [1].d
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-```
-</details>
-
-### Beat- and measure-relative
+### In time units and bars
 
 ```
-beat(base) * 2         # two beats after time zero
-base.t + beat(base)    # one beat after the BaseNote
-[3].t + beat(base)     # one beat after note 3 starts
-[1].t + measure([1])   # one measure after note 1 starts
+base.t + base.d * 2    # two time units after the BaseNote starts
+base.t + base.d        # one time unit after the BaseNote
+[3].t + base.d         # one time unit after note 3 starts
+[1].t + [1].d          # when measure bar 1 ends, which is where bar 2 starts
 ```
 
-`beat(x)` is `60 / tempo(x)` in seconds. `measure(x)` is `x`'s measure length in seconds.
-
-::: tip
-`measure([1])` is written back as `[1].ml` when the module is saved — the two compile to identical
-bytecode. `beat()` is the one helper the decompiler reconstructs, so it survives a save.
-:::
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(3).getVariable('startTime')
-  .add(new Fraction(60).div(module.findTempo(module.baseNote)))
-
-module.getNoteById(1).getVariable('startTime')
-  .add(module.findMeasureLength(module.getNoteById(1)))
-```
-</details>
+`base.d` is the time unit, the BaseNote's duration: see
+[the time unit](/reference/properties/duration#the-time-unit). There is no function to fetch a beat or
+a measure; a measure bar's length is its own `.d`.
 
 ### Simultaneous notes (chords)
 
@@ -174,21 +140,22 @@ There is no `[prev]` reference. A note reference must be a literal, non-negative
 `[2].t`, not `[prev].t`.
 :::
 
-## Measure bars and measure chains
+## Measure bars
 
-A note that has a `startTime` but **no `duration` and no `frequency`** is a **measure bar**. It is
-drawn as a vertical dashed line, it never sounds, and it is the backbone of the timing grid. A
-measure chain is just measure bars linked through `startTime`:
+A measure bar is a silent note with a start and a duration, no frequency, and the flag
+`"measure": true`. It is drawn as a vertical dashed line with a triangle, it never sounds, and a chain
+of them is the timing grid. Each bar starts where the previous one ends:
 
 ```json
-{ "id": 1, "startTime": "base.t" },
-{ "id": 2, "startTime": "[1].t + measure([1])" },
-{ "id": 3, "startTime": "[2].t + measure([2])" }
+{ "id": 1, "startTime": "base.t", "duration": "base.d * 4", "measure": true },
+{ "id": 2, "startTime": "[1].t + [1].d", "duration": "[1].d", "measure": true },
+{ "id": 3, "startTime": "[2].t + [2].d", "duration": "[2].d", "measure": true }
 ```
 
-Because each link uses the *previous measure's own* measure length, giving a single measure bar its
-own `beatsPerMeasure` changes the length of that bar and shifts every later one. See
-[beatsPerMeasure](/reference/properties/beats-per-measure).
+Because each link reads the previous bar's own start and duration, giving one bar a different
+duration changes that bar's length and moves every later start. See
+[Measure bars](/reference/module-schema#measure-bars) for the full rules, including how a bar differs
+from a silence and from a plain marker.
 
 ## Dependencies
 
@@ -219,7 +186,6 @@ A note is scheduled only if it has both a `startTime` and a `duration`. Its voic
 ## See also
 
 - [duration](/reference/properties/duration)
-- [tempo](/reference/properties/tempo)
-- [beatsPerMeasure](/reference/properties/beats-per-measure)
+- [Measure bars](/reference/module-schema#measure-bars)
 - [Creating Notes](/user-guide/notes/creating-notes)
 - [Dependencies](/user-guide/notes/dependencies)

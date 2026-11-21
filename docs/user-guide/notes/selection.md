@@ -1,6 +1,6 @@
 ---
 title: Selection & Group Editing
-description: Select several notes with a marquee or shift-click, drag them as one, delete them safely, and save a selection to the module library.
+description: Select several notes with a marquee, a shift-click or by their relations, change amplitude, attack, release, pitch, length, instrument or colour on all of them at once, drag them as one, delete them safely, and save a selection to the module library.
 ---
 
 # Selection & Group Editing
@@ -8,17 +8,13 @@ description: Select several notes with a marquee or shift-click, drag them as on
 Most of the time you work on one note: you click it, it gets a selection ring, and the
 [note widget](/user-guide/interface/variable-widget) opens on it.
 
-Select **two or more** notes and the app switches presentation. The selected notes get a heavy
-selection ring (white in the default theme — the **Selection ring** picker in Settings →
-Appearance sets it), the note widget closes (with a group there is no single note for it to
-describe), and a floating **group widget** appears with the count and two actions: **Copy to
-Modules** and **Delete all**. Drag any note in the set and the whole group moves as one.
+Select notes, silences and measure triangles together to move them in time, change their durations, copy them to the module library or delete them. The floating **group widget** counts notes and measures separately. Selected notes have a heavy outline, and selected measure triangles are highlighted.
 
-A group of exactly one note is not a group. However you get there — a lone shift-click, a marquee
-that caught one note, removing notes until one is left — it normalizes back to an ordinary single
-selection with the ring and the note widget.
+On desktop, a single remaining item opens its own widget. On touch, the first long-press opens a one-item group so you can add or remove further items with a tap.
 
-![The workspace during a marquee drag: a rubber-band rectangle over several notes, the notes it crosses ringed in white, and the group widget in the bottom-right corner showing the count](/img/multi-select-marquee.png)
+![A selection rectangle crosses the early canon notes, with intersected notes outlined](/img/multi-select-marquee.png)
+
+*While the pointer is down, the rectangle previews the selection. Release it to open the group widget.*
 
 ## Before you start: unlock the notes
 
@@ -33,108 +29,122 @@ click responds, check the padlock first.
 
 | | Desktop (mouse or pen) | Touch |
 |---|---|---|
-| **Marquee on empty background** | Hold **Shift** and drag | **Long-press** empty space (hold ~½ second without moving), then keep the finger down and drag |
-| **Toggle one note in or out** | **Shift + click** the note | **Long-press** the note (it toggles as soon as the press fires, while your finger is still down) |
-| **Move the group** | Drag the body of any note that is already selected | Same — press a selected note and drag |
-| **Select just one note (drops the group)** | Plain click the note | Plain tap the note |
-| **Clear the selection** | Plain click empty background, or the widget's **×** / **Clear selection** | Plain tap empty background, or **×** / **Clear selection** |
+| **Draw a marquee** | Hold **Shift** and drag anywhere, including from a note or measure triangle | Hold still for about half a second, then drag. Holding an item toggles it before the drag begins. |
+| **Toggle a note or measure** | **Shift + click** the note body or triangle | Long-press to begin a group, then tap items to add or remove them |
+| **Move the group** | Drag a selected note body or measure triangle | Drag a selected note body or measure triangle |
+| **Open a single item** | Plain click the item | Tap empty space to leave group mode, then tap the item |
+| **Clear the selection** | Click empty background or **Clear selection** | Tap empty background or **Clear selection** |
 
-Long-press is the touch equivalent of Shift. It is deliberately non-committal: moving more than
-about 8 px, putting down a second finger, or lifting early all cancel it. Panning, pinch-zoom,
-note dragging and quick tap-to-select behave exactly as before.
+Moving more than about 8 px before the long-press fires starts the usual pan or drag. Lifting early gives a tap.
 
 ::: tip
-A second finger always wins. Put one down mid-marquee and the gesture goes back to the camera as a
-pinch-zoom — the selection you had before the drag is restored.
+Adding a second finger cancels the selection box so you can pinch to zoom. An item already toggled by a completed long-press keeps its selection.
 :::
 
 ### Adding to a selection
 
-- **Shift-click / long-press a note toggles it**: in if it was out, out if it was in.
-- Click one note, then shift-click a second, and you get a group of **two** — the first note is
-  promoted into the group rather than dropped.
-- A **marquee adds** to whatever is already selected. There is no separate "add" modifier: with a
-  group live you always get the union; with nothing selected the marquee replaces. To start a
-  fresh marquee, clear the selection first.
-- **Shift-click on empty background does nothing.** A stray miss while you are refining a
-  selection will not throw it away.
+- Shift-click a note or measure triangle to toggle it. An item you selected with an ordinary click joins the group when you Shift-click a second item.
+- On touch, tapping the last selected item removes it and ends group mode. Tapping empty background also clears the group.
+- A marquee adds to an active group. Clear the selection first to draw a fresh rectangle.
+- Shift-clicking empty background preserves the current selection.
 
 ### What can be selected
 
-Notes only — including silences. The **BaseNote** and **measure bars** are never part of a group:
-a marquee dragged across them does not pick them up, and shift-clicking one does nothing. They are
-still selectable, movable and deletable on their own.
+The marquee picks up any note body or measure triangle it touches, even partly. To add a bar, cross the triangle at the bottom of the workspace. Crossing just its dashed line leaves the bar out. The BaseNote stays outside group selections.
 
-The marquee selects by **intersection**: any note the rectangle touches is caught, even partly. You
-do not have to enclose a note completely. Notes light up with the selection ring as the rectangle
-crosses them, before you release.
+### Selecting by relation
+
+The note widget's **SELECT** section selects a note together with the notes related to it, as a
+group (see [Note Widget → Select](/user-guide/interface/variable-widget#select)):
+
+- **Dependents** — the notes that read this one, then the notes that read those, and so on.
+- **Dependencies** — the notes this one reads, back to the BaseNote (which is never selected).
+
+The letter says which variable of the *reading* note is followed: **t** its start, **f** its
+frequency, **d** its duration, **all** any variable. A melody whose notes each begin where the one
+before ends (`[p].t + [p].d`) is, from its first note, exactly its **Dependents t**. In the canon
+that opens the app, **Dependents t** from the first bass note selects both basses, because the
+second is written from the first, and **Dependents f** from a bass note selects the note that
+answers it a fifth higher.
 
 ## The group widget
 
-The widget appears as soon as two notes are selected and hides itself when the selection drops to
-one or none. It opens bottom-right, is dragged by its header, and is not modal — you keep
-composing, playing and panning with it up, and clicking it never clears the selection.
+The widget opens at the bottom right. Drag its header to move it. You can keep composing, playing and panning while it is open.
+
+With only measures selected, **Change** offers **duration**. With a mixed selection, duration applies to notes and measures, and the other variables, instrument and colour apply to notes. **Copy to Modules** and **Delete all** include every selected item.
 
 | Part | What it does |
 |---|---|
-| Header | The live count: *"5 notes selected"* |
+| Header | The live count, for example *“3 notes and 2 measures selected”* |
 | **×** | Clears the selection (same as **Clear selection**) |
+| **Change** | One variable (amplitude, attack, release, frequency, duration), one expression, and **Set**, **×** or **Inherit** — see [Changing a group](#changing-a-group) |
+| **Instrument** | The list of instruments and two buttons: **Each note its own player** sets the instrument on every selected note; **One player** sets it only on the notes that start the selection's lines and lets the others inherit it. Choosing *inherited* makes every selected note inherit again — see [Instruments](/user-guide/playback/instruments#several-notes-at-once) |
+| **Colour** | Gives every selected note a colour (`#ff8800`, `rgba(0,0,255,0.5)`, a colour name) |
 | **Copy to Modules** | Saves the selection to the library's Custom section. Non-destructive. |
-| **Delete all** | Deletes the selected notes, behind a confirmation |
+| **Delete all** | Deletes all selected notes and measures after confirmation |
 | **Clear selection** | Deselects everything |
 
 Pressing **Escape** clears the selection, but only while focus is already inside the widget (for
 example, right after you tab into it). There is no global Escape-to-deselect and no Delete-key
 shortcut — see [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
 
+## Changing a group
+
+Pick a variable in **Change**, type an expression or a ratio, and choose how it applies:
+
+| Button | What it does |
+|---|---|
+| **Set** | Writes the expression to every selected note, replacing what each had, relations included. `3/4` as amplitude makes every note 3/4; `[9].a` makes every note read note 9's (note 9 itself is skipped: it would read itself). |
+| **×** | Multiplies each note's own value by the ratio, keeping its relations: `3/4`, `0.75`, `2`, or a tempered factor such as `2^(1/12)`, which stays exact. **Enter** in the field does the same. |
+| **Inherit** | Removes the notes' own amplitude, attack or release, so each inherits again (the BaseNote's, else 1 for amplitude, else the instrument's envelope). |
+
+**× changes each note once.** A selected note whose value is read, through the same variable, from
+another selected note follows that note: it is not multiplied itself, or it would change twice.
+Transpose a chord whose third and fifth hang off its root by `3/2` and only the root is
+multiplied; the third and the fifth follow it, and the chord keeps its intervals. In the canon, 57 green answering notes take their pitches a fifth above blue notes. The green A in bar 5 instead reads the following red E. Scaling a mixed selection follows the written pitch links in each case. [Trace the bar-five exception](/tutorials/workflows/canon-and-cadences#follow-the-exception-in-bar-5).
+
+The same holds for notes outside the selection: whatever reads a changed note follows it,
+as it does for any edit.
+
+**× on duration** changes every length by the ratio, and a note that begins where another ends
+(`[p].t + [p].d`) moves with it, so a chained melody spreads out or closes up by itself. A note
+whose start is written from the BaseNote keeps its start.
+
+A note **×** cannot change is skipped and counted in the message that follows: an attack or
+release multiplied where nothing sets one (the instrument's envelope has no value to multiply),
+or a Set that would make a note read itself. Each change is one undo step, and undo keeps the
+group selected, so you can try another value straight away.
+
 ## Moving a group
 
-Drag the body of any selected note and the whole group moves **in time**. Vertical position is not
-part of the drag, exactly as with a single note. Every selected note — and everything anchored to
-one — ghosts to its would-drop position while you drag.
+Drag a selected note body or a triangle in a group of two or more items. Every selected timed item shifts by the same amount. The preview stops when the earliest item reaches the BaseNote. Playback pauses for the move, and Undo restores the whole group in one step.
 
-What happens on drop:
+When a measure is in the group, the move keeps the length of the preceding bar. An item linked to the end of another selected item follows it. For example, `[1].t + [1].d` keeps that expression when item 1 moves with it. If a start expression follows by a different amount, the editor adds the offset needed to keep the selection together. Items outside the selection continue to follow their expressions.
 
-- **Relationships survive, not just positions.** A selected note that is anchored (directly or
-  transitively) to another selected note is not rewritten at all — its anchor's move already
-  carries it. If note 2 is `[1].t + [1].d` and you drag notes 1 and 2 together, note 2's expression
-  stays `[1].t + [1].d`.
-- Only "root" notes of the selection — those with no selected note anywhere in their start-time
-  chain — get a new start time.
-- **Notes outside the selection that depend on a moved note follow it.** Their expressions are
-  normally left alone — this is what keeps a phrase intact when you drag the note it hangs off.
-  The one exception is a dependent that would end up *before* the note it hangs off: it is
-  re-anchored to the nearest ancestor that still starts early enough. This is the same repair a
-  single-note drag runs.
-- The whole batch is clamped so no selected note lands before the BaseNote. Internal spacing is
-  preserved.
-- The move lands as **one undo entry**. Ctrl/Cmd+Z puts everything back.
-- Playback pauses first.
+For a group of ordinary notes, the editor moves the roots of their start-time chains. It applies the same timing and pitch re-anchoring rules as an ordinary note drag.
 
-::: warning Only the note-body drag is group-aware
-Resizing (dragging a note's right-hand tab), the [▲/▼ arrows](/user-guide/notes/transposing),
-and every field in the note widget still act on **one** note. There is no group resize, group
-transpose, group instrument change or group colour change.
+The right-hand resize tab and [▲/▼ arrows](/user-guide/notes/transposing) still edit one note. Use **Change → duration** to resize the group or **Change → frequency** to transpose its notes.
 
-Also note that a **plain click on a note that is in the group drops the group** and selects that
-one note. Use shift-click (or long-press) when you mean to refine the set.
-:::
+### Try a mixed group in the opening canon
+
+Shift-click the first two blue bass notes and the first measure triangle. On touch, hold the first blue note, lift and tap the other two items. Check for **2 notes and 1 measure**. Under **Change**, choose **duration**, enter `2` and press **×**. The bar grows from 2.4 to 4.8 seconds and the two short bass notes from 0.15 to 0.30 seconds. Their following notes still read the ends of their predecessors. Undo to compare.
+
+![The group widget shows two notes and one measure, with duration selected and 2 entered](/img/mixed-group-duration.png)
+
+*Press × to double each selected length.*
+
+To reuse the group, press **Copy to Modules** and find **Selection (2 notes and 1 measure)** in **Custom**. Drag the tile onto the orange BaseNote. The workspace gains two notes and a measure. Undo removes that import while leaving the tile available.
 
 ## Deleting a group
 
 Click **Delete all**. A confirmation appears, then:
 
-- Every selected note is removed.
+- Every selected note and measure is removed.
 - **Notes outside the group that depended on them are liberated, not deleted.** The deleted notes'
   expressions are inlined into whatever still referenced them, so those notes keep their exact
-  positions, lengths and pitches. A direct dependent with no instrument of its own also inherits
-  the deleted note's instrument.
+  positions, lengths and pitches. A direct dependent with no instrument of its own has the
+  instrument it was playing written onto it, and so starts a player of its own.
 - The whole delete is **one undo entry**, and the selection is cleared.
-
-::: warning
-The confirmation dialog calls the action *"irreversible"*. It is captured in the undo history —
-Ctrl/Cmd+Z restores the deleted notes.
-:::
 
 If you want the opposite behaviour — delete a note *and* everything that depends on it — select
 that note on its own and use **Delete Dependencies** in the note widget. See
@@ -143,40 +153,30 @@ that note on its own and use **Delete Dependencies** in the note widget. See
 
 ## Copy to Modules
 
-**Copy to Modules** exports the current selection as a self-contained module and drops it into the
+**Copy to Modules** saves the current selection as a module in the
 module library's **Custom** section.
 
-- The new icon is named **Selection (N notes)**. If that name is taken it becomes
-  *Selection (N notes) 2*, then *3*, and so on.
+- The new icon includes the counts, for example **Selection (2 notes and 1 measure)**. Duplicate names get a numeric suffix.
 - A green toast confirms it: *Copied to Custom modules as "…"*.
 - If the Custom section is collapsed, it expands so you can see the copy land.
 - The copy is saved in your browser's local storage, so it **survives a reload**. It behaves
-  exactly like a `.json` module you uploaded: drop it onto a note, or onto the BaseNote, to
-  import it. (A drop on empty background is refused — the import needs a target to hang off.)
+  exactly like a `.json` module you uploaded: drop it onto a sounding note, measure triangle or the BaseNote to import it. (A drop on empty background is refused — the import needs a target to hang off.)
 - The action is **non-destructive** — your selection stays live and your composition is untouched.
 - It is **not** an undo step. It changes the library, not the module. To get rid of a copy, remove
   its icon from the library.
 
 ### What the exported module contains
 
-The copy is **rooted at its earliest selected note**, which lands exactly on the new module's
-BaseNote. Everything else keeps its offset from that note, so dropping the module somewhere else
-reproduces the layout verbatim.
+The copy is **rooted at its earliest selected timed item**, which starts at the new module’s time origin. Other timed items retain their offsets from that start. Pitches keep their ratios to the source BaseNote.
 
-The tree survives the trip:
+Measures keep their bar handles, lengths, offsets and links inside the selection. A mixed phrase dropped on a measure takes its timing from that bar and its pitch from the BaseNote. **At End** places the phrase after the target bar or note.
 
-- An expression is copied **as written** when every note it names travels with it. `[1].t + [1].d`
-  stays `[1].t + [1].d`, with the ids renumbered `1..N` in time order.
-- An expression that reaches **outside** the selection would dangle, so it is rebuilt against the
-  new base from the note's current value: `base.t + beat(base) * 4`, `beat(base) * (1/2)`,
-  `(3/2) * base.f`.
-- A note whose start-time chain leaves the selection is always re-anchored to the new base, even if
-  its expression names no note at all. Otherwise it would stay pinned to its original absolute time
-  instead of following the module to wherever you drop it.
-- The new module's BaseNote is a **copy of the current one** — same frequency, tempo and meter — so
-  `base.f`, `beat(base)` and `tempo(base)` keep meaning what they meant. Pitches survive as
-  **ratios**, not frozen numbers, which is what lets the copy transpose correctly when you drop it
-  on a different note.
+The copy preserves the following relationships:
+
+- When both notes travel, the copy renumbers their link. A note that starts at the end of its neighbour still reads that neighbour’s start and duration. The copy adjusts expressions that read an absolute start time to account for the phrase’s new time origin.
+- When a pitch or duration reaches outside the selection, the copy writes its evaluated value relative to the new BaseNote where it can do so exactly. For example, a fifth can become `base.f * (3/2)`. If that conversion would round the value, the copy keeps the value itself.
+- A start anchored outside the group becomes an offset from the phrase’s beginning. When you drop the phrase, **Start** or **End** places that beginning on the chosen target.
+- The copied BaseNote supplies the source pitch, time unit and interpretation. Its start is zero. [See how the pitch anchor travels](#when-a-copy-will-be-opened-on-its-own).
 - Per-note colour and instrument come along when they are set.
 
 A five-note phrase chained end to end comes out with these start times (the exported file also
@@ -194,14 +194,25 @@ carries a `baseNote` and each note's `duration` and `frequency`):
 }
 ```
 
-Drop that copy back on the note it came from and it lands on top of itself. See
+Choose **Start** and drop this example on its original root to align their starts. See
 [The Module Library](/user-guide/modules/module-library) for what you can do with it afterwards.
+
+### When a copy will be opened on its own
+
+To open a Custom tile as a separate score, choose **Save UI** in the library footer. In the downloaded `ui-state.json`, find the named tile under the Custom category. Copy its `moduleData` object into a new JSON file. Open that file with **+ → Load Module ▾ → Load Module from file…**. For ordinary reuse in another score, drag the tile onto its target.
+
+Opening the copied module on its own keeps the source pitches. Suppose the BaseNote reads `[20].f` at 330 Hz, and you copy two notes at `base.f` and `base.f * 2` without note 20. The copy writes 330 Hz on its BaseNote. Its notes reopen at **330 and 660 Hz**. Change the copied BaseNote to 350 Hz and the pair follows to **350 and 700 Hz**.
+
+A pitch link between selected notes stays editable. If note 22 reads `[ 21 ].f * 2`, copying both notes updates the ID, including when there is whitespace inside the brackets. Change the first copied note and the second still follows an octave above. The same renumbering applies to BaseNote fields whose inputs travel intact. If a BaseNote field depends on an omitted note or a start time that is being rebased, the copy stores its evaluated value, preserving symbolic tuning and explicit approximation.
+
+If you already have a tile from an earlier build that reopens at the wrong pitch, copy the phrase again from the original score. Dropping a tile onto another note takes its pitch anchor from the destination. [Placing a module](/user-guide/interface/module-bar)
 
 ## What clears a selection
 
 **Clears it:** a plain click or tap on empty background (which also moves the playhead), a plain
-click on any note, the widget's **×** or **Clear selection**, locking the workspace, undo or redo,
-and loading a module.
+mouse click on an item, the widget's **×** or **Clear selection**, locking the workspace, and loading
+a module. Undo and redo keep a group: the same notes are selected again in the restored module
+(a single note's selection is dropped, as before).
 
 **Does not clear it:** clicking inside the group widget, the note widget, the
 [Settings panel](/user-guide/interface/settings), the gear button, or the library toolbar — and any

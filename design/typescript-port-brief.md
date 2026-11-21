@@ -1,0 +1,42 @@
+# Prompt for the full TypeScript port
+
+Port RMT Compose v2 and its first-party JavaScript tooling to strict TypeScript. Preserve the released instrument, its sound, data and workflows. Deliver a reviewable branch with evidence that a composer can open an existing piece, make the same edits and hear and save the same result.
+
+## Starting point
+
+Start from the merged JavaScript release on `main` (RMT Compose 2.0.0). The prepared branch is `codex/v2-typescript-port` in `C:\GitHub Projects\rmt-compose-typescript-port`. Before the first edit, fetch `origin`, record the worktree’s starting HEAD as the comparison SHA, and verify that it is on the history of `origin/main`. Record the package version, lockfiles, Node version and browser versions alongside that SHA.
+
+To prepare the same layout on a fresh checkout where the branch and worktree do not yet exist, run this from the main repository:
+
+```powershell
+Set-Location 'C:\GitHub Projects\rmt-compose-poc'
+git fetch origin
+git worktree add --no-track -b codex/v2-typescript-port '..\rmt-compose-typescript-port' origin/main
+```
+
+Use a detached worktree at the recorded SHA for the JavaScript comparison. Start baseline and candidate servers only when needed, on separate free loopback ports with disposable browser profiles. Record their process IDs and stop them when the checks finish.
+
+## Scope and checkpoints
+
+1. Inventory every first-party JavaScript entry point, including `src/`, workers or worklets, inline executable scripts, Vite and documentation configuration, Node tests, performance probes, generators, sample tooling and browser harnesses. Locate strings, templates, HTML and Playwright callbacks that import application source by URL. Include executable JavaScript embedded in owned tools in the audit. Record where non-TypeScript file formats or third-party files need to remain in their native format, including score JSON, GLSL, CSS, static audio, HTML markup and Python. Give each owned executable file a destination or an explicit, justified boundary.
+2. Run the JavaScript release first. Save reference outputs in scratch storage. Exercise the musical model and UI cases below on both builds. Identify pre-existing behaviours against this exact baseline. Run the group-copy regressions on both builds and confirm the copied octave reopens at 330/660 Hz and follows an anchor edit to 350/700 Hz. Keep independent feature changes and bug fixes available for separate review.
+3. Establish strict type checking for browser and Node entry points with their appropriate libraries. Add a reproducible `npm run typecheck`. Make supported Node versions, Vite dev, production bundles, the separate docs project and existing npm commands work from clean installs. Preserve existing documented command invocations or provide a working compatibility entry point and document any necessary migration. Check the minimum supported Node version as well as the development version. Node versions supported by v2 differ in how they execute TypeScript directly.
+4. Port in small, reviewable subsystem commits. Start with contracts that can be tested in isolation, then migrate their callers. Type the musical values (exact rational, symbolic power and approximate), IDs, mutable and evaluated note fields, missing or inherited values, bytecode, dependency edges and score interchange. Preserve numeric representation, fallbacks and operation order. Validate unknown input at file, storage and event boundaries. Preserve valid legacy inputs and their conversion.
+5. Follow those contracts into evaluation, notes/modules, editing, events, library/drop, history and autosave. Then cover WebGL2, typed arrays, picking, camera and gestures, Web Audio scheduling, instruments, MIDI and the remaining UI. Check dynamic imports, browser globals, injected hooks, generated classes or proxies, persisted JSON shapes, object identity, undefined fields and the timing of writes. The port is complete when all first-party application logic, scripts and tests in scope are type-checked. Use specific types and narrowing. Justify any narrowly scoped assertion or interop shim. Search for file-wide suppressions, unchecked JavaScript, blanket declarations and unbounded `any` before signing off.
+6. Port the tooling and update documentation where paths, commands or implementation explanations change. Keep the JavaScript comparison checkout intact. Confirm isolated deployment roots, application/library asset URLs, preview, built docs, screenshot generation and dynamically imported harness URLs. Tests that silently skip or import the baseline server can otherwise make a broken port appear green.
+
+## Regression evidence
+
+| Area | Baseline/candidate comparison |
+|---|---|
+| Scores and arithmetic | Load the shipped canon, all library modules and legacy fixtures. Compare canonical save text or a justified semantic diff, per-property evaluated values and exactness, IDs, dependencies and cycle decisions. Include the forward bar-5 A/E reference, `2^(1/12)`, explicit approximation, rests, measure bars and reference/key-change notes. |
+| Editor and persistence | Replay the first composition in a fresh desktop profile and touch emulation. Test mixed selection, linked move and duration edits, library copy/drop at Start and End, delete/undo/redo, saved preferences, import, autosave migration and reload. Compare history checkpoint hashes. |
+| Playback and MIDI | Use the same score, tempo, instrument and browser. Exercise pause, resume, seek, loops with repeat, note-off tails, player inheritance, pure/tempered playback and sample loading. Audition live tempo, commit it, undo it and reload. Check that the written time relationships stay exact and that seeking and repeating preserve the expected pace and pitch. Compare scheduled events and captured output with the existing audio oracles. Compare exported MIDI events, pitch bends, program changes, channels and warnings. |
+| Rendering | Compare selected/hovered notes, measure triangles, group picks, dependency highlights, detail cutoff and active drags. Run the existing visual, picking, convergence and edit-comparison harnesses against both servers using equivalent cameras and fixtures. Inspect any differences at the same pixel size. |
+| Scale | Use matching hardware and browser versions. Compare the existing edit/render/storage/audio probes, including the 500,000-entry history fixture. Report timing distributions, memory, audible-output metrics and known device jitter. Record the size and hash of any dense playback fixture used and distinguish unavailable historical fixtures from reproduced results. |
+
+Run `npm test`, `npm run typecheck`, `npm run build`, `npm run docs:build` and the canon-parts consistency check. Build from `docs/` independently and run the rendered-docs check on a local preview. Update and exercise the source-citation checker, browser harnesses, documented generators and their entry points after renaming files. Preserve byte-for-byte generated artifacts wherever the baseline is deterministic. Keep expensive generated fixtures, captures and build output out of release assets.
+
+## Handoff
+
+Report baseline and candidate SHAs, branch, coverage of the first-party inventory, how to type-check and run each project, before/after behavioural and performance evidence, and every unresolved discrepancy. Explain changes to interfaces used outside the migrated files. Keep the port independently reviewable and leave merging, versioning and publication for the maintainer’s approval.

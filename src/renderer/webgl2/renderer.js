@@ -1,5 +1,14 @@
+import { InstanceRanges } from './instance-ranges.js';
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
+import { noteLabel, LINE_LABEL } from './note-label.js';
+import { parseCssColor } from '../../utils/css-color.js';
+import { amplitudeToGain } from '../../player/amplitude.js';
+import { isMeasureNote } from '../../note.js';
+import { envelopeShares } from '../../instruments/instrument-manager.js';
+import { getDisplayTransposition } from '../../player/display-transpose.js';
+import * as X from '../../value/exact.js';
+import { getInstrumentManager } from '../../store/app-state.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
@@ -308,23 +317,7 @@ export class RendererAdapter {
     this._relRdepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
     this._relDepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
 
-    // PERFORMANCE: Cache dependency highlight data per selected note to avoid recomputation
-    // Invalidated when module structure changes or selection changes
-    this._depHighlightCache = {
-      noteId: null,                // cached selectedNoteId
-      posEpoch: null,              // cached posEpoch for invalidation
-      deps: null,                  // raw dependency IDs
-      rdeps: null,                 // raw dependent IDs
-      depIdx: null,                // index array for deps
-      rdepIdx: null,               // index array for rdeps
-      depMeasureIds: null,         // measure IDs in deps
-      rdepMeasureIds: null,        // measure IDs in rdeps
-      depsHasBase: false,
-      rdepsHasBase: false,
-      // Property-colored cache
-      rdepsByProperty: null,       // { frequency: [], startTime: [], duration: [] }
-      depsByProperty: null         // { frequency: [], startTime: [], duration: [] }
-    };
+
   }
 
   // Update configuration at runtime. Merges partial into current and normalizes; triggers redraw.
@@ -402,7 +395,79 @@ export class RendererAdapter {
   // drifting off its own frequency.
   _cfgCenterAnchor() { try { return this._config?.note?.centerAnchorWU ?? 10; } catch { return 10; } }
   _cfgNoteH() { try { return this._config?.note?.heightWU ?? 22; } catch { return 22; } }
+  // Note height as a picture of loudness: the configured height times the square
+  // root of the gain playback uses (amplitude clamped to 0..4), kept within
+  // 0.6x..2x so that the quietest note still holds its labels. Amplitude 1 gives
+  // exactly 1: a module that sets no amplitude draws as it always has.
+  _amplitudeHeightScale(amplitude) {
+    const gain = amplitudeToGain(amplitude);
+    if (gain === 1) return 1;
+    const s = Math.sqrt(gain);
+    return s < 0.6 ? 0.6 : (s > 2 ? 2 : s);
+  }
   _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
+  // The envelope of one note as shares of its duration, from the same function the
+  // audio engine uses (envelopeShares in instrument-manager.js): the note's own
+  // attack and release, the instrument's envelope (in seconds, some following the
+  // pitch) for what it leaves unset, the anti-click floors. Returns [attack, decay,
+  // level, release, tail, levelAtEnd] or null. The release sounds AFTER the note's
+  // end, so inside the note there is none to draw (release share 0): the band holds
+  // the level the body reaches until the end. `tail` is that release as a share of
+  // the duration (drawn past the end when tails are on), starting from `levelAtEnd`.
+  _envelopeSharesFor(module, note, durSec, attack, release, freq, memo = null) {
+    try {
+      const shape = { attack: attack ? toNumber(attack, null) : null, release: release ? toNumber(release, null) : null };
+      let env = {};
+      const im = getInstrumentManager();
+      if (im && typeof im.getInstrument === 'function') {
+        const inst = im.getInstrument(String(module.findInstrument(note, memo) || '').toLowerCase());
+        if (inst && typeof inst.getEnvelopeSettings === 'function') env = inst.getEnvelopeSettings(durSec, Number(freq)) || {};
+      }
+      const s = envelopeShares(env, durSec, shape);
+      return [s.attack, s.decay, s.sustain, 0, s.release, s.sustain];
+    } catch { return null; }
+  }
+
+  // The tails sync() collected, into their instance buffers. Nothing to do (and
+  // nothing uploaded) when tails are off: tailCount 0 skips the pass entirely.
+  _syncTails() {
+    const items = this._tailItems || [];
+    const M = items.length;
+    this.tailCount = M;
+    if (!M || !this.gl || !this.tailPosSizeBuffer) return;
+    const pos = new Float32Array(M * 4), col = new Float32Array(M * 4), lvl = new Float32Array(M * 2);
+    for (let i = 0; i < M; i++) {
+      const t = items[i], o = i * 4;
+      pos[o] = t.x; pos[o + 1] = t.y; pos[o + 2] = Math.max(0.0001, t.w); pos[o + 3] = Math.max(0.0001, t.h);
+      col[o] = t.color[0]; col[o + 1] = t.color[1]; col[o + 2] = t.color[2]; col[o + 3] = t.color[3];
+      lvl[i * 2] = t.level; lvl[i * 2 + 1] = t.under || 0;
+    }
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailColorBuffer); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer); gl.bufferData(gl.ARRAY_BUFFER, lvl, gl.DYNAMIC_DRAW);
+  }
+
+  _drawTails(vpW, vpH) {
+    const gl = this.gl, prog = this.tailProgram;
+    if (!this._uniforms) this._uniforms = {};
+    const U = this._uniforms.tail || (this._uniforms.tail = {
+      u_matrix: gl.getUniformLocation(prog, 'u_matrix'), u_viewport: gl.getUniformLocation(prog, 'u_viewport'),
+      u_offset: gl.getUniformLocation(prog, 'u_offset'), u_scale: gl.getUniformLocation(prog, 'u_scale'),
+    });
+    gl.useProgram(prog);
+    gl.uniformMatrix3fv(U.u_matrix, false, this.matrix);
+    gl.uniform2f(U.u_viewport, vpW, vpH);
+    gl.uniform2f(U.u_offset, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
+    gl.uniform2f(U.u_scale, this.xScalePxPerWU || 1.0, this.yScalePxPerWU || 1.0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    gl.bindVertexArray(this.tailVAO);
+    gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.tailCount);
+    gl.bindVertexArray(null);
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
+  }
 
   init(containerEl) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
@@ -598,8 +663,68 @@ export class RendererAdapter {
    *  evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId
    * }
    */
-  sync({ evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId = null, tempOverrides = null }) {
+  sync(args) {
+    this._syncInstances(args);
+  }
+
+  // A transposed repeat changes this label and the note inspector. Note positions
+  // and frequency ratios on the canvas are relative to the same written base.
+  syncBaseFrequencyLabel(evaluatedFrequency) {
+    // Keep the last label while an empty score is being initialized.
+    try {
+      const { factor } = getDisplayTransposition();
+      const transposed = factor && X.isRational(factor) && this._baseFreqExact && X.isRational(this._baseFreqExact);
+      const frequency = transposed ? X.mul(this._baseFreqExact, factor)
+        : evaluatedFrequency ?? this._moduleRef?.baseNote?.getVariable?.('frequency');
+      if (frequency == null) return;
+
+      let num, den;
+      if (frequency.n != null && frequency.d != null) {
+        num = (frequency.s < 0 ? '-' : '') + String(frequency.n);
+        den = String(frequency.d);
+      } else if (typeof frequency.toFraction === 'function') {
+        [num, den = '1'] = frequency.toFraction().split('/');
+      } else {
+        const hz = toNumber(frequency, NaN);
+        if (!Number.isFinite(hz)) return;
+        num = String(hz);
+        den = '1';
+      }
+      const elide = value => {
+        const negative = value.startsWith('-');
+        const digits = negative ? value.slice(1) : value;
+        if (digits.length <= 12) return value;
+        return (negative ? '-' : '') + digits.slice(0, 6) + '…' + digits.slice(-4);
+      };
+      this._baseFracNum = elide(num);
+      this._baseFracDen = elide(den);
+      this.needsRedraw = true;
+    } catch { /* Keep the previous label until a frequency is available. */ }
+  }
+
+  _syncInstances(args) {
+    const { evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId = null, tempOverrides = null } = args;
     if (!module) return;
+    const partial = args.incremental && this._simpleInstances && this._moduleRef === module &&
+      this._syncConfig === this._config && this.currentXScaleFactor === (xScaleFactor || 1) &&
+      this.currentYScaleFactor === (yScaleFactor || 1) && !tempOverrides && !this._dragActive &&
+      !this._hasPreviewGeometry && evaluatedNotes === module._evaluationCache &&
+      !module._untrackedProperties && !module.getDependencyGraph().corruptionFlags.size
+      ? module.evaluationChangesSince(this._syncRevision) : null;
+    let dirty = partial && !partial.has(0) ? partial : null;
+    if (dirty && this._restoredDragIds) {
+      for (const id of this._restoredDragIds) dirty.add(id);
+    }
+    this._restoredDragIds = null;
+    if (dirty && selectedNoteId !== this._lastSelectedNoteId) {
+      for (const id of [this._lastSelectedNoteId, selectedNoteId, this._naturalLastId]) {
+        if (id != null && this._noteIdToIndex.has(id)) dirty.add(id);
+      }
+    }
+    if (dirty && [...dirty].some(id => !this._noteIdToIndex.has(id))) dirty = null;
+    this._syncRevision = module._evaluationRevision;
+    this._syncConfig = this._config;
+    this._hasPreviewGeometry = !!tempOverrides;
     this.currentXScaleFactor = xScaleFactor || 1.0;
     this.currentYScaleFactor = yScaleFactor || 1.0;
     // Playhead derives world X at draw-time using currentXScaleFactor
@@ -608,16 +733,15 @@ export class RendererAdapter {
     // that are keyed by note content rather than by note identity. They are bounded by the
     // note count within a module, so this is the only place they need to be released.
     if (this._moduleRef !== module) {
+      for (const entry of this._ringBuffers?.values() || []) this.gl?.deleteBuffer(entry.buffer);
+      this._ringBuffers?.clear();
       this._parsedColorCache = null;
       this._idColorCache = null;
       this._fracStrCache = null;
     }
     this._moduleRef = module;
 
-    // Bump position epoch at START of sync to invalidate dependency highlight cache.
-    // This ensures cached dependency data is recomputed when module data changes
-    // (e.g., when a parent note's octave changes, affecting child note positions).
-    // Previously this was only bumped at the END of sync, causing stale cache hits.
+    // Invalidate position- and selection-dependent data before rebuilding the scene.
     this._posEpoch = (this._posEpoch || 0) + 1;
 
     // CSS px -> world units (Y) for padding to match DOM borders
@@ -629,6 +753,12 @@ export class RendererAdapter {
       if (typeof evaluatedNotes.get === 'function') return evaluatedNotes.get(id);
       return evaluatedNotes[id];
     };
+
+    // The BaseNote's exact frequency (src/value/exact.js), for exact note labels
+    try {
+      const b0 = getEv(0);
+      this._baseFreqExact = (b0 && (b0.exact?.frequency ?? b0.frequency)) ?? module.baseNote.getExactVariable?.('frequency') ?? null;
+    } catch { this._baseFreqExact = null; }
 
     // Resolve base frequency (fast path via evaluated cache)
     try {
@@ -646,78 +776,63 @@ export class RendererAdapter {
       } catch { this._baseFreqCache = 440; }
     }
 
-    // Resolve base fraction strings for GL fraction rendering
-    // Robust behavior on "clean slate": if we cannot derive a new fraction this frame,
-    // keep showing the previously known numerator/denominator instead of clearing it.
-    try {
-      let assigned = false;
-      // Huge components would draw one glyph per digit clipped by the circle mask;
-      // show head…tail instead. Anything at 12 digits or fewer renders verbatim.
-      const elide = (s) => {
-        const neg = s.charCodeAt(0) === 45 /* '-' */;
-        const digits = neg ? s.slice(1) : s;
-        if (digits.length <= 12) return s;
-        return (neg ? '-' : '') + digits.slice(0, 6) + '…' + digits.slice(-4);
-      };
-      const assign = (n, d) => {
-        if (n != null && d != null) {
-          this._baseFracNum = elide(String(n));
-          this._baseFracDen = elide(String(d));
-          assigned = true;
-        }
-      };
-      const coerceFrom = (src) => {
-        if (!src) return;
-        const nT = typeof src.n;
-        const dT = typeof src.d;
-        if ((nT === 'number' || nT === 'bigint') && (dT === 'number' || dT === 'bigint')) {
-          const sign = (src.s != null && src.s < 0) ? '-' : '';
-          assign(sign + String(src.n), String(src.d));
-        } else if (typeof src.toFraction === 'function') {
-          const fs = String(src.toFraction());
-          const parts = fs.split('/');
-          assign(parts[0] || fs, parts[1] || '1');
-        } else {
-          const val = toNumber(src, NaN);
-          if (isFinite(val)) assign(val, 1);
-        }
-      };
-
-      // Prefer evaluated base frequency, fall back to raw baseNote variable
-      const baseEv = getEv(0)?.frequency;
-      coerceFrom(baseEv);
-      if (!assigned) {
-        const bf = module?.baseNote?.getVariable?.('frequency');
-        coerceFrom(bf);
-      }
-
-      // If nothing was assigned and we have no previous cache yet, initialize to 1/1 once.
-      if (!assigned && (!this._baseFracNum || !this._baseFracDen)) {
-        this._baseFracNum = '1';
-        this._baseFracDen = '1';
-      }
-    } catch {
-      // Preserve previous values on error; initialize once if missing.
-      if (!this._baseFracNum || !this._baseFracDen) {
-        this._baseFracNum = '1';
-        this._baseFracDen = '1';
-      }
-    }
+    this.syncBaseFrequencyLabel(getEv(0)?.frequency);
 
     // Build list of visible notes (those with startTime and duration)
     const items = [];
+    let hasComplexBodies = false;
+    // What a note without an amplitude of its own inherits: the BaseNote's.
+    const baseEvForAmp = getEv(0);
+    const baseHeightScale = (baseEvForAmp && baseEvForAmp.amplitude) ? this._amplitudeHeightScale(baseEvForAmp.amplitude) : 1;
+    // And its attack and release, which a note without its own inherits.
+    const baseAttack = baseEvForAmp ? baseEvForAmp.attack : null;
+    const baseRelease = baseEvForAmp ? baseEvForAmp.release : null;
+    // Settings > Appearance > "Envelope inside notes": 'own' (the notes that set an
+    // attack or a release), 'all', 'none'; and "Tails after the note's end".
+    const envMode = this._config?.note?.envelopeMode || 'own';
+    const showTails = this._config?.note?.showTails === true;
+    // The tails to draw past the notes' ends (display only; see _drawTails).
+    const tails = [];
+    // Instruments resolved during this pass, by note id (see Module.findInstrument).
+    const instrumentMemo = new Map();
+    const tailUnder = Math.max(0, this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0);
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
-    let maxNoteEndSec = 0;
-    for (const idStr in module.notes) {
+    let maxNoteEndSec = dirty ? this._maxNoteEndSec : 0;
+    let maxId = dirty ? this._maxNoteEndId : null;
+    let lostMaximum = false;
+    // Notes that only relate: a frequency and no duration (a tonic, a key, a root;
+    // with a start, a key change from there on). Drawn as reference lines by
+    // _renderReferenceLines, never as note bodies, never played.
+    const refLines = [];
+    const sourceIds = dirty || Object.keys(module.notes);
+    for (const idStr of sourceIds) {
       const note = module.notes[idStr];
       if (!note) continue;
+      // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
+      if (Number(note.id) === 0) continue;
+      // A measure bar has a start and a duration but is drawn as a bar line and a
+      // triangle (_syncMeasureBars), never as a rest.
+      if (isMeasureNote(note)) continue;
       try {
         // Use evaluatedNotes cache if available (required for correct display after reorder)
         const ev = getEv(note.id);
         const hasStart = ev ? (ev.startTime != null) : !!note.getVariable('startTime');
         const hasDur = ev ? (ev.duration != null) : !!note.getVariable('duration');
+        if (!hasDur && note.hasExpression && note.hasExpression('frequency') && !note.hasExpression('duration')) {
+          const fr = (ev && ev.frequency != null) ? ev.frequency : note.getVariable('frequency');
+          const fv = fr ? (fr._floatValue !== undefined && fr._irrational ? fr._floatValue : toNumber(fr, NaN)) : NaN;
+          if (isFinite(fv) && fv > 0) {
+            let startSec = null;
+            if (hasStart) {
+              const st = toNumber((ev && ev.startTime != null) ? ev.startTime : note.getVariable('startTime'), NaN);
+              if (isFinite(st)) startSec = st;
+            }
+            refLines.push({ id: Number(note.id), freq: fv, startSec });
+          }
+          continue;
+        }
         if (!hasStart || !hasDur) continue;
 
         // Prefer evaluated cache values to avoid stale data after module reorder
@@ -749,7 +864,8 @@ export class RendererAdapter {
         // notes that actually sound — same predicate _computeModuleEndTime used.
         if (note.hasExpression && note.hasExpression('frequency')) {
           const end = startTime + duration;
-          if (end > maxNoteEndSec) maxNoteEndSec = end;
+          if (dirty && note.id === this._maxNoteEndId && end < this._maxNoteEndSec) lostMaximum = true;
+          if (end > maxNoteEndSec) { maxNoteEndSec = end; maxId = note.id; }
         }
 
         // World coords with optional temp overrides (e.g., dragging/resizing)
@@ -767,25 +883,80 @@ export class RendererAdapter {
         // top-left from the height. At the default height this is identical to the
         // old fixed -1 shift (anchor 10 - 22/2 = -1); at any other height the note
         // stays centred on its line instead of drifting off it.
-        const h = this._cfgNoteH(); // world units
+        // The height also shows the note's amplitude (silences have none).
+        const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
+        const heightScale = isSilence ? 1 : ((ev && ev.amplitude) ? this._amplitudeHeightScale(ev.amplitude) : baseHeightScale);
+        const h = this._cfgNoteH() * heightScale; // world units
         y = y + this._cfgCenterAnchor() - h * 0.5;
 
-        const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
         const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
+        // The envelope a note sounds with, drawn inside it (see rectBorderFS) as the
+        // "Envelope inside notes" setting says: by default when the note or the
+        // BaseNote sets an attack or a release. Otherwise null, and the note draws
+        // exactly as before. Its tail, past its end, when tails are on.
+        let env = null;
+        if (!isSilence) {
+          const atk = (ev && ev.attack) || baseAttack;
+          const rel = (ev && ev.release) || baseRelease;
+          const inside = envMode === 'all' || (envMode === 'own' && !!(atk || rel));
+          if (inside || showTails) {
+            const e = this._envelopeSharesFor(module, note, durSec, atk, rel, freqVal, instrumentMemo);
+            if (e) {
+              if (inside) env = e;
+              // The tail starts under the note, one corner radius in (the radius is in
+              // world units along x: rectBorderFS scales it by the same px-per-unit as
+              // the note), so the note's rounded corners sit over it instead of leaving
+              // a notch between the note and its tail.
+              if (showTails && e[4] > 0) tails.push({ x: x + w, y, w: w * e[4], h, color, level: e[5], under: Math.min(tailUnder, w * 0.5) });
+            }
+          }
+        }
+
         // Carry freqVal so the fraction-label pass below does not have to look the note up in
         // evaluatedNotes a second time and re-unwrap the Fraction.
-        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal });
+        // The exact frequency (Fraction, or an exact Irrational / Approx) for the label
+        const freqExact = ev ? (ev.exact?.frequency ?? ev.frequency ?? null) : null;
+        if (isSilence || env) hasComplexBodies = true;
+        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal, freqExact, env });
       } catch {
         // Ignore malformed notes
       }
     }
+    // Complex scenes use the same full path as load. A changed maximum
+    // that moved earlier also requires finding the next latest note.
+    if (dirty && (items.length !== dirty.size || hasComplexBodies || lostMaximum)) {
+      return this._syncInstances({ ...args, incremental: false });
+    }
+    this._maxNoteEndId = maxId;
     this._maxNoteEndSec = maxNoteEndSec;
+    if (!dirty) {
+      this._refLines = refLines;
+      this._tailItems = tails;
+    }
 
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
-    if (selectedNoteId != null) {
+    if (dirty) {
+      const swapWithLast = id => {
+        const index = this._noteIdToIndex.get(id), last = this.instanceCount - 1;
+        if (index == null || index === last) return;
+        const top = this._instanceNoteIds[last];
+        this._instanceNoteIds[index] = top;
+        this._instanceNoteIds[last] = id;
+        this._noteIdToIndex.set(top, index);
+        this._noteIdToIndex.set(id, last);
+      };
+      if (selectedNoteId !== this._lastSelectedNoteId) {
+        // Undo the previous selection swap, then apply the new one.
+        swapWithLast(this._naturalLastId);
+        swapWithLast(selectedNoteId);
+      }
+    } else {
+      this._naturalLastId = items.at(-1)?.id;
+    }
+    if (!dirty && selectedNoteId != null) {
       const selIdx = items.findIndex(it => it.id === selectedNoteId);
       if (selIdx >= 0 && selIdx < items.length - 1) {
         // Swap selected item with the last item (O(1) instead of O(n log n) sort)
@@ -797,7 +968,7 @@ export class RendererAdapter {
     }
 
     // Allocate/resize typed arrays only when count changes
-    const N = items.length;
+    const N = dirty ? this.instanceCount : items.length;
     if (!this.posSize || this.posSize.length !== N * 4) {
       this.posSize = new Float32Array(N * 4);
       this.colors  = new Float32Array(N * 4);
@@ -807,10 +978,14 @@ export class RendererAdapter {
       this._dragFlags = new Float32Array(N);
       this._corruptionType = new Float32Array(N);
     }
+    if (!this._envShape || this._envShape.length !== N * 4) {
+      this._envShape = new Float32Array(N * 4);
+    }
 
     // Fill arrays with reordered data
-    for (let i = 0; i < N; i++) {
-      const it = items[i];
+    for (let k = 0; k < items.length; k++) {
+      const it = items[k];
+      const i = dirty ? this._noteIdToIndex.get(it.id) : k;
       const o = i * 4;
       this.posSize[o + 0] = it.x;
       this.posSize[o + 1] = it.y;
@@ -822,6 +997,13 @@ export class RendererAdapter {
       this.colors[o + 1] = it.color[1];
       this.colors[o + 2] = it.color[2];
       this.colors[o + 3] = it.color[3];
+
+      // Envelope shape (attack, decay, sustain, release); all zeros = none drawn
+      const env = it.env;
+      this._envShape[o + 0] = env ? env[0] : 0;
+      this._envShape[o + 1] = env ? env[1] : 0;
+      this._envShape[o + 2] = env ? env[2] : 0;
+      this._envShape[o + 3] = env ? env[3] : 0;
 
       // Per-instance flags: 1 for silence, 0 otherwise
       if (this._instanceFlags) {
@@ -835,7 +1017,7 @@ export class RendererAdapter {
     }
  
     // Rebuild id->index map for fast per-instance updates
-    try {
+    if (!dirty) try {
       this._noteIdToIndex = new Map();
       for (let i = 0; i < N; i++) {
         const idVal = (items[i] && items[i].id != null) ? Number(items[i].id) : null;
@@ -845,7 +1027,7 @@ export class RendererAdapter {
 
     // Compute corruption type for hatching display (0=none, 1=transitive, 2=direct)
     // Always reset to 0 first to avoid stale data
-    if (this._corruptionType) {
+    if (!dirty && this._corruptionType) {
       this._corruptionType.fill(0.0);
     }
     try {
@@ -921,117 +1103,57 @@ export class RendererAdapter {
     } catch {}
 
     // Compute related highlight index sets from module when a note is selected
-    // PERFORMANCE: Use cached dependency data when selection hasn't changed
     try {
-      if (selectedNoteId != null && module && typeof module.getDirectDependencies === 'function' && this._noteIdToIndex) {
+      // Base selection draws its own ring. Its score-wide relation rings and lines are hidden.
+      if (selectedNoteId != null && selectedNoteId !== 0 && module && typeof module.getDirectDependencies === 'function' && this._noteIdToIndex) {
         const selIdNum = Number(selectedNoteId);
-        const cache = this._depHighlightCache;
+        const deps = module.getDirectDependencies(selIdNum) || [];
+        const depsByProperty = module.getDirectDependenciesByProperty?.(selIdNum) ||
+          { frequency: [], startTime: [], duration: [] };
+        const trees = this._selectionTrees(module, selIdNum);
+        const fallback = trees ? null : module.getDependentsByProperty?.(selIdNum);
 
-        // Check if we can reuse cached dependency data (same selection AND same posEpoch)
-        // posEpoch changes when module data is modified (e.g., after drop), so we must recompute
-        let deps, rdeps, rdepsByProperty, depsByProperty;
-        if (cache.noteId === selIdNum && cache.deps && cache.rdeps && cache.posEpoch === this._posEpoch) {
-          // Reuse cached raw dependency arrays
-          deps = cache.deps;
-          rdeps = cache.rdeps;
-          rdepsByProperty = cache.rdepsByProperty;
-          depsByProperty = cache.depsByProperty;
-          // Also reuse measure IDs and base flags (these don't change with reordering)
-          this._relDepsMeasureIds = cache.depMeasureIds;
-          this._relRdepsMeasureIds = cache.rdepMeasureIds;
-          this._relDepsHasBase = cache.depsHasBase;
-          this._relRdepsHasBase = cache.rdepsHasBase;
-        } else {
-          // Selection changed - compute and cache dependency data
-          const depsRaw = module.getDirectDependencies(selIdNum);
-          const rdepsRaw = (typeof module.getDependentNotes === 'function') ? module.getDependentNotes(selIdNum) : [];
-          deps = Array.isArray(depsRaw) ? depsRaw : [];
-          rdeps = Array.isArray(rdepsRaw) ? rdepsRaw : [];
+        const toIdx = id => this._noteIdToIndex.get(Number(id));
+        const selIdx = toIdx(selIdNum);
+        const measureIds = module.getTimingSummary?.()?.measureIds;
+        const isBarId = id => measureIds ? measureIds.has(id) : isMeasureNote(module.getNoteById(id));
+        this._relDepsMeasureIds = deps.filter(isBarId);
+        this._relDepsHasBase = deps.includes(0);
+        this._relDepsIdx = deps.map(toIdx).filter(i => i != null && i !== selIdx);
 
-          // Get property-colored dependents (notes that would move if property changes)
-          rdepsByProperty = (typeof module.getDependentsByProperty === 'function')
-            ? module.getDependentsByProperty(selIdNum)
-            : { frequency: [], startTime: [], duration: [] };
+        // Uncolored dependencies can include properties other than pitch, start
+        // and duration. Only bars, a dependent BaseNote, and optional drag ghosts
+        // consume that separate traversal. Keep it exact whenever they need it.
+        const needAll = !trees || !measureIds || measureIds.size ||
+          module.getDirectDependencies(0).some(id => id !== 0) || this.drawDragGhosts;
+        const rdeps = needAll ? module.getDependentNotes?.(selIdNum) || [] : null;
+        this._relRdepsMeasureIds = rdeps?.filter(isBarId) || [];
+        this._relRdepsHasBase = rdeps?.includes(0) || false;
+        this._relRdepsIdx = rdeps?.map(toIdx).filter(i => i != null && i !== selIdx) ?? null;
 
-          // Get property-colored dependencies (what this note's expressions reference)
-          depsByProperty = (typeof module.getDirectDependenciesByProperty === 'function')
-            ? module.getDirectDependenciesByProperty(selIdNum)
-            : { frequency: [], startTime: [], duration: [] };
-
-          // Compute measure IDs and base flags
-          const depMeasureIds = [];
-          const rdepMeasureIds = [];
-          let depsHasBase = false;
-          let rdepsHasBase = false;
-
-          const isMeasureNote = (id) => {
-            try {
-              const n = module.getNoteById(Number(id));
-              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-            } catch { return false; }
-          };
-
-          for (let k = 0; k < deps.length; k++) {
-            const id = Number(deps[k]);
-            if (id === 0) { depsHasBase = true; continue; }
-            if (isMeasureNote(id)) depMeasureIds.push(id);
-          }
-          for (let k = 0; k < rdeps.length; k++) {
-            const id = Number(rdeps[k]);
-            if (id === 0) { rdepsHasBase = true; continue; }
-            if (isMeasureNote(id)) rdepMeasureIds.push(id);
-          }
-
-          // Cache the computed data (including posEpoch for invalidation)
-          cache.noteId = selIdNum;
-          cache.posEpoch = this._posEpoch;
-          cache.deps = deps;
-          cache.rdeps = rdeps;
-          cache.rdepsByProperty = rdepsByProperty;
-          cache.depsByProperty = depsByProperty;
-          cache.depMeasureIds = Array.from(new Set(depMeasureIds));
-          cache.rdepMeasureIds = Array.from(new Set(rdepMeasureIds));
-          cache.depsHasBase = depsHasBase;
-          cache.rdepsHasBase = rdepsHasBase;
-
-          this._relDepsMeasureIds = cache.depMeasureIds;
-          this._relRdepsMeasureIds = cache.rdepMeasureIds;
-          this._relDepsHasBase = depsHasBase;
-          this._relRdepsHasBase = rdepsHasBase;
-        }
-
-        // Always recompute indices (they depend on current buffer ordering)
-        const toIdx = (id) => {
-          const idx = this._noteIdToIndex.get(Number(id));
-          return (idx != null && idx >= 0 && idx < N) ? idx : null;
-        };
-        const selIdx = this._noteIdToIndex.get(selIdNum);
-        const depSet = new Set();
-        for (const d of deps) {
-          const ii = toIdx(d);
-          if (ii != null && ii !== selIdx) depSet.add(ii);
-        }
-        const rdepSet = new Set();
-        for (const d of rdeps) {
-          const ii = toIdx(d);
-          if (ii != null && ii !== selIdx) rdepSet.add(ii);
-        }
-        this._relDepsIdx = Array.from(depSet);
-        this._relRdepsIdx = Array.from(rdepSet);
-
-        // Compute property-colored indices for rdeps (dependents)
-        // These follow the paradigm: which notes would MOVE if this property changes
-        const rdepsIdxByProp = { frequency: [], startTime: [], duration: [] };
+        // The edges already visited for the colored lines identify the same
+        // affected notes as the three property traversals. A child reached by
+        // two changed properties needs only one ring of each origin color.
+        const indices = { frequency: [], startTime: [], duration: [] };
+        const hasBase = { frequency: false, startTime: false, duration: false };
+        let seen;
+        let bit = 1;
         for (const prop of ['frequency', 'startTime', 'duration']) {
-          const propIds = rdepsByProperty[prop] || [];
-          const propIdxSet = new Set();
-          for (const id of propIds) {
-            const ii = toIdx(id);
-            if (ii != null && ii !== selIdx) propIdxSet.add(ii);
+          const list = trees ? trees.edgesByProperty[prop] : fallback?.[prop] || [];
+          if (list.length && !seen) seen = new Uint8Array(N);
+          for (const entry of list) {
+            const id = trees ? entry.childId : entry;
+            if (id === 0) hasBase[prop] = true;
+            const idx = toIdx(id);
+            if (idx != null && idx !== selIdx && !(seen[idx] & bit)) {
+              indices[prop].push(idx);
+              seen[idx] |= bit;
+            }
           }
-          rdepsIdxByProp[prop] = Array.from(propIdxSet);
+          bit <<= 1;
         }
-        this._relRdepsIdxByProperty = rdepsIdxByProp;
+        this._relRdepsIdxByProperty = indices;
+        this._relRdepsHasBaseByProperty = hasBase;
 
         // Compute property-colored indices for deps (dependencies)
         const depsIdxByProp = { frequency: [], startTime: [], duration: [] };
@@ -1047,11 +1169,6 @@ export class RendererAdapter {
         this._relDepsIdxByProperty = depsIdxByProp;
 
         // Compute base flags per property
-        this._relRdepsHasBaseByProperty = {
-          frequency: (rdepsByProperty.frequency || []).includes(0),
-          startTime: (rdepsByProperty.startTime || []).includes(0),
-          duration: (rdepsByProperty.duration || []).includes(0)
-        };
         this._relDepsHasBaseByProperty = {
           frequency: (depsByProperty.frequency || []).includes(0),
           startTime: (depsByProperty.startTime || []).includes(0),
@@ -1094,40 +1211,71 @@ export class RendererAdapter {
         this._relDepsChainByProperty = { frequency: [], startTime: [], duration: [] };
         this._relDepsChainIdxByProperty = { frequency: [], startTime: [], duration: [] };
         // Clear cache when no selection
-        this._depHighlightCache.noteId = null;
+        this._linkTreeCache = null;
       }
     } catch { this._relDepsIdx = null; this._relRdepsIdx = null; }
  
     // Compute per-note fraction label strings (relative to base) for overlay rendering.
-    // These arrays must stay freshly allocated: _lastNoteFracNumStrs keeps the previous one by
-    // reference to detect content changes, so reusing the array in place would compare it
-    // against itself and text would never be marked dirty.
-    this._noteFracNumStrs = new Array(N);
-    this._noteFracDenStrs = new Array(N);
+    // A full pass compares fresh arrays. A partial pass writes affected slots in place
+    // and invalidates the text cache explicitly.
+    if (!dirty) this._noteFracNumStrs = new Array(N);
+    if (!dirty) this._noteFracDenStrs = new Array(N);
+    // 1 where the label is drawn with ≈: an approximate value, or an exact one too long to show
+    if (!dirty) this._noteLabelApprox = new Uint8Array(N);
     const baseValNum = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+    const baseExact = this._baseFreqExact;
     const fracCache = this._fracStrCache || (this._fracStrCache = new Map());
-    for (let i = 0; i < N; i++) {
+    // Exact labels, memoised per value object: a record keeps its Fraction / exact value
+    // until the note is re-evaluated, so a steady sync costs one WeakMap lookup per note.
+    const exactCache = (this._labelCacheBase === baseExact && this._exactLabelCache) || new WeakMap();
+    this._exactLabelCache = exactCache;
+    this._labelCacheBase = baseExact;
+    const approxFrac = (ratio) => {
+      let pair = fracCache.get(ratio);
+      if (pair === undefined) {
+        const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
+        pair = [String(fr.n), String(fr.d)];
+        if (fracCache.size > 65536) fracCache.clear();
+        fracCache.set(ratio, pair);
+      }
+      return pair;
+    };
+    for (let k = 0; k < items.length; k++) {
+      const i = dirty ? this._noteIdToIndex.get(items[k].id) : k;
+      if (dirty) this._noteLabelApprox[i] = 0;
       try {
-        // items[i] is instance i (the selected-note swap above keeps them aligned), and its
+        // items[k] is instance i (the selected-note swap above keeps them aligned), and its
         // freqVal was already resolved in the note loop — including the raw-variable fallback
         // that avoids a transient "silence" label at initial load. Re-reading evaluatedNotes
         // here was a second Map lookup plus a Fraction unwrap for every note.
-        const fnum = items[i] ? items[i].freqVal : null;
+        const fnum = items[k].freqVal;
+        const fex = items[k].freqExact;
         if (fnum != null && isFinite(fnum) && baseValNum && isFinite(baseValNum) && baseValNum !== 0) {
-          // The label is a pure function of the frequency ratio, and a piece of music reuses a
-          // small set of ratios across many notes. Memoising skips both the continued-fraction
-          // approximation and two string allocations per note per sync (200k strings at 100k
-          // notes). The ratio already folds in the base frequency, so a base change re-keys.
-          const ratio = fnum / baseValNum;
-          let pair = fracCache.get(ratio);
-          if (pair === undefined) {
-            const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
-            pair = [String(fr.n), String(fr.d)];
-            if (fracCache.size > 65536) fracCache.clear();
-            fracCache.set(ratio, pair);
+          // The label states the note's exact relation to the BaseNote (note-label.js): a
+          // pure ratio as its fraction, a tempered note as its power, ≈ only for an
+          // approximation or an exact value too long for the label.
+          let label = (fex && typeof fex === 'object' && baseExact) ? exactCache.get(fex) : undefined;
+          if (label === undefined && fex && typeof fex === 'object' && baseExact) {
+            label = noteLabel(fex, baseExact) || null;
+            exactCache.set(fex, label);
           }
-          this._noteFracNumStrs[i] = pair[0];
-          this._noteFracDenStrs[i] = pair[1];
+          if (label) {
+            if (label.approx) {
+              const pair = approxFrac(fnum / baseValNum);
+              this._noteFracNumStrs[i] = pair[0];
+              this._noteFracDenStrs[i] = pair[1];
+              this._noteLabelApprox[i] = 1;
+            } else {
+              this._noteFracNumStrs[i] = label.num;
+              this._noteFracDenStrs[i] = label.den;
+            }
+          } else {
+            // No exact value at hand: the float ratio, as before
+            const pair = approxFrac(fnum / baseValNum);
+            this._noteFracNumStrs[i] = pair[0];
+            this._noteFracDenStrs[i] = pair[1];
+            if (this._corruptionType && this._corruptionType[i] > 0) this._noteLabelApprox[i] = 1;
+          }
         } else {
           // Only mark as 'silence' when we truly lack/invalid frequency even after fallback
           this._noteFracNumStrs[i] = 'silence';
@@ -1140,9 +1288,21 @@ export class RendererAdapter {
     }
 
     this.instanceCount = N;
+    if (dirty) {
+      const slots = [...dirty].map(id => this._noteIdToIndex.get(id)).sort((a, b) => a - b);
+      this._rangeIndex?.update(this.posSize, slots);
+      this._uploadChangedInstances(slots);
+    } else {
+      this._rangeIndex = N >= 512 ? new InstanceRanges(this.posSize) : null;
+      this._simpleInstances = typeof module.evaluationChangesSince === 'function' && evaluatedNotes instanceof Map &&
+        !tempOverrides && !showTails && !hasComplexBodies &&
+        !module.getDependencyGraph().corruptionFlags.size;
+    }
+    this._lastSyncWasPartial = !!dirty;
+    this._syncTails();
 
     // Upload to GPU
-    if (this.gl && this.rectInstancePosSizeBuffer && this.rectInstanceColorBuffer) {
+    if (!dirty && this.gl && this.rectInstancePosSizeBuffer && this.rectInstanceColorBuffer) {
       const gl = this.gl;
  
       gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
@@ -1169,6 +1329,11 @@ export class RendererAdapter {
       if (this.rectInstanceCorruptionBuffer && this._corruptionType) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
+      }
+      // Envelope shapes follow the same order, so they are uploaded with it
+      if (this.rectInstanceEnvBuffer && this._envShape) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceEnvBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._envShape, gl.DYNAMIC_DRAW);
       }
 
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
@@ -1244,12 +1409,13 @@ export class RendererAdapter {
     // Determine if text content or selection changed (avoid forcing text rebuild on every sync)
     const prevNum = this._lastNoteFracNumStrs;
     const prevDen = this._lastNoteFracDenStrs;
-    let contentChanged = false;
-    if (!prevNum || !prevDen || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
+    const prevApx = this._lastNoteLabelApprox;
+    let contentChanged = !!dirty;
+    if (contentChanged || !prevNum || !prevDen || !prevApx || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
       contentChanged = true;
     } else {
       for (let i = 0; i < this._noteFracNumStrs.length; i++) {
-        if (this._noteFracNumStrs[i] !== prevNum[i] || this._noteFracDenStrs[i] !== prevDen[i]) { contentChanged = true; break; }
+        if (this._noteFracNumStrs[i] !== prevNum[i] || this._noteFracDenStrs[i] !== prevDen[i] || this._noteLabelApprox[i] !== prevApx[i]) { contentChanged = true; break; }
       }
     }
     const selChanged = (this._lastSelectedNoteId !== (selectedNoteId == null ? null : selectedNoteId));
@@ -1258,6 +1424,7 @@ export class RendererAdapter {
     // Persist current snapshot for next-diff
     this._lastNoteFracNumStrs = this._noteFracNumStrs;
     this._lastNoteFracDenStrs = this._noteFracDenStrs;
+    this._lastNoteLabelApprox = this._noteLabelApprox;
 
     // Rebuild glyph runs only when necessary; viewport changes are handled by _lastTextViewEpoch gating in _render()
     // PERFORMANCE: Selection change doesn't affect text content (fractions, "silence"), only ring/highlights
@@ -1276,15 +1443,22 @@ export class RendererAdapter {
     const t = (typeof timeSec === 'number') ? timeSec : 0;
     // Keep legacy world-x in sync for any consumers reading it prior to render
     this.playheadXWorld = t * this._cfgSX() * (this.currentXScaleFactor || 1.0);
-    // player.js calls this from its rAF loop on EVERY frame, playing or not. Marking the
-    // scene dirty unconditionally kept needsRedraw permanently true, which silently
-    // defeated the redraw gate: a completely idle canvas still paid a full per-note
-    // redraw 60x a second. Only a playhead that actually moved changes any pixels.
-    // (_render derives the playhead X from playheadTimeSec at draw time, and the scale
-    // setters mark their own redraws, so nothing else depends on this being sticky.)
     if (t === this.playheadTimeSec) return;
     this.playheadTimeSec = t;
-    this.needsRedraw = true;
+    // The line is pixel-snapped. At score overview scales, several seconds can
+    // elapse before it reaches another pixel. Camera changes dirty their own frames.
+    const x = this.matrix[0] * this.playheadXWorld + this.matrix[6] - this.canvasOffset.x;
+    if (this.trackingMode || this.needsRedraw) return;
+    const last = this._lastPlayheadLocalX;
+    if (last == null) { this.needsRedraw = true; return; }
+    const left = Math.round(x) - 0.5;
+    const previousLeft = Math.round(last) - 0.5;
+    if (left === previousLeft) return;
+    const width = this._cachedCanvasRect?.width ?? Infinity;
+    const thickness = this._config?.playhead?.thicknessPx ?? 1;
+    // Redraw once to erase a departing line, then leave the stationary score alone.
+    if ((left < width && left + thickness > 0) ||
+        (previousLeft < width && previousLeft + thickness > 0)) this.needsRedraw = true;
   }
 
   // Public API: set hovered note id for hover ring rendering
@@ -1426,9 +1600,7 @@ export class RendererAdapter {
         if (same) return;
       }
 
-      this._multiSelIds = next;
-      this._resolveMultiSelIndices();
-      this.needsRedraw = true;
+      this.syncMultiSelection(next);
     } catch {
       this._multiSelIds = null;
       this._multiSelNoteIdx = null;
@@ -1436,8 +1608,23 @@ export class RendererAdapter {
     }
   }
 
+  // player.js owns this Set and calls here after each mutation. Keep one copy
+  // of the IDs when committing a large group. The public setter above takes
+  // a snapshot of an arbitrary caller's iterable.
+  syncMultiSelection(ids) {
+    this._multiSelIds = ids?.size ? ids : null;
+    this._resolveMultiSelIndices();
+    this.needsRedraw = true;
+  }
+
   // Public API: current multi-selection as an array of ids (empty when none).
   getMultiSelection() {
+    const rect = this._marqueeRect;
+    if (rect) {
+      const hits = this.pickRectIds(rect.x0, rect.y0, rect.x1, rect.y1);
+      if (rect.seedId != null && !hits.includes(rect.seedId)) hits.push(rect.seedId);
+      return rect.additive && this._multiSelIds ? [...new Set([...this._multiSelIds, ...hits])] : hits;
+    }
     return this._multiSelIds ? Array.from(this._multiSelIds) : [];
   }
 
@@ -1454,8 +1641,9 @@ export class RendererAdapter {
       const x1 = Number(rect.x1), y1 = Number(rect.y1);
       if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) return;
       const cur = this._marqueeRect;
-      if (cur && cur.x0 === x0 && cur.y0 === y0 && cur.x1 === x1 && cur.y1 === y1) return;
-      this._marqueeRect = { x0, y0, x1, y1 };
+      const additive = !!rect.additive;
+      if (cur && cur.x0 === x0 && cur.y0 === y0 && cur.x1 === x1 && cur.y1 === y1 && cur.additive === additive) return;
+      this._marqueeRect = { x0, y0, x1, y1, additive, seedId: rect.seedId ?? null };
       this.needsRedraw = true;
     } catch {
       this._marqueeRect = null;
@@ -1467,42 +1655,65 @@ export class RendererAdapter {
    * Rectangle pick in CLIENT CSS px. Returns every NOTE whose bounding box INTERSECTS
    * the rect (containment is not required).
    *
-   * Notes only. The BaseNote (id 0) and measure bars are deliberately never returned:
-   * a measure's startTime is its link in the measure chain, so a group move can neither
-   * re-anchor it (that reflows the grid under the whole score) nor leave it behind (the
-   * group visibly tears on drop). Half-supporting them was worse than not supporting them.
+   * Measures participate through their visible triangle handles.
    */
   pickRect(clientX0, clientY0, clientX1, clientY1) {
+    return this.pickRectIds(clientX0, clientY0, clientX1, clientY1).map(id => ({ type: this._measureTriIdToIndex?.has(id) ? 'measure' : 'note', id }));
+  }
+
+  _worldRect(x0, y0, x1, y1) {
+    const a = this.screenToWorld(Math.min(x0, x1), Math.min(y0, y1));
+    const b = this.screenToWorld(Math.max(x0, x1), Math.max(y0, y1));
+    return [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)];
+  }
+
+  _measureRectHits(x0, y0, x1, y1) {
     const hits = [];
-    try {
-      const cx0 = Math.min(clientX0, clientX1);
-      const cx1 = Math.max(clientX0, clientX1);
-      const cy0 = Math.min(clientY0, clientY1);
-      const cy1 = Math.max(clientY0, clientY1);
-
-      // Notes live in world units: map the rect corners through the same inverse
-      // affine used for point picking. Y is not guaranteed to increase downward in
-      // world space, so re-normalize after the transform.
-      if (this.posSize && this._instanceNoteIds) {
-        const a = this.screenToWorld(cx0, cy0);
-        const b = this.screenToWorld(cx1, cy1);
-        const wx0 = Math.min(a.x, b.x), wx1 = Math.max(a.x, b.x);
-        const wy0 = Math.min(a.y, b.y), wy1 = Math.max(a.y, b.y);
-
-        const N = Math.min(this._instanceNoteIds.length, this.instanceCount | 0);
-        const ps = this.posSize;
-        for (let i = 0; i < N; i++) {
-          const id = this._instanceNoteIds[i] | 0;
-          if (id === 0) continue;
-          const o = i * 4;
-          const x = ps[o + 0];
-          const y = ps[o + 1];
-          if (x > wx1 || (x + ps[o + 2]) < wx0) continue;
-          if (y > wy1 || (y + ps[o + 3]) < wy0) continue;
-          hits.push({ type: 'note', id });
-        }
+    const css = this._measureTriCss;
+    if (!css) return hits;
+    const ox = this.canvasOffset?.x ?? 0, oy = this.canvasOffset?.y ?? 0;
+    const left = Math.min(x0, x1) - ox, right = Math.max(x0, x1) - ox;
+    const top = Math.min(y0, y1) - oy, bottom = Math.max(y0, y1) - oy;
+    if (!this._measureTriIds?.length || bottom < css[1] || top > css[1] + css[3]) return hits;
+    let first = 0;
+    const count = this._measureTriIds.length;
+    const ordered = !this._dragActive && !this._measurePreview && this.matrix?.[0] > 0;
+    if (ordered) {
+      let end = count;
+      while (first < end) {
+        const mid = Math.floor((first + end) / 2), o = mid * 4;
+        if (css[o] + css[o + 2] < left) first = mid + 1;
+        else end = mid;
       }
-    } catch {}
+    }
+    for (let i = first; i < count; i++) {
+      const o = i * 4, x = css[o], y = css[o + 1], w = css[o + 2], h = css[o + 3];
+      if (ordered && x > right) break;
+      if (h <= 0 || bottom < y || top > y + h) continue;
+      // The widest overlapping slice is at the lower edge of the intersection.
+      const center = x + w / 2;
+      const radius = w / 2 * Math.min(1, (bottom - y) / h);
+      if (right >= center - radius && left <= center + radius) hits.push(this._measureTriIds[i]);
+    }
+    return hits;
+  }
+
+  pickRectIds(x0, y0, x1, y1) {
+    const hits = this._measureRectHits(x0, y0, x1, y1);
+    if (!this.posSize || !this._instanceNoteIds) return hits;
+    const [left, minY, right, maxY] = this._worldRect(x0, y0, x1, y1);
+    const ranges = [];
+    if (this._rangeIndex) this._rangeIndex.collect(left, right, ranges, minY, maxY);
+    else ranges.push(0, this.instanceCount);
+    const ps = this.posSize;
+    for (let j = 0; j < ranges.length; j += 2) {
+      for (let i = ranges[j]; i < ranges[j + 1]; i++) {
+        const o = i * 4, x = ps[o], y = ps[o + 1];
+        if (x > right || x + ps[o + 2] < left || y > maxY || y + ps[o + 3] < minY) continue;
+        const id = this._instanceNoteIds[i];
+        if (id) hits.push(id);
+      }
+    }
     return hits;
   }
 
@@ -1518,17 +1729,19 @@ export class RendererAdapter {
     const sel = this._multiSelIds;
     if (!sel || sel.size === 0) {
       this._multiSelNoteIdx = null;
+      this._multiSelMeasureIds = null;
       this._multiSelNoteMapRef = this._noteIdToIndex || null;
       return;
     }
     const noteMap = this._noteIdToIndex || null;
     const noteIdx = [];
+    const measureIds = [];
     for (const id of sel) {
-      if (noteMap && noteMap.has(id)) {
-        const i = noteMap.get(id);
-        if (i != null && i >= 0 && i < this.instanceCount) noteIdx.push(i);
-      }
+      const i = noteMap?.get(id);
+      if (i != null && i >= 0 && i < this.instanceCount) noteIdx.push(i);
+      else measureIds.push(id);
     }
+    this._multiSelMeasureIds = measureIds.length ? measureIds : null;
     this._multiSelNoteIdx = noteIdx.length ? noteIdx : null;
     this._multiSelNoteMapRef = noteMap;
   }
@@ -1639,6 +1852,7 @@ export class RendererAdapter {
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance (negative brings closer)
+      uniform int u_instanceBase;
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
 
       out vec4 v_color;
@@ -1656,7 +1870,7 @@ export class RendererAdapter {
         // Convert to NDC
         float ndcX = (local.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (local.y / u_viewport.y) * 2.0; // invert Y
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_color = a_color;
         v_css = local;
@@ -1755,12 +1969,14 @@ export class RendererAdapter {
       layout(location=5) in float a_flags;     // 1.0 = silence, 0.0 = normal
       layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
       layout(location=7) in float a_corruptionType; // 0=none, 1=transitive, 2=direct
+      layout(location=8) in vec4 a_env;        // envelope (attack, decay, sustain, release); zeros = none
 
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
+      uniform int u_instanceBase;
       uniform vec2 u_scale;                    // (px per world unit X, px per world unit Y)
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
 
@@ -1770,6 +1986,7 @@ export class RendererAdapter {
       out vec2 v_noteSize;                     // note size in CSS px
       out float v_isSilence;                   // flag propagated to FS
       out float v_corruptionType;              // corruption type for hatching
+      out vec4 v_env;                          // envelope shape for the FS
 
       void main() {
         // Apply drag offset only to flagged instances
@@ -1783,7 +2000,7 @@ export class RendererAdapter {
 
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_color = a_color;
         v_css = localCss;
@@ -1792,6 +2009,7 @@ export class RendererAdapter {
         v_noteSize = sizeAdjusted * u_scale;
         v_isSilence = a_flags;
         v_corruptionType = a_corruptionType;
+        v_env = a_env;
       }
     `;
     const rectBorderFS = `#version 300 es
@@ -1802,6 +2020,7 @@ export class RendererAdapter {
       in vec2 v_noteSize;             // CSS px
       in float v_isSilence;           // 1.0 for silence -> suppress solid border
       in float v_corruptionType;      // 0=none, 1=transitive, 2=direct
+      in vec4 v_env;                  // (attack, decay, sustain, release) shares; zeros = none
 
       uniform float u_cornerRadius;   // CSS px (scaled with zoom)
       uniform float u_borderWidth;    // CSS px (scaled with zoom)
@@ -1811,6 +2030,11 @@ export class RendererAdapter {
       uniform vec4  u_hatchColor;     // RGBA for hatching lines
 
       out vec4 outColor;
+
+      // Loudness: a gain in dB, and the band height that shows it (full at 0 dB,
+      // nothing at -48 dB). An exponential fall is a straight line on this scale.
+      float toDb(float g) { return 8.685889638 * log(max(g, 1e-4)); }
+      float dbHeight(float g) { return clamp(1.0 + toDb(g) / 48.0, 0.0, 1.0); }
 
       // Signed distance to rounded rectangle with half-size b and corner radius r.
       // Negative inside, positive outside, zero at the boundary.
@@ -1880,11 +2104,36 @@ export class RendererAdapter {
         // Composite: apply hatch color over note color in interior
         vec3 hatchedRgb = mix(v_color.rgb, u_hatchColor.rgb, hatchMask * u_hatchColor.a);
 
+        // Envelope: the gain the note sounds with, as a band about its centre line
+        // (attack ramp, decay to the sustain level, hold, release ramp). Inside the
+        // band the note has its full colour; outside it is dimmed. A note without
+        // an attack or release of its own (or the BaseNote's) has v_env = 0 and
+        // draws as before.
+        float interiorAlpha = v_color.a;
+        if (v_env.x > 0.0) {   // attack is never 0 when drawn (floor); a disabled attribute reads (0,0,0,1)
+          float x = clamp(v_uv.x, 0.0, 1.0);
+          float atk = max(v_env.x, 1e-5);
+          float dec = v_env.y;
+          float sus = v_env.z;
+          float rel = max(v_env.w, 1e-5);
+          // The curve that sounds, on the dB scale: a linear rise in gain, an
+          // exponential decay (straight in dB) to the level held to the note's end.
+          float level;
+          if (x < atk) level = dbHeight(x / atk);
+          else if (x < atk + dec) level = clamp(1.0 + mix(0.0, toDb(sus), (x - atk) / max(dec, 1e-5)) / 48.0, 0.0, 1.0);
+          else if (x < 1.0 - rel) level = dbHeight(sus);
+          else level = dbHeight(sus) * clamp((1.0 - x) / rel, 0.0, 1.0);
+          float halfBand = level * he.y;
+          float dy = abs(p.y) - halfBand;           // CSS px outside the band (negative inside)
+          float band = 1.0 - smoothstep(-0.75, 0.75, dy);
+          interiorAlpha = v_color.a * mix(0.3, 1.0, band);
+        }
+
         // Composite color and alpha:
         // - Border draws with u_borderColor on the ring (if not silence)
         // - Interior draws with hatched note color
         vec3 rgb = u_borderColor.rgb * ring + hatchedRgb * interior;
-        float a   = u_borderColor.a   * ring + v_color.a   * interior;
+        float a   = u_borderColor.a   * ring + interiorAlpha * interior;
 
         // Discard fragments with no coverage to avoid unnecessary blending
         if (a <= 0.0) discard;
@@ -1892,6 +2141,73 @@ export class RendererAdapter {
       }
     `;
     this.rectBorderProgram = this._createProgram(rectBorderVS, rectBorderFS);
+
+    // Tails (Phase I): the release that rings after a note's end, drawn past it as
+    // the note's envelope band continuing to silence. Display only: nothing picks,
+    // snaps or drags by it.
+    const tailVS = `#version 300 es
+      precision highp float;
+      layout(location=0) in vec2 a_unit;
+      layout(location=1) in vec4 a_posSize;    // (x, y, w, h) world: from the note's end, as tall as the note
+      layout(location=2) in vec4 a_color;
+      layout(location=3) in vec2 a_level;      // (gain at the note-off as a share of the peak, world units it starts under the note)
+      uniform mat3 u_matrix;
+      uniform vec2 u_viewport;
+      uniform vec2 u_offset;
+      uniform vec2 u_scale;
+      out vec4 v_color;
+      out vec2 v_uv;
+      out float v_heightCss;
+      out float v_level;
+      out float v_t;                           // 0 at the note's end, 1 at silence
+      out float v_tailPx;                      // the tail's length, CSS px
+      out float v_underPx;                     // how far it starts under the note, CSS px
+      void main() {
+        float under = a_level.y;
+        vec2 worldPos = vec2(a_posSize.x - under, a_posSize.y) + a_unit * vec2(a_posSize.z + under, a_posSize.w);
+        v_t = (a_unit.x * (a_posSize.z + under) - under) / a_posSize.z;
+        vec2 l = (u_matrix * vec3(worldPos, 1.0)).xy - u_offset;
+        gl_Position = vec4((l.x / u_viewport.x) * 2.0 - 1.0, 1.0 - (l.y / u_viewport.y) * 2.0, 0.0, 1.0);
+        v_color = a_color;
+        v_uv = a_unit;
+        v_heightCss = a_posSize.w * u_scale.y;
+        v_level = a_level.x;
+        v_tailPx = a_posSize.z * u_scale.x;
+        v_underPx = under * u_scale.x;
+      }
+    `;
+    const tailFS = `#version 300 es
+      precision highp float;
+      in vec4 v_color;
+      in vec2 v_uv;
+      in float v_heightCss;
+      in float v_level;
+      in float v_t;
+      in float v_tailPx;
+      in float v_underPx;
+      out vec4 outColor;
+      void main() {
+        // Under the note only its rounded corners' cut-outs are drawn: the note's
+        // body (translucent) must not be tinted by the tail beneath it.
+        float dxPx = v_t * v_tailPx;
+        if (dxPx < 0.0) {
+          float r = v_underPx, halfH = 0.5 * v_heightCss;
+          vec2 q = vec2(dxPx + r, abs(v_uv.y - 0.5) * v_heightCss - (halfH - r));
+          if (!(q.y > 0.0 && length(q) > r - 0.5)) discard;
+        }
+        // The release falls exponentially from the note-off level to -80 dB: a
+        // straight line in dB, drawn on the body's scale (full at 0 dB, nothing at -48).
+        float startDb = 8.685889638 * log(max(v_level, 1e-4));
+        float db = mix(startDb, -80.0, clamp(v_t, 0.0, 1.0));   // level held under the note's corner
+        float level = clamp(1.0 + db / 48.0, 0.0, 1.0);
+        float dy = abs(v_uv.y - 0.5) * v_heightCss - level * 0.5 * v_heightCss;
+        float band = 1.0 - smoothstep(-0.75, 0.75, dy);
+        float a = v_color.a * 0.45 * band;
+        if (a <= 0.004) discard;
+        outColor = vec4(v_color.rgb, a);
+      }
+    `;
+    this.tailProgram = this._createProgram(tailVS, tailFS);
     // Cache uniform locations for rectBorderProgram to avoid per-frame getUniformLocation calls
     try {
       if (!this._uniforms) this._uniforms = {};
@@ -2000,12 +2316,22 @@ export class RendererAdapter {
       uniform float u_layerZ;  // depth
       uniform vec2 u_scale;    // (px per world X, px per world Y)
       uniform vec2 u_dragOffset; // (dx, dw) in world units; 0,0 when not moving (or for anchor)
+      uniform vec4 u_marqueeBounds; // min.xy, max.xy in world units
+      uniform int u_marqueeFilter; // 1 draws hits, -1 draws only the existing group outside it
 
       out vec2 v_uv;
       out vec2 v_noteSize; // CSS px
 
       void main() {
         // Apply drag/resize offset (dx,dw) when provided
+        if (u_marqueeFilter != 0) {
+          bool intersects = all(lessThanEqual(a_posSize.xy, u_marqueeBounds.zw))
+                         && all(greaterThanEqual(a_posSize.xy + a_posSize.zw, u_marqueeBounds.xy));
+          if (intersects != (u_marqueeFilter > 0)) {
+            gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
+            return;
+          }
+        }
         vec2 posAdjusted  = a_posSize.xy + vec2(u_dragOffset.x, 0.0);
         vec2 sizeAdjusted = a_posSize.zw + vec2(u_dragOffset.y, 0.0);
 
@@ -2067,6 +2393,8 @@ export class RendererAdapter {
         this._uniforms.selectionRing.u_borderWidth  = gl.getUniformLocation(p, 'u_borderWidth');
         this._uniforms.selectionRing.u_color        = gl.getUniformLocation(p, 'u_color');
         this._uniforms.selectionRing.u_dragOffset   = gl.getUniformLocation(p, 'u_dragOffset');
+        this._uniforms.selectionRing.u_marqueeFilter = gl.getUniformLocation(p, 'u_marqueeFilter');
+        this._uniforms.selectionRing.u_marqueeBounds = gl.getUniformLocation(p, 'u_marqueeBounds');
       }
     } catch {}
 
@@ -2163,6 +2491,7 @@ export class RendererAdapter {
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
+      uniform int u_instanceBase;
       uniform vec2 u_scale;                    // (px per world X, px per world Y)
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging/resizing
 
@@ -2182,7 +2511,7 @@ export class RendererAdapter {
 
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_uv = a_unit;
         v_noteSize = sizeAdjusted * u_scale;
@@ -2265,6 +2594,7 @@ export class RendererAdapter {
       uniform vec2  u_offset;                  // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
+      uniform int u_instanceBase;
       uniform vec2  u_scale;                   // (px per world X, px per world Y)
       uniform vec2  u_dragOffset;              // (dx, dw) in world units for dragging
 
@@ -2284,7 +2614,7 @@ export class RendererAdapter {
 
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
 
         v_uv = a_unit;
@@ -2524,6 +2854,42 @@ export class RendererAdapter {
     gl.vertexAttribPointer(7, 1, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(7, 1); // per-instance
 
+    // Envelope shape (loc 8) - (attack, decay, sustain level, release) as shares of
+    // the note; all zeros = no envelope drawn
+    this.rectInstanceEnvBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceEnvBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(8);
+    gl.vertexAttribPointer(8, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(8, 1); // per-instance
+
+    // ========== Tails (Phase I) ==========
+    // Their own VAO and instance buffers (filled by _syncTails), on the rects' unit quad.
+    this.tailVAO = gl.createVertexArray();
+    gl.bindVertexArray(this.tailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectUnitBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.tailPosSizeBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    this.tailColorBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailColorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(2, 1);
+    this.tailLevelBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(3, 1);
+    gl.bindVertexArray(this.rectVAO); // back to the rects for the setup below
+
     // Dedicated buffer for single-instance draws (avoid corrupting shared per-instance buffer)
     this._singlePosSizeBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
@@ -2569,10 +2935,10 @@ export class RendererAdapter {
    * instanced call. Hoisted out of _render() so ring passes that are not tied to the
    * single selected note (dependency rings, multi-selection) can share it.
    */
-  _drawRingIdxList(indices, rgba, borderPx) {
+  _drawRingIdxList(indices, rgba, borderPx, marqueeBounds = null, cacheKey = null) {
     const gl = this.gl;
     if (!gl || !this.selectionRingProgram) return;
-    if (!indices || !indices.length) return;
+    if (!indices?.length && !marqueeBounds) return;
     if (!this.posSize || !this.instanceCount) return;
 
     const rectCss = this._cachedCanvasRect || (this.canvas ? this.canvas.getBoundingClientRect() : null);
@@ -2604,70 +2970,77 @@ export class RendererAdapter {
     if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
 
     gl.bindVertexArray(this.rectVAO);
+    if (marqueeBounds) {
+      gl.uniform4fv(Us.u_marqueeBounds, marqueeBounds);
+      gl.uniform1i(Us.u_marqueeFilter, indices ? -1 : 1);
+      if (!indices) {
+        // The GPU already has every visible note's bounds. A moving marquee
+        // needs just four coordinates until the user commits the selection.
+        gl.uniform2f(Us.u_dragOffset, 0, 0);
+        this._drawVisibleInstances(this.selectionRingProgram, null, this._visibleRanges);
+        gl.uniform1i(Us.u_marqueeFilter, 0);
+        gl.bindVertexArray(null);
+        this._setAttr4Enabled(true);
+        gl.depthMask(true);
+        return;
+      }
+    }
     if (!this._singlePosSizeBuffer) {
       this._singlePosSizeBuffer = gl.createBuffer();
     }
 
     const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
-    if (!this._dragActive) {
-      // PERFORMANCE (Phase 8): when no drag is active, u_dragOffset is (0,0) for
-      // EVERY note, so the whole bucket shares identical uniforms and can be drawn
-      // in ONE instanced call instead of a per-note loop (up to ~N draws + N
-      // bufferData uploads per bucket -> 1 draw + 1 upload). This is the worst-case
-      // path when a highly-connected note is selected and the scene keeps redrawing
-      // (hover, playhead). The selectionRing shader reads ONLY a_posSize (attrib 1)
-      // per instance, so gathering the bucket into one buffer is pixel-identical;
-      // WebGL rasterizes instances in order, so same-color overlap blends the same.
-      if (uDrag) gl.uniform2f(uDrag, 0.0, 0.0);
-      const need = indices.length * 4;
-      if (!this._depRingBatch || this._depRingBatch.length < need) {
-        this._depRingBatch = new Float32Array(Math.max(need, 64));
-      }
-      const batch = this._depRingBatch;
-      let w = 0;
-      for (let i = 0; i < indices.length; i++) {
-        const idx = indices[i];
-        if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-        const base = idx * 4;
-        const o = w * 4;
-        batch[o + 0] = this.posSize[base + 0];
-        batch[o + 1] = this.posSize[base + 1];
-        batch[o + 2] = this.posSize[base + 2];
-        batch[o + 3] = this.posSize[base + 3];
-        w++;
-      }
-      if (w > 0) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, batch.subarray(0, w * 4), gl.DYNAMIC_DRAW);
-        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-        gl.vertexAttribDivisor(1, 1);
-        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, w);
-      }
-    } else {
-      // Drag active: per-instance drag offset varies (moving notes vs anchor vs
-      // static), so keep the exact per-instance path for correctness.
-      for (let i = 0; i < indices.length; i++) {
-        const idx = indices[i];
-        if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-        const base = idx * 4;
-        const arr = new Float32Array([
-          this.posSize[base + 0],
-          this.posSize[base + 1],
-          this.posSize[base + 2],
-          this.posSize[base + 3]
-        ]);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-        gl.vertexAttribDivisor(1, 1);
-        if (uDrag) {
-          const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
-          const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
-          gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
-        }
-        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+    // The ring shader reads only position/size and a uniform drag offset.
+    // Draw consecutive rings with the same offset together, in painter order.
+    // A committed selection has fixed world geometry. Keep each large ring
+    // batch on the GPU across camera frames; drag previews retain their offsets.
+    let saved = null;
+    if (cacheKey && !this._dragActive && indices.length >= 512) {
+      const buffers = this._ringBuffers || (this._ringBuffers = new Map());
+      saved = buffers.get(cacheKey);
+      if (!saved) {
+        saved = { buffer: gl.createBuffer() };
+        buffers.set(cacheKey, saved);
       }
     }
+    const upload = !saved || saved.indices !== indices || saved.epoch !== this._posEpoch;
+    const need = indices.length * 4;
+    if (!this._depRingBatch || this._depRingBatch.length < need) {
+      this._depRingBatch = new Float32Array(Math.max(need, 64));
+    }
+    const batch = this._depRingBatch;
+    let count = upload ? 0 : saved.count, moving = false;
+    const flush = () => {
+      if (uDrag) gl.uniform2f(uDrag, moving ? this._dragOffsetX || 0 : 0, moving ? this._dragOffsetW || 0 : 0);
+      if (upload) {
+        gl.bufferData(gl.ARRAY_BUFFER, batch, gl.DYNAMIC_DRAW, 0, count * 4);
+        if (saved) {
+          saved.indices = indices;
+          saved.epoch = this._posEpoch;
+          saved.count = count;
+        }
+      }
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
+      count = 0;
+    };
+    gl.bindBuffer(gl.ARRAY_BUFFER, saved?.buffer || this._singlePosSizeBuffer);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    if (upload) for (const idx of indices) {
+      if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
+      const shifted = !!(this._dragActive && this._dragFlags?.[idx] === 1 &&
+        !(this._dragAnchorIndex != null && idx === (this._dragAnchorIndex | 0)));
+      if (count && shifted !== moving) flush();
+      moving = shifted;
+      const source = idx * 4, target = count * 4;
+      batch[target] = this.posSize[source];
+      batch[target + 1] = this.posSize[source + 1];
+      batch[target + 2] = this.posSize[source + 2];
+      batch[target + 3] = this.posSize[source + 3];
+      count++;
+    }
+    if (count) flush();
+    if (marqueeBounds) gl.uniform1i(Us.u_marqueeFilter, 0);
 
     // Restore instanced buffer for attribute 1
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
@@ -2678,6 +3051,153 @@ export class RendererAdapter {
     this._setAttr4Enabled(true);
     gl.depthMask(true);
   }
+
+  _selectionTrees(module, anchor) {
+    if (!module?.getChildrenTreeByAllProperties) return null;
+    const cached = this._linkTreeCache;
+    if (cached?.module === module && cached.anchor === anchor && cached.pos === this._posEpoch) return cached.trees;
+    const trees = module.getChildrenTreeByAllProperties(anchor);
+    this._linkTreeCache = { module, anchor, pos: this._posEpoch, trees };
+    return trees;
+  }
+
+  _ensureGhostIndices() {
+    if (!this._relRdepsIdx && this._lastSelectedNoteId != null && this._lastSelectedNoteId !== 0) {
+      const ids = this._moduleRef?.getDependentNotes?.(this._lastSelectedNoteId) || [];
+      this._relRdepsIdx = ids.map(id => this._noteIdToIndex.get(id)).filter(i => i != null);
+    }
+    return this._relRdepsIdx;
+  }
+
+  // Compute ranges once for all body and overlay passes of this frame.
+  _updateVisibleInstances(vpW, vpH) {
+    const ranges = this._nextVisibleRanges || [];
+    const old = this._visibleRanges || [];
+    const m = this.matrix;
+    this._detailRanges = ranges;
+    const aligned = m[1] === 0 && m[3] === 0 && m[0] > 0 && m[4] > 0;
+    const x0 = (this.canvasOffset.x - m[6]) / m[0], x1 = x0 + vpW / m[0];
+    const y0 = (this.canvasOffset.y - m[7]) / m[4], y1 = y0 + vpH / m[4];
+    const dragPad = Math.abs(this._dragOffsetX || 0) + Math.abs(this._dragOffsetW || 0);
+    if (!this._rangeIndex || !aligned) {
+      ranges.length = 0;
+      ranges.push(0, this.instanceCount);
+    } else {
+      const pad = 4 / m[0] + Math.max(Math.abs(x0), Math.abs(x1)) * 1e-6 + 2 * dragPad;
+      this._rangeIndex.collect(x0 - pad, x1 + pad, ranges);
+    }
+    const cutoff = this._config.note.detailCutoff;
+    if (aligned && (this.instanceCount > cutoff || this.instanceCount >= 512)) {
+      this._detailRanges = this._viewportDetailRanges(ranges, x0, x1, y0, y1, dragPad, cutoff);
+    }
+    this._nextVisibleRanges = old;
+    this._visibleRanges = ranges;
+    const previous = this._lastDetailRanges;
+    const next = this._detailRanges;
+    if (!previous || next.length !== previous.length || next.some((v, i) => v !== previous[i])) {
+      this._lastDetailRanges = next.slice();
+      this._lastTabEpoch = this._lastArrowEpoch = -1;
+      this._textDirty = true;
+    }
+  }
+
+  // Count intersecting bodies in the actual viewport. Index leaf blocks may
+  // contain offscreen notes, so their slot counts alone cannot decide the cutoff.
+  _viewportDetailRanges(bodyRanges, x0, x1, y0, y1, dragPad, cutoff) {
+    let cache = this._overviewDetails;
+    const sx = this.matrix[0], sy = this.matrix[4];
+    if (!cache || cache.pos !== this._posEpoch || cache.drag !== this._dragEpoch ||
+        cache.x0 !== x0 || cache.x1 !== x1 || cache.y0 !== y0 || cache.y1 !== y1 ||
+        cache.sx !== sx || cache.sy !== sy || cache.cutoff !== cutoff) {
+      const blocks = this._detailBlocks || (this._detailBlocks = []);
+      if (this._rangeIndex) this._rangeIndex.collect(x0 - dragPad, x1 + dragPad, blocks, y0, y1);
+      const candidates = this._rangeIndex ? blocks : bodyRanges;
+      const ranges = [];
+      let visible = 0;
+      const p = this.posSize;
+      for (let j = 0; j < candidates.length && visible <= cutoff; j += 2) {
+        for (let i = candidates[j]; i < candidates[j + 1]; i++) {
+          const o = i * 4;
+          const shifted = this._dragActive && this._dragFlags?.[i];
+          const x = p[o] + (shifted ? this._dragOffsetX : 0);
+          const w = p[o + 2] + (shifted ? this._dragOffsetW : 0);
+          const y = p[o + 1], h = p[o + 3];
+          if (x >= x1 || x + w <= x0 || y >= y1 || y + h <= y0) continue;
+          if (++visible > cutoff) break;
+          if (ranges.length && ranges[ranges.length - 1] === i) ranges[ranges.length - 1]++;
+          else ranges.push(i, i + 1);
+        }
+      }
+      cache = this._overviewDetails = { x0, x1, y0, y1, sx, sy, cutoff,
+        pos: this._posEpoch, drag: this._dragEpoch, ranges, crowded: visible > cutoff };
+    }
+    if (!cache.crowded) return cache.ranges;
+    const selected = this._noteIdToIndex?.get(this._lastSelectedNoteId);
+    const hovered = this._noteIdToIndex?.get(this._hoveredNoteId);
+    const ranges = [];
+    if (hovered != null && hovered !== selected) ranges.push(hovered, hovered + 1);
+    if (selected != null) ranges.push(selected, selected + 1);
+    return ranges;
+  }
+
+  _uploadChangedInstances(slots) {
+    const gl = this.gl;
+    if (!gl || !slots.length) return;
+    const update = (buffer, array, width) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      for (let k = 0; k < slots.length;) {
+        const first = slots[k++];
+        let end = first + 1;
+        while (k < slots.length && slots[k] === end) { end++; k++; }
+        gl.bufferSubData(gl.ARRAY_BUFFER, first * width * 4, array, first * width, (end - first) * width);
+      }
+    };
+    update(this.rectInstancePosSizeBuffer, this.posSize, 4);
+    update(this.rectInstanceColorBuffer, this.colors, 4);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  }
+
+  _uploadVisibleRegions(data) {
+    const gl = this.gl;
+    for (let j = 0; j < this._detailRanges.length; j += 2) {
+      const start = this._detailRanges[j], end = this._detailRanges[j + 1];
+      if (end > start) gl.bufferSubData(gl.ARRAY_BUFFER, start * 16, data, start * 4, (end - start) * 4);
+    }
+  }
+
+  _drawVisibleInstances(program, regionBuffer = null, ranges = this._detailRanges) {
+    const gl = this.gl;
+    if (ranges.length === 2 && ranges[0] === 0 && ranges[1] === this.instanceCount) {
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+      return;
+    }
+    if (!ranges.length) return;
+    const uniforms = this._instanceBaseUniforms || (this._instanceBaseUniforms = new WeakMap());
+    if (!uniforms.has(program)) uniforms.set(program, gl.getUniformLocation(program, 'u_instanceBase'));
+    const base = uniforms.get(program);
+    const pointer = (loc, buffer, size, first) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, first * size * 4);
+    };
+    const bind = first => {
+      pointer(1, this.rectInstancePosSizeBuffer, 4, first);
+      pointer(2, this.rectInstanceColorBuffer, 4, first);
+      if (regionBuffer) pointer(4, regionBuffer, 4, first);
+      pointer(5, this.rectInstanceFlagsBuffer, 1, first);
+      pointer(6, this.rectInstanceDragFlagsBuffer, 1, first);
+      pointer(7, this.rectInstanceCorruptionBuffer, 1, first);
+      pointer(8, this.rectInstanceEnvBuffer, 4, first);
+      gl.uniform1i(base, first);
+    };
+    for (let j = 0; j < ranges.length; j += 2) {
+      const first = ranges[j];
+      bind(first);
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, ranges[j + 1] - first);
+    }
+    bind(0);
+  }
+
+
 
   _render() {
     const gl = this.gl;
@@ -2708,6 +3228,13 @@ export class RendererAdapter {
     // Update canvas offset for proper coordinate transformation
     this.canvasOffset = { x: rectCss.left, y: rectCss.top };
     
+
+    this._updateVisibleInstances(vpW, vpH);
+
+    // Tails first, under the note bodies: a note that follows paints over the tail
+    // of the one before. Hidden while a drag previews new positions (they return
+    // when it is committed and the notes are synced).
+    if (this.tailCount > 0 && this.tailProgram && this.tailVAO && !this._dragActive) this._drawTails(vpW, vpH);
 
     // Draw notes as simple rectangles with flat colors (clipped to rounded rect)
     if (this.instanceCount > 0) {
@@ -2772,7 +3299,7 @@ export class RendererAdapter {
 
       // Upload per-instance flags (silence mask) is handled during sync() to avoid per-frame uploads
  
-      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+      this._drawVisibleInstances(prog, null, this._visibleRanges);
       gl.bindVertexArray(null);
 
       // Second pass for borders is no longer needed because border is integrated
@@ -2834,7 +3361,7 @@ export class RendererAdapter {
         for (const prop of ['startTime', 'frequency', 'duration']) {
           const rdepsIdx = this._relRdepsIdxByProperty?.[prop];
           if (rdepsIdx?.length) {
-            this._drawRingIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS);
+            this._drawRingIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS, null, 'child:' + prop);
           }
         }
 
@@ -2843,7 +3370,7 @@ export class RendererAdapter {
         for (const prop of ['startTime', 'frequency', 'duration']) {
           const chainIdx = this._relDepsChainIdxByProperty?.[prop];
           if (chainIdx?.length) {
-            this._drawRingIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
+            this._drawRingIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS, null, 'parent:' + prop);
           }
         }
       }
@@ -2852,9 +3379,12 @@ export class RendererAdapter {
     // Multi-selection group ring (notes) — above the dependency rings, below the single
     // selection ring, so the "current" note keeps its normal ring on top.
     try {
-      if (this._ensureMultiSelIndices() && this._multiSelNoteIdx) {
-        this._drawRingIdxList(this._multiSelNoteIdx, this._multiSelRingRgba(), this._multiSelRingPx());
+      const rect = this._marqueeRect;
+      const bounds = rect && this._worldRect(rect.x0, rect.y0, rect.x1, rect.y1);
+      if ((!rect || rect.additive) && this._ensureMultiSelIndices() && this._multiSelNoteIdx) {
+        this._drawRingIdxList(this._multiSelNoteIdx, this._multiSelRingRgba(), this._multiSelRingPx(), bounds, 'group');
       }
+      if (bounds) this._drawRingIdxList(null, this._multiSelRingRgba(), this._multiSelRingPx(), bounds);
     } catch {}
 
     // Selection outline for currently selected note (rounded, zoom-aware)
@@ -3155,18 +3685,8 @@ export class RendererAdapter {
     const startTimeString = note.variables?.startTimeString;
     let parentId = null;
     if (startTimeString) {
-      // Legacy
-      const m = /getNoteById\(\s*(\d+)\s*\)/.exec(startTimeString);
-      if (m) parentId = parseInt(m[1], 10);
-      // DSL
-      if (parentId == null) {
-        const dm = /\[(\d+)\]\./.exec(startTimeString);
-        if (dm) parentId = parseInt(dm[1], 10);
-        else {
-          const dh = /\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/.exec(startTimeString);
-          if (dh) parentId = parseInt(dh[1], 10);
-        }
-      }
+      const dm = /\[(\d+)\]\./.exec(startTimeString);
+      if (dm) parentId = parseInt(dm[1], 10);
     }
     if (parentId == null && note.parentId != null) parentId = note.parentId;
     if (parentId == null) return module.baseNote;
@@ -3254,28 +3774,11 @@ export class RendererAdapter {
     return this._parseAnyColorUncached(col);
   }
 
+  // Any CSS colour a note can be given (src/utils/css-color.js). It used to read only
+  // rgba(), hsl()/hsla() and 3- or 6-digit hex, so rgb(255,255,255) or a colour name
+  // fell through to the id-derived colour: a different hue on every note.
   _parseAnyColorUncached(col) {
-    if (!col) return null;
-    if (typeof col === 'string') {
-      const s = col.trim().toLowerCase();
-      if (s.startsWith('rgba')) {
-        const m = s.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
-        if (m) return [ Number(m[1])/255, Number(m[2])/255, Number(m[3])/255, (m[4]!=null)?Number(m[4]):1 ];
-      } else if (s.startsWith('hsla') || s.startsWith('hsl')) {
-        const m = s.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
-        if (m) return this._hslaToRgba(Number(m[1]), Number(m[2]), Number(m[3]), (m[4]!=null)?Number(m[4]):1);
-      } else if (s.startsWith('#')) {
-        let hex = s.replace('#','');
-        if (hex.length === 3) hex = hex.split('').map(ch => ch+ch).join('');
-        if (hex.length === 6) {
-          const r = parseInt(hex.slice(0,2),16)/255;
-          const g = parseInt(hex.slice(2,4),16)/255;
-          const b = parseInt(hex.slice(4,6),16)/255;
-          return [r,g,b,1];
-        }
-      }
-    }
-    return null;
+    return parseCssColor(col);
   }
 
   _hslaToRgba(h, s, l, a) {
@@ -3391,60 +3894,43 @@ export class RendererAdapter {
 
   // CPU picking against rounded-rect geometry. Returns top-most note id or null.
   pickAt(clientX, clientY, expandCssPx = 2) {
+    return this._pickNotes(clientX, clientY, expandCssPx, null);
+  }
+
+  // Stack and top-only queries share the same exact shape test and painter order.
+  pickStackAt(clientX, clientY, expandCssPx = 2) {
+    const hits = [];
+    this._pickNotes(clientX, clientY, expandCssPx, hits);
+    return hits;
+  }
+
+  _pickNotes(clientX, clientY, expandCssPx, hits) {
     if (!this.posSize || !this._instanceNoteIds) return null;
-
-    // Convert hit expansion from CSS px to world units for fast AABB reject
-    const exWU = (expandCssPx || 0) / (this.xScalePxPerWU || 1.0);
-    const eyWU = (expandCssPx || 0) / (this.yScalePxPerWU || 1.0);
-
     const p = this.screenToWorld(clientX, clientY);
-    const N = this._instanceNoteIds.length;
-
-    // Iterate from top-most (last drawn) to bottom
-    for (let i = N - 1; i >= 0; i--) {
-      const id = this._instanceNoteIds[i] | 0;
-      const o = i * 4;
-
-      // Quick AABB test in world units (expanded)
-      const x = this.posSize[o + 0] - exWU;
-      const y = this.posSize[o + 1] - eyWU;
-      const w = this.posSize[o + 2] + 2 * exWU;
-      const h = this.posSize[o + 3] + 2 * eyWU;
-      if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) continue;
-
-      // Precise rounded-rect test in CSS px space to avoid corner-selection artifacts
-      if (this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) {
-        return { type: 'note', id };
+    const ex = expandCssPx / (this.xScalePxPerWU || 1);
+    const ey = expandCssPx / (this.yScalePxPerWU || 1);
+    const left = p.x - ex, right = p.x + ex, top = p.y - ey, bottom = p.y + ey;
+    const ranges = this._pickRanges ||= [];
+    if (this._rangeIndex && !this._dragActive) {
+      this._rangeIndex.collect(left, right, ranges, top, bottom);
+    } else {
+      ranges.length = 2;
+      ranges[0] = 0;
+      ranges[1] = this._instanceNoteIds.length;
+    }
+    const rects = this.posSize;
+    for (let r = ranges.length - 2; r >= 0; r -= 2) {
+      for (let i = ranges[r + 1] - 1; i >= ranges[r]; i--) {
+        const o = i * 4;
+        if (rects[o] > right || rects[o] + rects[o + 2] < left ||
+            rects[o + 1] > bottom || rects[o + 1] + rects[o + 3] < top) continue;
+        if (!this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) continue;
+        const hit = { type: 'note', id: this._instanceNoteIds[i] };
+        if (!hits) return hit;
+        hits.push(hit);
       }
     }
     return null;
-  }
-
-  // CPU stack picking: return all hit notes top-most first (rounded-rect aware)
-  pickStackAt(clientX, clientY, expandCssPx = 2) {
-    if (!this.posSize || !this._instanceNoteIds) return [];
-    const exWU = (expandCssPx || 0) / (this.xScalePxPerWU || 1.0);
-    const eyWU = (expandCssPx || 0) / (this.yScalePxPerWU || 1.0);
-    const p = this.screenToWorld(clientX, clientY);
-    const N = this._instanceNoteIds.length;
-    const hits = [];
-    for (let i = N - 1; i >= 0; i--) {
-      const id = this._instanceNoteIds[i] | 0;
-      const o = i * 4;
-
-      // Quick AABB test in world units (expanded)
-      const x = this.posSize[o + 0] - exWU;
-      const y = this.posSize[o + 1] - eyWU;
-      const w = this.posSize[o + 2] + 2 * exWU;
-      const h = this.posSize[o + 3] + 2 * eyWU;
-      if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) continue;
-
-      // Precise rounded-rect hit
-      if (this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) {
-        hits.push({ type: 'note', id });
-      }
-    }
-    return hits;
   }
   /**
    * Hit test sub-region for the top-most note under the given client point.
@@ -3453,10 +3939,8 @@ export class RendererAdapter {
    * - Respects rounded-rect interior via pickAt() (corner-safe); only runs when a note body is hit.
    * - Silence notes do not report octaveUp/Down regions.
    */
-  hitTestSubRegion(clientX, clientY) {
+  hitTestSubRegion(clientX, clientY, hit = this.pickAt(clientX, clientY, 2)) {
     try {
-      // First, hit test the note body with rounded-corner-safe CPU picking
-      const hit = this.pickAt(clientX, clientY, 2);
       if (!hit || hit.type !== 'note') return null;
       const id = hit.id | 0;
 
@@ -3465,6 +3949,14 @@ export class RendererAdapter {
         ? this._noteIdToIndex.get(id)
         : undefined;
       if (idx == null || idx < 0 || idx >= this.instanceCount) {
+        return { id, region: 'body' };
+      }
+
+      // Only rendered controls can receive a gesture. In dense overviews most
+      // note bodies have no tabs or arrows, even within the normal edge tolerance.
+      const details = this._detailRanges;
+      if (!this.drawNoteOverlays || (details && details !== this._visibleRanges &&
+          !details.some((first, j) => j % 2 === 0 && first <= idx && idx < details[j + 1]))) {
         return { id, region: 'body' };
       }
 
@@ -3562,6 +4054,8 @@ export class RendererAdapter {
       const h  = this.posSize[base + 3];
  
       // Update CPU-side cache
+      this._hasPreviewGeometry = true;
+      this._rangeIndex = null; // direct geometry preview; rebuilt on sync
       this.posSize[base + 0] = xw;
       this.posSize[base + 2] = ww;
  
@@ -3619,6 +4113,8 @@ export class RendererAdapter {
         const xw = startSec * this._cfgSX() * xScale;
         const ww = durationSec * this._cfgSX() * xScale;
 
+        this._hasPreviewGeometry = true;
+        this._rangeIndex = null;
         // Write back only x and w; y/h remain unchanged
         this.posSize[base + 0] = xw;
         this.posSize[base + 2] = ww;
@@ -3930,6 +4426,8 @@ export class RendererAdapter {
           if (base + 3 < this.posSize.length) {
             this.posSize[base + 0] = orig.x;
             this.posSize[base + 2] = orig.w;
+            // A cancelled drag also restores the anchor on the next GPU sync.
+            (this._restoredDragIds ||= new Set()).add(this._instanceNoteIds[idx]);
           }
         }
         this._dragOriginalPos = null;
@@ -4671,17 +5169,22 @@ export class RendererAdapter {
       catch { return false; }
     };
 
-    // Measure notes: a startTime and nothing else.
+    // Measure bars: notes flagged `measure` (a start and a duration, drawn as bar lines).
     proto._collectMeasureNotes = function (module) {
       const out = [];
       try {
         for (const id in module.notes) {
           const n = module.notes[id];
-          if (!n) continue;
-          if (hasVar(n, 'startTime') && !hasVar(n, 'duration') && !hasVar(n, 'frequency')) out.push(n);
+          if (n && isMeasureNote(n)) out.push(n);
         }
       } catch {}
       return out;
+    };
+
+    // A bar's length is its own duration, in seconds (0 when it has none).
+    const barLengthSec = (bar) => {
+      try { return toNumber(bar ? bar.getVariable('duration') : null, 0) || 0; }
+      catch { return 0; }
     };
 
     proto._computeModuleEndTime = function (module, measureNotes) {
@@ -4701,8 +5204,9 @@ export class RendererAdapter {
           if (lastMeasure) {
             const st = lastMeasure.getVariable('startTime');
             if (st) {
-              const ml = module.findMeasureLength(lastMeasure);
-              measureEnd = toNumber(st.add(ml), 0);
+              // The last bar ends at its start plus its own duration (exact add, one conversion)
+              const ml = lastMeasure.getVariable('duration');
+              measureEnd = toNumber(ml ? st.add(ml) : st, 0);
             }
           }
         }
@@ -4718,7 +5222,7 @@ export class RendererAdapter {
         try {
           for (const id in module.notes) {
             const n = module.notes[id];
-            if (!n) continue;
+            if (!n || Number(id) === 0) continue;   // the BaseNote's duration is the time unit, not a note
             if (hasVar(n, 'startTime') && hasVar(n, 'duration') && hasVar(n, 'frequency')) {
               try {
                 const s = toNumber(n.getVariable('startTime'), 0);
@@ -4732,7 +5236,7 @@ export class RendererAdapter {
       return Math.max(measureEnd, lastNoteEnd);
     };
 
-    proto._syncMeasureBars = function (module) {
+    proto._syncMeasureBars = function (module, knownMeasures = null) {
       if (!module) return;
 
       // Collect measure times. One classification pass, shared with the end-time computation
@@ -4740,7 +5244,8 @@ export class RendererAdapter {
       const times = [];
       times.push(0); // origin
 
-      const measureNotes = this._collectMeasureNotes(module);
+      const measureNotes = knownMeasures || this._collectMeasureNotes(module);
+      this._syncedMeasures = measureNotes;
       for (let i = 0; i < measureNotes.length; i++) {
         try {
           const st = measureNotes[i].getVariable('startTime');
@@ -4830,19 +5335,16 @@ export class RendererAdapter {
       try {
         const triTimes = [];
         const triIds = [];
-        for (const id in module.notes) {
-          const n = module.notes[id];
-          if (!n) continue;
-          // Measure notes: have startTime but no duration/frequency
-          if (n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency) {
-            try {
-              const st = n.getVariable('startTime');
-              if (st != null) {
-                triTimes.push(toNumber(st, 0));
-                triIds.push(Number(id));
-              }
-            } catch {}
-          }
+        // One triangle per measure bar (the list collected above)
+        for (let i = 0; i < measureNotes.length; i++) {
+          const n = measureNotes[i];
+          try {
+            const st = n.getVariable('startTime');
+            if (st != null) {
+              triTimes.push(toNumber(st, 0));
+              triIds.push(Number(n.id));
+            }
+          } catch {}
         }
         // Sort by time and build next arrays
         const zipped = triTimes.map((t, i) => ({ t, id: triIds[i] })).sort((a, b) => a.t - b.t);
@@ -4866,12 +5368,7 @@ export class RendererAdapter {
           if (nextTimes && nextIds && nextTimes.length > 0) {
             const lastIdx = nextTimes.length - 1;
             const lastId = Number(nextIds[lastIdx]);
-            let mlSec = 0;
-            try {
-              const lastNote = module.getNoteById(lastId);
-              const mlVal = module.findMeasureLength(lastNote);
-              mlSec = toNumber(mlVal, 0) || 0;
-            } catch {}
+            const mlSec = barLengthSec(module.getNoteById(lastId));
             this._lastMeasureMeta = {
               id: lastId,
               baseStartSec: Number(nextTimes[lastIdx]) || 0,
@@ -5038,7 +5535,9 @@ export class RendererAdapter {
               try {
                 const Ninst = Math.max(0, this.instanceCount | 0);
                 const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
-                for (let i = 0; i < Ninst; i++) {
+                if (this._rangeIndex && denom > 0 && Number.isFinite(this._rangeIndex.right[1])) {
+                  endFromNotes = Math.max(0, this._rangeIndex.right[1] / denom);
+                } else for (let i = 0; i < Ninst; i++) {
                   const o = i * 4;
                   const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
                   if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
@@ -5055,7 +5554,7 @@ export class RendererAdapter {
                     ml = this._lastMeasureMeta.lengthSec;
                   } else {
                     const lastNote = this._moduleRef.getNoteById(Number(lastId));
-                    const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                    const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
                     ml = toNumber(mlVal, 0) || 0;
                   }
                   endFromMeasures = Math.max(0, lastStart + ml);
@@ -5082,7 +5581,7 @@ export class RendererAdapter {
                   ml = this._lastMeasureMeta.lengthSec;
                 } else {
                   const lastNote = this._moduleRef.getNoteById(Number(lastId));
-                  const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                  const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
                   ml = toNumber(mlVal, 0) || 0;
                 }
                 endFromMeasures = Math.max(0, lastStart + ml);
@@ -5224,7 +5723,9 @@ const e = startSec + addDx + durSec;
         let endFromNotes = 0;
         const Ninst = Math.max(0, this.instanceCount | 0);
         const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
-        for (let i = 0; i < Ninst; i++) {
+        if (this._rangeIndex && denom > 0 && Number.isFinite(this._rangeIndex.right[1])) {
+          endFromNotes = Math.max(0, this._rangeIndex.right[1] / denom);
+        } else for (let i = 0; i < Ninst; i++) {
           const o = i * 4;
           const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
           if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
@@ -5239,7 +5740,7 @@ const e = startSec + addDx + durSec;
             ml = this._lastMeasureMeta.lengthSec;
           } else {
             const lastNote = this._moduleRef.getNoteById(Number(lastId));
-            const mlVal = this._moduleRef.findMeasureLength(lastNote);
+            const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
             ml = toNumber(mlVal, 0) || 0;
           }
           endFromMeasures = Math.max(0, lastStart + ml);
@@ -5264,7 +5765,7 @@ const e = startSec + addDx + durSec;
           ml = this._lastMeasureMeta.lengthSec;
         } else {
           const lastNote = this._moduleRef.getNoteById(Number(lastId));
-          const mlVal = this._moduleRef.findMeasureLength(lastNote);
+          const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
           ml = toNumber(mlVal, 0) || 0;
         }
         endFromMeasures = Math.max(0, lastStart + ml);
@@ -5562,23 +6063,23 @@ const e = startSec + addDx + durSec;
         }
 // Build per-instance drag flags for triangles and update CPU picking CSS to match shader shift
 {
-  const flags = new Float32Array(count);
   const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size) ? this._dragMovingIds : null;
   const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
 
   // CPU picking CSS array mirroring on-screen triangles
-  const triCssPick = new Float32Array(this.measureTriPosSize);
+  const triCssPick = moving ? new Float32Array(this.measureTriPosSize) : this.measureTriPosSize;
 
   const flaggedIdx = [];
   if (moving && this._measureTriIdToIndex) {
     try {
-      for (const id of moving) {
+      const candidates = moving.size < count ? moving : this._measureTriIds;
+      for (const id of candidates) {
+        if (!moving.has(id)) continue;
         const idNum = Number(id);
         const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, idNum));
         if (hasPrev) continue;
         const idx = this._measureTriIdToIndex.get ? this._measureTriIdToIndex.get(idNum) : -1;
         if (idx != null && idx >= 0 && idx < count) {
-          flags[idx] = 1.0;
           flaggedIdx.push(idx);
           // Adjust CPU picking left X to match shader shift
           const o = idx * 4;
@@ -5591,6 +6092,8 @@ const e = startSec + addDx + durSec;
   flaggedIdx.sort((a,b) => a-b);
   const triKey = `${count}|${flaggedIdx.join(',')}`;
   if (this._lastTriFlagsKey !== triKey) {
+    const flags = new Float32Array(count);
+    for (const idx of flaggedIdx) flags[idx] = 1;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flags, gl.DYNAMIC_DRAW);
     this._lastTriFlagsKey = triKey;
@@ -6007,7 +6510,40 @@ try {
       drawTriOutlineAtIndex(idx, [hr[0], hr[1], hr[2], 0.6], this.measureTriPosSizeOutline);
     }
 
-    // (No multi-selection outline for measures: measures are not group-selectable.)
+    const rect = this._marqueeRect;
+    this._ensureMultiSelIndices();
+    const committed = !rect || rect.additive ? this._multiSelMeasureIds : null;
+    if (rect || committed?.length) {
+      const css = this._measureTriCss;
+      let cache = this._measureRingCache;
+      if (!cache || cache.rect !== rect || cache.committed !== committed || cache.css !== css
+          || cache.map !== idToIdx || cache.view !== this._viewEpoch || cache.preview !== this._triPreviewEpoch) {
+        const selected = new Set(rect ? this._measureRectHits(rect.x0, rect.y0, rect.x1, rect.y1) : []);
+        for (const id of committed || []) selected.add(id);
+        const entries = [];
+        for (const id of selected) {
+          const i = idToIdx?.get(id);
+          if (i == null) continue;
+          const o = i * 4;
+          entries.push(css[o] - 1, css[o + 1] - 1, css[o + 2] + 2, css[o + 3] + 2);
+        }
+        cache = this._measureRingCache = { rect, committed, css, map: idToIdx, view: this._viewEpoch,
+          preview: this._triPreviewEpoch, boxes: new Float32Array(entries) };
+      }
+      const boxes = cache.boxes;
+      if (boxes.length) {
+        gl.uniform4fv(uColD, this._multiSelRingRgba());
+        // Picking boxes already carry the live drag offset.
+        gl.uniform1f(this._uniforms.measureTriOutline.u_dragCssX, 0);
+        gl.bindVertexArray(this.measureTriVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, boxes, gl.DYNAMIC_DRAW);
+        gl.disableVertexAttribArray(2);
+        gl.drawArraysInstanced(gl.LINE_LOOP, 0, 3, boxes.length / 4);
+        gl.enableVertexAttribArray(2);
+        gl.bindVertexArray(null);
+      }
+    }
   }
 } catch {}
 
@@ -6060,7 +6596,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 // Draw triangle labels "[id]" over the triangles (centered, narrow texture) — near bottom edge
 // This pass occurs AFTER triangle outline+fill so text is on top (not darkened by triangle alpha).
 {
-  const reuseTextRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
+  const reuseTextRuns = !!(this.useGlyphAtlas && this.useGlyphCache && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
   if (!reuseTextRuns) {
     if (!this._deferredGlyphRuns) this._deferredGlyphRuns = [];
     const padX = 2.0;
@@ -6109,6 +6645,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       if (this.drawOctaveGuides) {
         try { this._renderOctaveGuides(); } catch {}
       }
+      // 4b) Reference lines: notes with a frequency and no duration
+      try { this._renderReferenceLines(); } catch {}
 
       // Restore depth state for subsequent passes (note overlays/text flush)
       gl.enable(gl.DEPTH_TEST);
@@ -6342,6 +6880,17 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       if (!gl || !this.canvas) return;
       if (!this.drawNoteOverlays || !this.instanceCount) return;
 
+      const ranges = this._detailRanges;
+      if (!ranges.length) {
+        // Measure ids are appended later in the same glyph pass. Start that
+        // list fresh so cached note labels cannot survive a zoom into overview.
+        this._glyphRunsCache = null;
+        this._atlasGlyphCache = null;
+        this._deferredGlyphRuns = [];
+        this._textRebuildThisFrame = false;
+        return;
+      }
+
       // Ensure instanced attribute 4 (region attrib used by tab/arrow/divider masks) is enabled.
       // Note body pass disables attrib 4 via _setAttr4Enabled(false); without re-enabling,
       // tab regions, octave backgrounds, and fraction divider bands will not render at idle.
@@ -6394,7 +6943,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           _dividerRegions = neededLen ? new Float32Array(neededLen) : null;
           _anyDivider = false; // must rebuild flags for the new buffer
         }
-        if (!_silenceEraseRegions || _silenceEraseRegions.length !== neededLen) {
+        if (this.enableSilenceEraseBands && (!_silenceEraseRegions || _silenceEraseRegions.length !== neededLen)) {
           _silenceEraseRegions = neededLen ? new Float32Array(neededLen) : null;
           _anySilenceErase = false; // must rebuild flags for the new buffer
         }
@@ -6424,7 +6973,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
               ? this._tabInnerRegions : new Float32Array(N * 4);
 
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
-            for (let i = 0; i < N; i++) {
+            for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               const o = i * 4;
               const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
               const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
@@ -6458,10 +7007,10 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             if (glUp) {
               glUp.bindVertexArray(this.rectVAO);
               glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
-              glUp.bufferData(glUp.ARRAY_BUFFER, this._tabRegions, glUp.DYNAMIC_DRAW);
+              this._uploadVisibleRegions(this._tabRegions);
               if (this.rectInstanceTabInnerBuffer) {
                 glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
-                glUp.bufferData(glUp.ARRAY_BUFFER, this._tabInnerRegions, glUp.DYNAMIC_DRAW);
+                this._uploadVisibleRegions(this._tabInnerRegions);
               }
               glUp.bindBuffer(glUp.ARRAY_BUFFER, null);
               glUp.bindVertexArray(null);
@@ -6474,7 +7023,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             // Resize preview: update only flagged instances to avoid O(N) work every frame
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
             const Nloc = this.instanceCount;
-            for (let i = 0; i < Nloc; i++) {
+            for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               if (this._dragFlags[i] !== 1.0) continue;
               const o = i * 4;
               const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
@@ -6503,10 +7052,10 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             if (glUp) {
               glUp.bindVertexArray(this.rectVAO);
               glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
-              glUp.bufferData(glUp.ARRAY_BUFFER, this._tabRegions, glUp.DYNAMIC_DRAW);
+              this._uploadVisibleRegions(this._tabRegions);
               if (this.rectInstanceTabInnerBuffer) {
                 glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
-                glUp.bufferData(glUp.ARRAY_BUFFER, this._tabInnerRegions, glUp.DYNAMIC_DRAW);
+                this._uploadVisibleRegions(this._tabInnerRegions);
               }
               glUp.bindBuffer(glUp.ARRAY_BUFFER, null);
               glUp.bindVertexArray(null);
@@ -6556,7 +7105,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           // Point attribute 4 to primary buffer, then draw
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceTabRegionBuffer);
 
           // Pass 2: inner vertical bar (stronger)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.6);
@@ -6567,9 +7116,9 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           } else {
             // Fallback: re-upload inner to primary buffer if secondary not available
             gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, this._tabInnerRegions, gl.DYNAMIC_DRAW);
+            this._uploadVisibleRegions(this._tabInnerRegions);
           }
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceTabInnerBuffer || this.rectInstanceTabRegionBuffer);
 
           // Restore attribute 4 to primary buffer for consistency
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -6594,7 +7143,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       // Defer all text sprites (IDs, silence text) to draw AFTER any rings for correct z-order across notes
       this._deferredTextSprites = []; // array of { tex, x, y, w, h, layerZ }
       // Defer glyph-run draws (IDs, digits, arrows). Prefer cached runs if scene text unchanged and view epoch stable.
-      const reuseRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
+      const reuseRuns = !!(this.useGlyphAtlas && this.useGlyphCache && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
       if (reuseRuns) {
         // Hand the cached list back BY REFERENCE rather than copying it. Every push site
         // is guarded by this same reuse condition, so a reuse frame cannot mutate it, and
@@ -6643,7 +7192,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             const borderCssExact = (this.xScalePxPerWU || 1.0);
             const epsCss = 0.5;
 
-            for (let i = 0; i < N; i++) {
+            for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               const o = i * 4;
               const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
               const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
@@ -6739,19 +7288,19 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
           if (mustUploadArrow) {
-            gl.bufferData(gl.ARRAY_BUFFER, this._arrowUpRegions, gl.DYNAMIC_DRAW);
+            this._uploadVisibleRegions(this._arrowUpRegions);
           }
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceArrowRegionBuffer);
 
           // Lower half (same tint to avoid seam brightness mismatch)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowDownRegionBuffer);
           if (mustUploadArrow) {
-            gl.bufferData(gl.ARRAY_BUFFER, this._arrowDownRegions, gl.DYNAMIC_DRAW);
+            this._uploadVisibleRegions(this._arrowDownRegions);
           }
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceArrowDownRegionBuffer);
 
           // Mark successful upload epoch to prevent redundant buffer traffic next frames
           if (mustUploadArrow) {
@@ -6883,10 +7432,9 @@ try {
   }
 } catch {}
 
-      const canSkipPerNote = !!(this._dragOriginalPos && this._dragOffsetW === 0.0 && reuseRuns && this._tabRegions && this._arrowUpRegions && (!this._anyDivider || this._dividerRegions) && !this.enableSilenceEraseBands);
-      // Fast path: during pure-move drags, overlays are moved by shader u_dragOffset.
-      // Skip heavy per-note overlay recompute when text runs are cached and no width changes are previewed.
-      if (!canSkipPerNote) {
+      // The cached run list already contains all note labels. Appending again
+      // would retain a duplicate set on every playhead or hover redraw.
+      if (!reuseRuns) {
       // Viewport cull bounds. Every overlay this loop emits for a note — pull tab, octave
       // arrows, fraction divider, silence band, and all of its text runs — is scissored to
       // that note's own rect, so a note whose rect lies entirely off-canvas cannot produce
@@ -6901,7 +7449,7 @@ try {
       const cullPadX = 2 + (this._dragActive
         ? Math.abs((m[0] || 0) * (this._dragOffsetX || 0)) + Math.abs((m[0] || 0) * (this._dragOffsetW || 0))
         : 0);
-      for (let i = 0; i < this.instanceCount; i++) {
+      for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
         const o = i * 4;
         const so = i * 2;
 
@@ -7006,8 +7554,32 @@ try {
           const numStr = this._noteFracNumStrs ? this._noteFracNumStrs[i] : null;
           const denStr = this._noteFracDenStrs ? this._noteFracDenStrs[i] : null;
           const isSilence = (numStr === 'silence');
- 
-          if (isSilence) {
+          const isLine = (denStr === LINE_LABEL);
+
+          if (isLine) {
+            // A tempered note: its exact power on one line (2^(7/12)), after the arrows,
+            // squeezed horizontally like the silence text when the note is short
+            const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26)));
+            const text = String(numStr);
+            const sLeft = contentLeft;
+            const sWidth = Math.max(1, contentRight - sLeft);
+            const runW = this._measureGlyphRunWidth(text, fontPx);
+            const runH = this._getRunHeight(text, fontPx);
+            const sx = runW > 0 ? Math.min(1.0, sWidth / runW) : 1.0;
+            const ny = Math.round((top + hCss * 0.5 - runH * 0.5) * 2.0) / 2.0;
+            this._deferredGlyphRuns.push({
+              text, noteId: id, x: sLeft, y: ny, fontPx, color: this._noteTextRgba(), layerZ, scaleX: sx,
+              scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
+              rrCx, rrCy, rrHx, rrHy, rrR
+            });
+            // No fraction bar for a one-line label
+            if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
+            const oDiv = i * 4;
+            _dividerRegions[oDiv + 0] = 1.0;
+            _dividerRegions[oDiv + 1] = 0.0;
+            _dividerRegions[oDiv + 2] = 0.0;
+            _dividerRegions[oDiv + 3] = 0.0;
+          } else if (isSilence) {
             // Silence: draw only "silence" text, left-aligned; HORIZONTAL scaling only (no vertical scaling).
             // Use full left content area (no octave arrows for silences) while keeping ID placement unchanged.
             const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26)));
@@ -7061,8 +7633,9 @@ try {
               : this._clampFontPx(Math.max(5, Math.round(hCss * (this._config?.overlays?.fractionFontFactor ?? 0.26)))); // slightly larger fraction numerals
             const gapPx  = Math.max(1, Math.round(fontPx * 0.08));
 
-            // Check if note is corrupted (direct or transitive) to show ≈ prefix
-            const isCorrupted = this._corruptionType && this._corruptionType[i] > 0;
+            // ≈ before the fraction: the value is approximate, or the exact fraction is too long
+            // to show and this one is rounded (a tempered note has a one-line label instead)
+            const isCorrupted = !!(this._noteLabelApprox && this._noteLabelApprox[i] === 1);
             const approxSymbol = '≈';
             const approxW = isCorrupted ? this._measureGlyphRunWidth(approxSymbol, fontPx) : 0;
             const approxGap = isCorrupted ? Math.max(1, Math.round(fontPx * 0.1)) : 0;
@@ -7459,9 +8032,9 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDividerRegionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, this._silenceEraseRegions, gl.DYNAMIC_DRAW);
+          this._uploadVisibleRegions(this._silenceEraseRegions);
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceDividerRegionBuffer);
 
           // Restore attribute 4 to primary buffer
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -7516,9 +8089,9 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDividerRegionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, _dividerRegions, gl.DYNAMIC_DRAW);
+          this._uploadVisibleRegions(_dividerRegions);
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceDividerRegionBuffer);
 
           // Restore attribute 4 to primary buffer
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -7593,7 +8166,7 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
           // Uses the existing per-instance attributes (posSize, flags)
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.silenceDashRingProgram);
           gl.bindVertexArray(null);
         }
       } catch {}
@@ -8988,7 +9561,7 @@ try {
     const _origSync = proto.sync;
     proto.sync = function (args) {
       _origSync.call(this, args);
-      try { this._syncMeasureBars(args.module); } catch {}
+      try { this._syncMeasureBars(args.module, this._lastSyncWasPartial ? this._syncedMeasures : null); } catch {}
 
       // Cache selection context for octave guides (BaseNote vs selected note)
       try {
@@ -9124,7 +9697,7 @@ try {
       };
 
       // Hit test all measure triangles (CSS px). Returns top-most first (reverse draw order).
-      proto.pickTrianglesAt = function(clientX, clientY) {
+      proto.pickTrianglesAt = function(clientX, clientY, firstOnly = false) {
         try {
           const css = this._measureTriCss;
           const ids = this._measureTriIds;
@@ -9142,33 +9715,31 @@ try {
             const cx = left + w,       cy = top + h;       // bottom right
             if (this._pointInTriangle(px, py, ax, ay, bx, by, cx, cy)) {
               hits.push({ type: 'measure', id: ids[i] });
+              if (firstOnly) break;
             }
           }
           return hits;
         } catch { return []; }
       };
 
+      // A hover/ordinary hit needs only the first item in painter order.
+      // A supplied note hit (including null) lets hover reuse its subregion probe.
+      proto.pickTopAt = function(clientX, clientY, expandCssPx = 2, noteHit) {
+        return this.pickTrianglesAt(clientX, clientY, true)[0] ||
+          this.pickBaseCircleAt(clientX, clientY)[0] ||
+          (noteHit === undefined ? this.pickAt(clientX, clientY, expandCssPx) : noteHit) ||
+          this.pickReferenceLinesAt(clientX, clientY, true)[0] || null;
+      };
+
       // Mixed-type stack at client coords: triangles (top), base, then notes (existing stack)
       proto.pickAllAt = function(clientX, clientY, expandCssPx = 2) {
         try {
-          const list = [];
-          // Triangles first (on top of notes visually)
-          try {
-            const tHits = this.pickTrianglesAt(clientX, clientY);
-            if (tHits && tHits.length) list.push(...tHits);
-          } catch {}
-          // Base circle next
-          try {
-            const bHits = this.pickBaseCircleAt(clientX, clientY);
-            if (bHits && bHits.length) list.push(...bHits);
-          } catch {}
-          // Notes (existing CPU stack)
-          try {
-            const nHits = this.pickStackAt(clientX, clientY, expandCssPx) || [];
-            // Already includes { type:'note', id }
-            list.push(...nHits);
-          } catch {}
-          return list;
+          const hits = this.pickTrianglesAt(clientX, clientY);
+          const base = this.pickBaseCircleAt(clientX, clientY)[0];
+          if (base) hits.push(base);
+          this._pickNotes(clientX, clientY, expandCssPx, hits);
+          for (const line of this.pickReferenceLinesAt(clientX, clientY)) hits.push(line);
+          return hits;
         } catch { return []; }
       };
     }
@@ -9569,6 +10140,7 @@ try {
         layout(location=2) in vec2 a_pFlags;      // (p0Drag, p1Drag) flags for horizontal GPU drag
 
         uniform vec2  u_viewport;                 // (canvas CSS w,h)
+        uniform vec2 u_pan;                       // from the view that built these endpoints
         uniform float u_thickness;                // CSS px
         uniform float u_dragCssX;                 // CSS px horizontal drag offset
 
@@ -9585,7 +10157,7 @@ try {
 
           float s = a_unit.x;                        // along the line
           float t = (a_unit.y - 0.5) * u_thickness;  // across thickness centered at 0
-          vec2 pos = mix(p0, p1, s) + n * t;
+          vec2 pos = mix(p0, p1, s) + n * t + u_pan;
 
           float ndcX = (pos.x / u_viewport.x) * 2.0 - 1.0;
           float ndcY = 1.0 - (pos.y / u_viewport.y) * 2.0;
@@ -9604,6 +10176,7 @@ try {
         this._uniforms.linkLine = this._uniforms.linkLine || {};
         if (this.linkLineProgram) {
           this._uniforms.linkLine.u_viewport  = gl.getUniformLocation(this.linkLineProgram, "u_viewport");
+          this._uniforms.linkLine.u_pan = gl.getUniformLocation(this.linkLineProgram, "u_pan");
           this._uniforms.linkLine.u_thickness = gl.getUniformLocation(this.linkLineProgram, "u_thickness");
           this._uniforms.linkLine.u_color     = gl.getUniformLocation(this.linkLineProgram, "u_color");
           this._uniforms.linkLine.u_dragCssX  = gl.getUniformLocation(this.linkLineProgram, "u_dragCssX");
@@ -9817,7 +10390,14 @@ try {
 
           // Check if we need to rebuild endpoints (epoch-gated to avoid redundant CPU work)
           const anchorChanged = (this._lastLinkAnchorId !== anchorId);
-          const viewChanged   = (this._lastLinkViewEpoch !== this._viewEpoch);
+          // A pan translates every note endpoint equally. Measure markers can
+          // be screen-anchored vertically, so rebuild for vertical moves there.
+          const basis = this._linkBasis, m = this.matrix;
+          const tx = m[6] - this.canvasOffset.x, ty = m[7] - this.canvasOffset.y;
+          const translate = basis && !this._dragActive && basis.config === this._config &&
+            basis.sx === m[0] && basis.sy === m[4] && basis.b === m[1] && basis.c === m[3] &&
+            basis.w === vpW && basis.h === vpH && (!this._measureTriIds?.length || basis.ty === ty);
+          const viewChanged = this._lastLinkViewEpoch !== this._viewEpoch && !translate;
           const posChanged    = (this._lastLinkPosEpoch !== this._posEpoch);
           const prosChanged   = (this._lastLinkProspectiveParentId !== this._prospectiveParentId);
           const triChanged    = (this._lastLinkTriDataEpoch !== this._triDataEpoch);
@@ -9935,7 +10515,7 @@ try {
               const isMeasureNoteId = (id) => {
                 try {
                   const n = mref?.getNoteById?.(Number(id));
-                  return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                  return isMeasureNote(n);
                 } catch { return false; }
               };
 
@@ -9952,7 +10532,7 @@ try {
                   const yCenterWorld = this._noteCenterY(baseFreq);
                   return toLocalCss(xCenterWorld, yCenterWorld);
                 }
-                if (isMeasureNoteId(numId)) {
+                if (this._measureTriIdToIndex?.has(numId)) {
                   // measure triangle
                   const triIdx = (this._measureTriIdToIndex && this._measureTriIdToIndex.get)
                     ? this._measureTriIdToIndex.get(numId)
@@ -9987,7 +10567,7 @@ try {
                 if (st.type === 'move' && Number(st.dxSec) > 0) {
                   try {
                     const n = mref?.getNoteById?.(Number(anchorId));
-                    const isMeasureAnchor = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    const isMeasureAnchor = isMeasureNote(n);
                     if (isMeasureAnchor) usePros = false;
                   } catch {}
                 }
@@ -10056,43 +10636,20 @@ try {
 
                     out.parsed = true;
 
-                    // Legacy base ref
-                    const baseRefRe = /module\.baseNote\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/;
-                    out.hasBase = baseRefRe.test(s);
-                    // DSL base ref
-                    if (!out.hasBase) {
-                      out.hasBase = /\bbase\./.test(s) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(s);
-                    }
+                    out.hasBase = /\bbase\./.test(s);
 
                     const seen = new Set();
-                    // Legacy note refs
-                    const re = /module\.getNoteById\(\s*(\d+)\s*\)\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/g;
-                    let m;
-                    while ((m = re.exec(s))) {
-                      const id = Number(m[1]);
-                      if (!isFinite(id) || id === 0) continue;
-                      if (id === Number(anchorId) || seen.has(id)) continue;
-                      seen.add(id);
-                      try {
-                        const ref = mod.getNoteById(id);
-                        const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
-                        if (isMeasure) out.measureIds.push(id);
-                        else out.noteIds.push(id);
-                      } catch {
-                        out.noteIds.push(id);
-                      }
-                    }
-                    // DSL note refs: [N].t, [N].d, beat([N]), measure([N])
-                    const dslRe = /\[(\d+)\]\.|\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/g;
+                    // Note refs: [N].t, [N].d
+                    const dslRe = /\[(\d+)\]\./g;
                     let dm;
                     while ((dm = dslRe.exec(s))) {
-                      const id = Number(dm[1] ?? dm[2]);
+                      const id = Number(dm[1]);
                       if (!isFinite(id) || id === 0) continue;
                       if (id === Number(anchorId) || seen.has(id)) continue;
                       seen.add(id);
                       try {
                         const ref = mod.getNoteById(id);
-                        const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
+                        const isMeasure = isMeasureNote(ref);
                         if (isMeasure) out.measureIds.push(id);
                         else out.noteIds.push(id);
                       } catch {
@@ -10118,7 +10675,7 @@ try {
                   const isMeasureNoteId = (id) => {
                     try {
                       const n = mref.getNoteById(Number(id));
-                      return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                      return isMeasureNote(n);
                     } catch { return false; }
                   };
                   const d = mref.getDirectDependencies(Number(anchorId)) || [];
@@ -10169,26 +10726,36 @@ try {
                 // (tens of thousands of objects per frame with a 5000-dependent hub), which is
                 // what kept triggering GC mid-drag. Both epochs in the key are bumped by sync(),
                 // so any real change to the module still invalidates it.
-                const treeKey = Number(anchorId) + '|' + (this._posEpoch || 0) + '|' + (this._sceneEpoch || 0);
-                let allTrees;
-                if (this._linkTreeCache && this._linkTreeCache.key === treeKey) {
-                  allTrees = this._linkTreeCache.trees;
-                } else {
-                  allTrees = mref.getChildrenTreeByAllProperties(Number(anchorId));
-                  this._linkTreeCache = { key: treeKey, trees: allTrees };
-                }
+                const allTrees = this._selectionTrees(mref, Number(anchorId));
 
                 for (const prop of ['frequency', 'startTime', 'duration']) {
                   const edges = allTrees.edgesByProperty[prop];
                   if (!edges?.length) continue;
 
+                  // At overview scales many siblings end in the same pixel.
+                  // One segment represents those coincident paths; the full tree
+                  // and its per-note rings still retain every relationship.
+                  const siblings = edges.length > 2048 && !this._dragActive &&
+                    (this.xScalePxPerWU < 1 || this.currentXScaleFactor < 1) ? new Map() : null;
+                  let lastParent = null, parentCenter = null;
                   for (const edge of edges) {
                     // During drag, only include edges where child is in the moving set
                     if (movingSet && !movingSet.has(edge.childId)) continue;
 
-                    const parentCenter = getCenterForId(edge.parentId);
+                    if (edge.parentId !== lastParent) {
+                      parentCenter = getCenterForId(edge.parentId);
+                      lastParent = edge.parentId;
+                      siblings?.clear();
+                    }
                     const childCenter = getCenterForId(edge.childId);
                     if (!parentCenter || !childCenter) continue;
+                    if (siblings) {
+                      const x = Math.round(childCenter.x), y = Math.round(childCenter.y);
+                      let row = siblings.get(y);
+                      if (!row) siblings.set(y, row = new Set());
+                      if (row.has(x)) continue;
+                      row.add(x);
+                    }
 
                     // Add segment from parent to child
                     rdepsListByProp[prop].push(parentCenter.x, parentCenter.y, childCenter.x, childCenter.y);
@@ -10228,7 +10795,7 @@ try {
                 const isMeasureNoteIdRdeps = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    return isMeasureNote(n);
                   } catch { return false; }
                 };
 
@@ -10263,7 +10830,7 @@ try {
                 const isMeasureNoteIdFallback = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    return isMeasureNote(n);
                   } catch { return false; }
                 };
                 const rRaw = mref.getDependentNotes(Number(anchorId)) || [];
@@ -10377,6 +10944,7 @@ try {
             this._lastLinkDragEpoch = this._dragEpoch;
             this._lastLinkProspectiveParentId = this._prospectiveParentId;
             this._lastLinkTriDataEpoch = this._triDataEpoch;
+            this._linkBasis = { sx: m[0], sy: m[4], b: m[1], c: m[3], config: this._config, tx, ty, w: vpW, h: vpH };
           } // end if (selC && needsRebuild)
 
           // Draw link lines if selection exists (uses cached/fresh endpoints)
@@ -10388,6 +10956,7 @@ try {
             const uTh  = U ? U.u_thickness : gl.getUniformLocation(this.linkLineProgram, 'u_thickness');
             const uCol = U ? U.u_color     : gl.getUniformLocation(this.linkLineProgram, 'u_color');
             if (uVP)  gl.uniform2f(uVP, vpW, vpH);
+            gl.uniform2f(U.u_pan, tx - (this._linkBasis?.tx ?? tx), ty - (this._linkBasis?.ty ?? ty));
             // Fixed 2px thickness for link lines (selected or dragging)
             if (uTh)  gl.uniform1f(uTh, 2.0);
             // Set drag delta uniform (CSS px); endpoints move via GPU flags
@@ -10582,7 +11151,7 @@ try {
             // Dependent ghosts (translucent) — show where dependents will move/shift
             try {
               const stDO = this._dragOverlay || null;
-              if (this.drawDragGhosts && stDO && (stDO.type === 'move' || stDO.type === 'resize') && Array.isArray(this._relRdepsIdx) && this._relRdepsIdx.length && this.selectionFillProgram) {
+              if (this.drawDragGhosts && stDO && (stDO.type === 'move' || stDO.type === 'resize') && this._ensureGhostIndices()?.length && this.selectionFillProgram) {
                 const dxWU   = ((stDO.dxSec || 0) * this._cfgSX()) * (this.currentXScaleFactor || 1.0);
                 const ddurWU = ((stDO.ddurSec || 0) * this._cfgSX()) * (this.currentXScaleFactor || 1.0);
 
@@ -10933,6 +11502,114 @@ try {
       _prevRenderM.call(this);
       if (!wasDirty) return;
       try { this._renderMarquee(); } catch {}
+    };
+  } catch {}
+})();
+
+// Reference lines: notes that only relate (a frequency, no duration). A tonic, a key
+// or a chord root is a dashed line across the whole workspace at its pitch; with a
+// start it is a key change, the same line from that start on. They never sound. Drawn
+// with the octave guides' per-line dashed program (one draw per line; it re-uploads
+// its quad every draw, so sharing its buffer leaves nothing stale), longer dashes.
+(() => {
+  try {
+    if (typeof RendererAdapter === 'undefined') return;
+    const proto = RendererAdapter.prototype;
+
+    proto._renderReferenceLines = function () {
+      const gl = this.gl;
+      const lines = this._refLines;
+      this._refLineCss = [];
+      if (!gl || !this.canvas || !lines || !lines.length) return;
+      if (!this.octaveLineProgram || !this.octaveLineVAO || !this.octaveLinePosSizeBuffer) return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const vpW = Math.max(1, rect.width), vpH = Math.max(1, rect.height);
+      const m = this.matrix;
+      const ox = this.canvasOffset?.x ?? 0, oy = this.canvasOffset?.y ?? 0;
+      const sx = this._cfgSX() * (this.currentXScaleFactor || 1);
+      const ac = this._accentRgba();
+      const sel = this._lastSelectedNoteId != null ? Number(this._lastSelectedNoteId) : null;
+
+      const P = this.octaveLineProgram;
+      const uVP = gl.getUniformLocation(P, 'u_viewport');
+      const uDash = gl.getUniformLocation(P, 'u_dashLen');
+      const uGap = gl.getUniformLocation(P, 'u_gapLen');
+      const uCol = gl.getUniformLocation(P, 'u_color');
+      const uHole = gl.getUniformLocation(P, 'u_holeRect');
+      const T = this.textProgram;
+      const uVPt = T ? gl.getUniformLocation(T, 'u_viewport') : null;
+      const uTint = T ? gl.getUniformLocation(T, 'u_tint') : null;
+      const uTex = T ? gl.getUniformLocation(T, 'u_tex') : null;
+      gl.disable(gl.SCISSOR_TEST);
+
+      for (const L of lines) {
+        const yw = this._noteCenterY(L.freq);
+        const xw = L.startSec != null ? L.startSec * sx : 0;
+        const lyRaw = m[1] * xw + m[4] * yw + m[7] - oy;
+        const y = Math.floor(lyRaw) + 0.5;
+        if (y < -4 || y > vpH + 4) continue;
+        const x0 = L.startSec != null ? Math.max(-1, m[0] * xw + m[3] * yw + m[6] - ox) : -1;
+        if (x0 > vpW) continue;
+        const selected = sel === L.id;
+        const entry = this._createTextTexture(`[${L.id}]`);
+        // A key change's label sits just before its start, where it reads as the
+        // marker for what follows (after it, the first note in the new key covers it).
+        let lx = 8;
+        if (L.startSec != null) {
+          const w = entry ? entry.wCss : 0;
+          lx = (x0 - w - 6 >= 8) ? (x0 - w - 6) : Math.max(8, x0 + 6);
+        }
+
+        gl.useProgram(P);
+        if (uVP) gl.uniform2f(uVP, vpW, vpH);
+        if (uDash) gl.uniform1f(uDash, 8.0);   // longer than the octave guides' 3/3
+        if (uGap) gl.uniform1f(uGap, 4.0);
+        if (uCol) gl.uniform4f(uCol, ac[0], ac[1], ac[2], selected ? 1.0 : 0.7);
+        if (uHole) {
+          if (entry) gl.uniform4f(uHole, lx - 3, y - entry.hCss * 0.5 - 1, entry.wCss + 6, entry.hCss + 2);
+          else gl.uniform4f(uHole, 0, 0, 0, 0);
+        }
+        gl.bindVertexArray(this.octaveLineVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([x0, selected ? y - 0.5 : y, vpW + 2 - x0, selected ? 2 : 1]), gl.DYNAMIC_DRAW);
+        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+
+        if (entry && entry.tex && T && this.textVAO && this.textPosSizeBuffer) {
+          gl.useProgram(T);
+          if (uVPt) gl.uniform2f(uVPt, vpW, vpH);
+          if (uTex) gl.uniform1i(uTex, 0);
+          if (uTint) gl.uniform4f(uTint, 1, 1, 1, selected ? 1.0 : 0.9);
+          gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+          gl.bindVertexArray(this.textVAO);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([lx, y - entry.hCss * 0.5, entry.wCss, entry.hCss]), gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.bindTexture(gl.TEXTURE_2D, null);
+        }
+        this._refLineCss.push({ id: L.id, y, x0 });
+      }
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    };
+
+    // Within 4 CSS px of a drawn line (and, for a key change, at or after its start).
+    proto.pickReferenceLinesAt = function (clientX, clientY, firstOnly = false) {
+      const css = this._refLineCss;
+      if (!css || !css.length) return [];
+      const px = clientX - (this.canvasOffset?.x ?? 0);
+      const py = clientY - (this.canvasOffset?.y ?? 0);
+      const hits = [];
+      for (const r of css) {
+        if (px >= r.x0 - 2 && Math.abs(py - r.y) <= 4) {
+          hits.push({ type: 'reference', id: r.id });
+          if (firstOnly) break;
+        }
+      }
+      return hits;
     };
   } catch {}
 })();

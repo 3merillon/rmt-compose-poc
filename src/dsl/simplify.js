@@ -2,9 +2,9 @@
  * DSL Expression Simplifier
  *
  * Folds the rational coefficients of a DSL expression while leaving every note
- * reference, helper call and irrational power exactly where the author put them.
+ * reference and irrational power exactly where the author put them.
  *
- * The normal form mirrors the evaluator's SymbolicPower algebra (see
+ * The normal form mirrors the evaluator's exact algebra (src/value/exact.js; see
  * binary-evaluator.js): a value is a rational coefficient times a product of
  * base^exp terms, and like-base powers merge by adding exponents. Coefficients
  * never migrate into a power term, so a TET expression keeps its shape:
@@ -136,8 +136,12 @@ function canonicalize(node, ctx) {
     }
 
     case NodeType.NoteReference:
-    case NodeType.HelperCall:
       return [termFromAtom(atomFor(node), ctx)];
+
+    case NodeType.Approximate:
+      // `~1.5` is an opaque factor, never folded into the exact coefficient:
+      // `2 * base.f * ~(3/2)`, not `base.f * ~3`
+      return [termFromAtom(opaqueAtom(node), ctx)];
 
     case NodeType.UnaryOp: {
       if (node.operator !== '-') throw new Bail();
@@ -194,7 +198,7 @@ function canonicalizePow(node, ctx) {
 
   const base = collapse(canonicalize(node.left, ctx), ctx);
 
-  // Constant base: mirror MusicValue.pow / tryRationalPower.
+  // Constant base: mirror the evaluator's rational power (src/value/exact.js).
   if (base.factors.size === 0) {
     const rational = tryRationalPow(base.coeff, exp);
     if (rational) {
@@ -279,7 +283,7 @@ function mergeFactor(term, factor, exp) {
 /**
  * Drop factors that cancelled out, and fold constant powers that became rational.
  *
- * The fold matches SymbolicPower.isRational(): only an integer exponent counts.
+ * The fold matches the evaluator: only an integer exponent makes a power rational by itself.
  * A merged exponent that is still fractional (4^(1/4) * 4^(1/4) = 4^(1/2)) stays
  * a power term, exactly as the evaluator leaves it symbolic — and so stays
  * flagged as corrupted.
@@ -320,7 +324,7 @@ function group(terms) {
   return [...groups.values()].filter(term => !term.coeff.equals(0));
 }
 
-/** base^exp as an exact rational, or null when irrational. Mirrors tryRationalPower. */
+/** base^exp as an exact rational, or null when irrational. Mirrors rationalPow in src/value/exact.js. */
 function tryRationalPow(base, exp) {
   if (exp.equals(0)) return new Fraction(1);
   try {
@@ -450,7 +454,7 @@ function precOf(node) {
     case NodeType.FractionLiteral:
       return node.numerator < 0 ? PREC.UNARY : PREC.ATOMIC;
     case NodeType.NoteReference:
-    case NodeType.HelperCall:
+    case NodeType.Approximate:
       return PREC.ATOMIC;
     case NodeType.UnaryOp:
       return PREC.UNARY;
@@ -474,13 +478,11 @@ function printNode(node) {
       return `${target}.${getShortPropertyName(node.property)}`;
     }
 
-    case NodeType.HelperCall: {
-      const arg = node.noteArg === 'base' ? 'base' : `[${node.noteArg}]`;
-      return `${node.helper}(${arg})`;
-    }
-
     case NodeType.UnaryOp:
       return `-${wrap(node.operand, PREC.UNARY)}`;
+
+    case NodeType.Approximate:
+      return `~${approxLiteralText(node.literal)}`;
 
     case NodeType.BinaryOp: {
       const op = node.operator;
@@ -496,6 +498,31 @@ function printNode(node) {
     default:
       throw new Bail();
   }
+}
+
+/**
+ * An approximate literal as written: a measurement keeps its decimal form
+ * (`~261.63`, not `~(26163/100)`) whenever the fraction is a finite decimal.
+ */
+function approxLiteralText(lit) {
+  const neg = lit.type === NodeType.UnaryOp;
+  const node = neg ? lit.operand : lit;
+  let n = BigInt(node.numerator), d = BigInt(node.denominator);
+  if (neg) n = -n;
+  if (d < 0n) { n = -n; d = -d; }
+  const sign = n < 0n ? '-' : '';
+  const mag = n < 0n ? -n : n;
+  if (d === 1n) return `${sign}${mag}`;
+  // A finite decimal when d = 2^a 5^b: k digits after the point, k = max(a, b)
+  let a2 = 0, a5 = 0, r = d;
+  while (r % 2n === 0n) { r /= 2n; a2++; }
+  while (r % 5n === 0n) { r /= 5n; a5++; }
+  if (node.type === NodeType.NumberLiteral && r === 1n) {
+    const k = Math.max(a2, a5);
+    const digits = (mag * (10n ** BigInt(k)) / d).toString().padStart(k + 1, '0');
+    return `${sign}${digits.slice(0, -k)}.${digits.slice(-k)}`;
+  }
+  return `(${sign}${mag}/${d})`;
 }
 
 function wrap(node, required) {

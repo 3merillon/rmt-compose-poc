@@ -1,6 +1,6 @@
 ---
 title: Building a Module Library
-description: How the shipped 79-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
+description: How the shipped 81-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
 ---
 
 # Building a Module Library
@@ -10,7 +10,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 
 ## What ships
 
-**79 modules in six sections.**
+**81 modules in six sections.**
 
 | Section | Modules | What's in it |
 |---|---|---|
@@ -19,9 +19,11 @@ editable, and the fastest way to add to it is to select some notes and press one
 | **Progressions** | 8 | ii–V–I, I–IV–V–I, I–vi–IV–V, V7–I, plus four cadences |
 | **Melodies** | 7 | Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 1 | `canon base` — and where your own modules land |
+| **Custom** | 3 | `canon`, `canon base` and `canon melody` — and where your own modules land |
 
-![The module bar showing coloured module tiles grouped into labelled sections](/img/module-library-icons.png)
+![The Intervals section begins with 1/1, 9/8, 32/27, 81/64 and 4/3 tiles](/img/module-library-icons.png)
+
+*Read each interval as a fraction. The small line underneath gives its size in cents.*
 
 Tiles are drawn from the module's metadata. An interval shows its ratio as a stacked fraction with a
 cents caption (`3 / 2`, `702¢`); a chord shows its name with the colon ratio underneath
@@ -48,29 +50,30 @@ Closing the field (magnifier again, `Escape`, or blurring it while empty) always
 
 ## Getting your work into the library
 
-### The good way: Copy to Modules
+### Copy a selection to Modules
 
-1. **Select the notes.** Shift-drag a marquee across empty background (desktop), or long-press empty
-   space and drag (touch). Shift-click / long-press individual notes to toggle them in or out.
-2. Two or more notes selected → the **group widget** appears with the count.
+1. Hold **Shift** and drag from any point on the canvas, including a note. Cross note bodies and the triangle handles of measures you want to include. Shift-click an item to toggle it. On touch, hold still, then drag, or hold the first item and tap the others.
+2. Check the counts in the group widget. A mixed selection lists notes and measures separately.
 3. Press **Copy to Modules**.
 
-The selection is saved into the **Custom** section as `Selection (N notes)` (uniquified with a
+The selection is saved into the **Custom** section with a name such as `Selection (2 notes and 1 measure)` (uniquified with a
 trailing number if that name is taken), a toast confirms it, and the Custom section auto-expands if
 it was collapsed. The selection stays live — the action is non-destructive.
 
 What you get is a genuinely reusable module, not a snapshot:
 
-- The **earliest selected note becomes the root** and sits on the new module's BaseNote.
+- The earliest selected timed item starts at the new module’s time origin. Pitches keep their ratios to the source BaseNote.
 - Expressions that reference only notes *inside* the selection are copied **verbatim** (ids
   renumbered). So `[1].t + [1].d` stays `[1].t + [1].d` — internal branching survives.
 - Expressions that reached *outside* the selection would dangle, so they are rebuilt against the new
-  base as ratios and beat offsets: `k * base.f`, `base.t + beat(base) * k`, `beat(base) * k`.
-- The new BaseNote is a copy of your current one, so `base.f` and `beat(base)` keep meaning what
+  base as ratios and time-unit offsets: `k * base.f`, `base.t + base.d * k`, `base.d * k`.
+- The new BaseNote is a copy of your current one, so `base.f` and `base.d` keep meaning what
   they meant, and pitches survive as **ratios** — which is what lets the copy transpose correctly
   when you drop it on a different note.
 
-Drop the copy back onto the note it came from and it lands exactly on top of itself.
+Measures keep their flags, offsets, lengths and internal links. Choose **Start** or **End** in the library toolbar, then drag the copy onto a sounding note, the BaseNote or a measure triangle. Start aligns the earliest item with the target start. End aligns it with the end of a note or bar.
+
+Open the copied phrase as its own score to keep the original pitches, or drop it onto a new pitch to transpose it. The [330 Hz octave example](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own) shows which pitch to change if you want the copy to follow a different anchor.
 
 Per-note `color` and `instrument` are carried into the copied module too, along with the BaseNote's
 instrument — the copy keeps its look and its timbre, not just its pitch, timing and structure.
@@ -80,7 +83,7 @@ It writes to the library, not to your composition — so `Ctrl+Z` will not remov
 copy, delete its tile (the red **×** on the icon).
 :::
 
-### The other way: upload a file
+### Upload a file
 
 1. **+ menu** → **Save Module**. A file downloads, always named **`module.json`** — which is why you
    have to rename it.
@@ -90,7 +93,7 @@ copy, delete its tile (the red **×** on the icon).
 4. Pick your file. On success: `Module "NAME" uploaded successfully`.
 
 The file is validated on the way in: it must have a `baseNote` object and a `notes` array, at most
-10 000 notes, unique integer ids in 0…65535 (the same `u16` ceiling the loader and both expression
+500 000 notes, unique integer ids in 0…16777215 (the same ceiling the loader and both expression
 parsers enforce), and every expression and colour must pass validation.
 A bad file is rejected with `Invalid module: <errors>`.
 
@@ -109,9 +112,9 @@ its internal ids renumbered so nothing collides.
 
 | Drop target | Result |
 |---|---|
-| A note | Imported and re-rooted onto that note |
+| A note | Imported and re-rooted onto that note's start and pitch; its durations stay in the workspace's time unit |
 | The BaseNote circle | Imported keeping its `base.*` anchors |
-| A measure bar | Timing anchors to the measure; **frequency stays on `base.f`** (a measure bar has no pitch) |
+| A measure bar | Timing starts at the chosen edge of the bar. Lengths expressed in `base.d` use the workspace time unit. Pitch anchors to the BaseNote. |
 | A silence | **Rejected** — *"Cannot drop onto a silence."* |
 | Empty background | **Rejected** — *"Drop onto a note or the BaseNote circle to import a module."* |
 
@@ -123,8 +126,7 @@ produces an error toast and does nothing. Modules are always imported *onto a ta
 ### Drop mode: Start / End
 
 The **Start / End drop-mode buttons** are the two arrow-against-a-bar icons in the library toolbar,
-just left of Undo/Redo. They work as a radio pair — exactly one is lit — and the default is
-**Start**.
+just left of Undo/Redo. They work as a radio pair — exactly one is lit — and a fresh library starts in **End** mode. A saved choice takes precedence.
 
 | Mode | Button | Effect on a note |
 |---|---|---|
@@ -134,7 +136,7 @@ just left of Undo/Redo. They work as a radio pair — exactly one is lit — and
 Start stacks (chords). End chains (scales, melodies). The choice is remembered across sessions.
 
 **Dropping on the BaseNote ignores the drop mode entirely.** The End adjustment only applies to a
-real note.
+sounding note or measure.
 
 An import is one undo entry (`Import Module at <id>`), and playback pauses first if it was running.
 

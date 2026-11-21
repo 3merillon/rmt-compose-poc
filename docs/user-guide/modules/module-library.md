@@ -1,17 +1,15 @@
 ---
 title: The Module Library
-description: The 79 shipped modules — intervals, chords, progressions, melodies, scale systems — and why each one is a relational tree you can re-root onto any note.
+description: The 81 shipped modules — intervals, chords, progressions, melodies, scale systems — including their ratios, progression timings, scale periods and canon parts.
 ---
 
 # The Module Library
 
-RMT Compose ships **79 modules**. Not one of their notes carries an absolute pitch.
+Choose from **81 shipped modules**. An interval adds one pitch, a progression adds several chords, and a complete canon adds three voices. For a first comparison, open the module bar, choose **Start**, and drag **Intervals → Perfect 5th** onto a sounding note. The new pitch begins with its target and follows it at 3/2. Choose **End** to hear the interval after the target instead.
 
-That is the point. A module does not store "A4 = 440 Hz followed by C♯5". It stores *a fifth above the root*, *a major third above the chord root*, *a fourth above the previous chord's root*. Every note is written against the module's own `base`, and dropping the module throws that `base` away and substitutes the note you dropped on. So you get a real chord, in a real key, at a real pitch — the one that note is at. Drop the same module on a different note and you get the same shape somewhere else, with exactly the same ratios.
+![The Intervals section begins with 1/1, 9/8, 32/27, 81/64 and 4/3 tiles](/img/module-library-icons.png)
 
-So the library is not a bag of samples to paste. It is a set of relationships you graft onto what you already have.
-
-![Module library tiles: coloured squares showing stacked fractions with cents for intervals, chord names with colon ratios, and wrapped names for melodies and scales](/img/module-library-icons.png)
+*Read each interval as a fraction. The small line underneath gives its size in cents.*
 
 ## What ships
 
@@ -22,99 +20,26 @@ So the library is not a bag of samples to paste. It is a set of relationships yo
 | **Progressions** | 8 | Four progressions and four cadences, each a chain of chord roots |
 | **Melodies** | 7 | Public-domain tunes |
 | **Scale Systems** | 6 | 12-, 19-, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 1 | Where copied selections land, and the obvious home for your uploads |
+| **Custom** | 3 | Where copied selections land, and the obvious home for your uploads |
 
 They live in the [module bar](/user-guide/interface/module-bar) under the top bar. Drag one out and drop it on a note.
 
 ## How the catalog is built
 
-Every module is a tree. The root of the tree is `base` — the module's own reference note — and everything else hangs off it, or off another note in the module. When you drop the module onto a note, `base` **becomes** that note, and the whole tree comes with it.
+Open a module file on its own to use its saved BaseNote pitch and time unit. Drop its tile into a workspace to use that workspace’s time unit (`base.d`). On a sounding target, the target supplies the pitch anchor, and the **Start** or **End** control places the imported passage in time. A drop on the BaseNote begins at its start in either mode. [Loading modules](/user-guide/modules/loading-modules)
 
-### An interval is one note
-
-The Perfect 5th module holds exactly one note (plus its own `baseNote` block and a colour):
-
-```json
-{
-  "id": 1,
-  "startTime": "base.t",
-  "duration": "beat(base)",
-  "frequency": "(3/2) * base.f"
-}
-```
-
-Drop it on a note and `base.f` becomes that note's frequency. You get a fifth above *that* note — exactly 3/2, not 700 cents of approximation. Drop it on a note that is itself a fifth above something, and you have stacked two exact fifths.
-
-### A chord is a root, with tones hanging off it
-
-The Major chord, frequencies only (note 1 starts at `base.t`, notes 2 and 3 at `[1].t`, and all three last `beat(base) * 2`):
-
-```json
-{ "id": 1, "frequency": "base.f" }
-{ "id": 2, "frequency": "(5/4) * [1].f" }
-{ "id": 3, "frequency": "(3/2) * [1].f" }
-```
-
-Note 1 is the **root**. Notes 2 and 3 are not independent pitches — they are *defined as* a major third and a fifth above note 1. Move note 1 and the third and the fifth follow it, still a third and a fifth.
-
-This is the difference between a chord and three notes that happen to sound like a chord.
-
-### A progression is a chain of roots
-
-This is where it gets interesting. Here is **ii – V – I**, stripped to its frequencies:
-
-```
-[1]  (9/8) * base.f      ← the ii root — the only note that touches base
-[2]  (6/5) * [1].f       ← minor third of ii
-[3]  (3/2) * [1].f       ← fifth of ii
-
-[4]  (4/3) * [1].f       ← the V root, a fourth above the ii root
-[5]  (5/4) * [4].f       ← third of V
-[6]  (3/2) * [4].f       ← fifth of V
-[7]  (7/4) * [4].f       ← harmonic seventh of V
-
-[8]  (2/3) * [4].f       ← the I root, a fifth below the V root
-[9]  (5/4) * [8].f       ← third of I
-[10] (3/2) * [8].f       ← fifth of I
-[11] (2/1) * [8].f       ← octave of I
-```
-
-Read down the roots: note 1 comes from `base`. Note 4 comes from **note 1**. Note 8 comes from **note 4**. The roots move *by interval* — up a fourth, then down a fifth — exactly as a musician would describe the progression. Nothing in the module is in any key. The absolute pitches only exist once you drop it somewhere.
-
-::: tip Try this
-Drop **ii – V – I** onto a note. Now open the ii chord's root — the first note — in the [note widget](/user-guide/interface/variable-widget) and press the **▲** next to its frequency. That transposes it by the arrow interval, which is 2/1 until you change it in **Settings → Arrows**.
-
-The **entire progression** goes with it. Every chord, every third, every seventh. The V root is still a fourth above the ii root, because that is literally what it says. You did not transpose eleven notes; you moved one note, and ten notes were defined relative to it.
-
-Now try retuning instead of transposing: open that same root and multiply its frequency by `81/80`, a syntonic comma. The whole progression shifts with it, still perfectly in tune with itself.
-:::
-
-Cadences work the same way, with two chords instead of three or four.
-
-### Melodies and scales chain too
-
-Melodies are written as scale degrees against `base`, with start times in beats: `(5/4) * base.f`, `base.t + beat(base) * 3`. Change the BaseNote and the whole tune transposes. Drop it on a note and it plays from there.
-
-Scale systems are **chained note to note** — each step lifts off the one below it:
-
-```
-[1]  base.f
-[2]  [1].f * 2 ^ (1/12)
-[3]  [2].f * 2 ^ (1/12)
-...
-```
-
-Only the first note touches `base`. Lift note 5 and every note above it rises with it, because they are all defined as steps above their predecessor. This is what makes the scale modules useful for experimenting with tunings rather than only hearing them.
-
-::: info
-The scale systems are the only part of the catalog that deliberately makes notes **irrational**. `2 ^ (1/12)` cannot be written as a fraction, so notes built on it are flagged as corrupted in the workspace — shown with a `≈` and a hatched fill. That is honest labelling, not an error. See [Equal Temperament](/user-guide/tuning/equal-temperament).
-
-The **Tesla** scale is the exception: it is built entirely from whole-number ratios, so every note in it stays exact.
-:::
+| Musical structure | What to inspect |
+|---|---|
+| Single interval | **Perfect 5th** contains one note at `(3/2) * base.f`, lasting `base.d`. Drop it onto another fifth to hear two stacked fifths. |
+| Chord | **Major** has three simultaneous pitches, all written against `base.f`. The third and fifth copy the first tone’s start and duration. Retune the drop target to move all three together. |
+| Progression | In **ii – V – I**, silent key changes carry the harmonic roots. The V root reads `(4/3) * [1].f`, and the I root reads `(2/3) * [5].f` in the source file. Sounding notes choose their own octaves around those roots. |
+| Melody | Pitch can be a scale degree against the tonic while time follows a preceding note’s end. Lengthen the first note of **Ode to Joy** and listen to the later entrances move. |
+| Scale | In **12-TET** each successive pitch multiplies the previous one by `2^(1/12)`. Twelve steps reach the octave exactly. **Mixed-Base** ends with a fresh `base.f` reference. |
+| Canon | A pitch can refer across voices or forward in score time, while its onset and duration follow another line. [Trace bar 5 and a cadence](/tutorials/workflows/canon-and-cadences). |
 
 ## Intervals — 46 modules
 
-Each is a single note, one beat long, at a fixed ratio above whatever you drop it on. The tile shows the ratio as a fraction with its size in cents underneath.
+Each is a single note, one time unit long, at a fixed ratio above whatever you drop it on. The tile shows the ratio as a fraction with its size in cents underneath.
 
 **3-limit** — built from 2s and 3s only. Pythagorean tuning.
 
@@ -189,7 +114,7 @@ Each is a single note, one beat long, at a fixed ratio above whatever you drop i
 
 ## Chords — 11 modules
 
-Each is a root plus its tones, all starting together, two beats long. The tile shows the name with the chord's harmonic ratio underneath.
+Each is a root plus its tones, all starting together, two time units long. The tile shows the name with the chord's harmonic ratio underneath.
 
 | Name | Ratio | Tones above the root |
 |---|---|---|
@@ -207,7 +132,7 @@ Each is a root plus its tones, all starting together, two beats long. The tile s
 
 Two of these deserve a note:
 
-**Dominant 7th and Harmonic 7th are not the same chord.** The Dominant 7th takes its seventh from 16/9, which gives the classic 64/45 tritone against the 5/4 third — the tense, wants-to-resolve sound of functional harmony. The Harmonic 7th (4:5:6:7) takes 7/4 instead: four consecutive harmonics, and the flattest, sweetest seventh there is. It does not want to resolve. Play them back to back.
+**Dominant 7th and Harmonic 7th are not the same chord.** The Dominant 7th takes its seventh from 16/9, which gives the classic 64/45 tritone against the 5/4 third — the tense, wants-to-resolve sound of functional harmony. The Harmonic 7th (4:5:6:7) uses four consecutive harmonics. Its 7/4 is lower than 16/9. Play them back to back.
 
 **Base-3 and Base-5 are RMT's own chords.** They are runs of consecutive *odd* harmonics stacked over an odd root: 3:5:7:9 and 5:7:9:11. There is no common-practice name for them because common practice was built on the octave, and these are not.
 
@@ -215,36 +140,37 @@ Two of these deserve a note:
 
 Both live in the **Progressions** section. Every root is expressed as a move from the previous root, so the roots you see below are what the chain resolves to — not what is written in the file.
 
-| Module | Chords | Roots resolve to |
-|---|---|---|
-| V7 – I | Harmonic 7th → Major (with octave) | 3/2 → 1/1 |
-| ii – V – I | Minor → Harmonic 7th → Major (with octave) | 9/8 → 3/2 → 1/1 |
-| I – IV – V – I | Major → Major → Major → Major (with octave) | 1/1 → 4/3 → 3/2 → 1/1 |
-| I – vi – IV – V | Major → Minor → Major → Major | 1/1 → 5/3 → 4/3 → 3/2 |
-| Authentic (V–I) | Major → Major (with octave) | 3/2 → 1/1 |
-| Plagal (IV–I) | Major → Major (with octave) | 4/3 → 1/1 |
-| Deceptive (V–vi) | Major → Minor | 3/2 → 5/3 |
-| Half (I–V) | Major → Major | 1/1 → 3/2 |
+| Module | Chords | Roots resolve to | Chord lengths |
+|---|---|---|---|
+| V7 – I | Harmonic 7th → Major (with octave) | 3/2 → 1/1 | 2 + 2 |
+| ii – V – I | Minor → Harmonic 7th → Major (with octave) | 9/8 → 3/2 → 1/1 | 2 + 2 + 4 |
+| I – IV – V – I | Major → Major → Major → Major (with octave) | 1/1 → 4/3 → 3/2 → 1/1 | 2 + 2 + 2 + 2 |
+| I – vi – IV – V | Major → Minor → Major → Major | 1/1 → 5/3 → 4/3 → 3/2 | 2 + 2 + 2 + 2 |
+| Authentic (V–I) | Major → Major (with octave) | 3/2 → 1/1 | 2 + 2 |
+| Plagal (IV–I) | Major → Major (with octave) | 4/3 → 1/1 | 2 + 2 |
+| Deceptive (V–vi) | Major → Minor | 3/2 → 5/3 | 2 + 2 |
+| Half (I–V) | Major → Major | 1/1 → 3/2 | 2 + 2 |
 
-Each chord lasts two beats; the resolving chord in **ii – V – I** lasts four.
+Read the last column as successive chord lengths in units of `base.d`. In **ii – V – I** the tonic lasts as long as the first two chords together.
 
-Because the roots chain, a progression is a single object with a single handle. Grab the first root and the progression moves. That is not a feature that was added — it falls out of writing the music down honestly.
+Transpose the first silent root to move all the sounding pitches together.
 
 ## Melodies — 7 modules
 
 Public-domain tunes, written as scale degrees against the BaseNote.
 
-| Name | Notes | Tempo | Beats/measure |
+| Name | Notes | BaseNote duration | Reads as |
 |---|---|---|---|
-| Ode to Joy | 15 | 120 | 4 |
-| Twinkle Twinkle | 14 | 120 | 4 |
-| Frère Jacques | 32 | 120 | 4 |
-| Amazing Grace | 32 | 150 | 3 |
-| Greensleeves | 19 | 200 | 3 |
-| Bach Minuet in G | 16 | 150 | 3 |
-| Scarborough Fair | 15 | 150 | 3 |
+| Ode to Joy | 15 | `1/2` | 120 BPM |
+| Twinkle Twinkle | 14 | `1/2` | 120 BPM |
+| Frère Jacques | 32 | `1/2` | 120 BPM |
+| Amazing Grace | 32 | `2/5` | 150 BPM |
+| Greensleeves | 19 | `3/10` | 200 BPM |
+| Bach Minuet in G | 16 | `2/5` | 150 BPM |
+| Scarborough Fair | 15 | `2/5` | 150 BPM |
 
-Drop one on a note and it plays from there, in tune with everything around it. Frère Jacques is a round: drop a second copy onto a note partway through the first and it sings against itself.
+Each melody's pace is its BaseNote's duration, the time unit, and every note length is written against it. The "Reads as" column is `60 / base.d`, which the note widget shows next to the duration. Dropped on a note, a melody takes that note's start and pitch and keeps the workspace's time unit (`base.d` stays `base.d`); see [Loading Modules](/user-guide/modules/loading-modules#drop-a-library-module-onto-a-note).
+For a round with **Frère Jacques**, choose **Start** and drop a second copy onto a note partway through the first. The target pitch and start time determine the second entry.
 
 ## Scale Systems — 6 modules
 
@@ -252,18 +178,18 @@ Chained scales: each note is a step above the previous one, so the scale is a la
 
 | Name | Notes | Step | Note length | Repeats at |
 |---|---|---|---|---|
-| 12-TET | 13 | `× 2 ^ (1/12)` | ¾ beat | the octave |
-| 19-TET | 20 | `× 2 ^ (1/19)` | ½ beat | the octave |
-| 31-TET | 32 | `× 2 ^ (1/31)` | ¼ beat | the octave |
-| Bohlen–Pierce | 14 | `× 3 ^ (1/13)` | ½ beat | the **tritave** (3/1) |
-| Tesla | 81 | odd harmonics — see below | 1 beat | never |
-| Mixed-Base | 12 | mixed 2-, 3- and 5-based steps | ½ beat | returns to `base.f` |
+| 12-TET | 13 | `× 2 ^ (1/12)` | ¾ time unit | the octave |
+| 19-TET | 20 | `× 2 ^ (1/19)` | ½ time unit | the octave |
+| 31-TET | 32 | `× 2 ^ (1/31)` | ¼ time unit | the octave |
+| Bohlen–Pierce | 14 | `× 3 ^ (1/13)` | ½ time unit | the **tritave** (3/1) |
+| Tesla | 81 | odd harmonics — see below | 1 time unit | never |
+| Mixed-Base | 12 | mixed 2-, 3- and 5-based steps | ½ time unit | returns to `base.f` |
 
 Each equal temperament runs one full period plus the note it started on, so you hear it close.
 
 **Bohlen–Pierce** divides the tritave (3/1) into 13 equal steps instead of dividing the octave. It has no octave at all. It sounds like nothing else here, and it is the fastest way to hear that "the octave" is a choice.
 
-### The Tesla scale, honestly
+### The Tesla scale {#the-tesla-scale-honestly}
 
 **Tesla is not an equal temperament**, and it does not repeat at the octave — or anywhere. It is a construction, named for the 3-6-9 idea, not a historical tuning.
 
@@ -275,15 +201,15 @@ Here is exactly what it is: take the **odd numbers from 9 to 169** and divide ea
 
 That is 81 notes (81 = 3⁴), anchored on the 9th harmonic (9 = 3²). In the file it is written as a chain, so each step is the next odd harmonic over the current one — `11/9`, then `13/11`, then `15/13`, all the way down to `169/167`.
 
-The consequence is the interesting part. The steps **shrink as the scale climbs**: the first step is 347 cents — a neutral third — and the last is 21 cents, barely a comma. It starts as a chord and ends as a shimmer. The whole thing spans 169/9, about 5077 cents, or 4.23 octaves, which is why its BaseNote is set an octave low (131.5 Hz) — otherwise the top of it would be out of hearing.
+The consequence is the interesting part. The steps **shrink as the scale climbs**: the first step is 347 cents — a neutral third — and the last is 21 cents, barely a comma.  The whole thing spans 169/9, about 5077 cents, or 4.23 octaves, which is why its BaseNote is set an octave low (131.5 Hz).
 
-It is a harmonic series segment stretched over four octaves, not a scale in the usual sense. Play it and you will hear that immediately. And unlike the equal temperaments sitting beside it, every note in it is an **exact ratio** — nothing in Tesla is approximated.
+Listen for the gap between successive notes narrowing as the pitches climb. And unlike the equal temperaments sitting beside it, every note in it is an **exact ratio** — nothing in Tesla is approximated.
 
 **Mixed-Base** is an experiment: 12 notes whose steps mix octave-based, tritave-based and 5-based roots (`2^(1/12)`, `3^(1/13)`, `5^(1/7)`, and some inverses), and whose final note jumps straight back to `base.f`. It goes wandering and comes home.
 
-## Custom — 1 module
+## Custom — 3 modules
 
-**Custom** ships with `canon base`, a 74-note canon with four silences in it — a real composition to take apart. It is also where **Copy to Modules** files anything you build from a multi-note selection. Uploaded `.json` files land in whichever section's dashed **`+`** tile you clicked, so Custom is the obvious place to put them, not the only one.
+**Custom** includes the eight-bar canon per tonos that opens the app (153 notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The answering bass enters one bar later. Of its 58 notes, 57 are exact fifths above the notes they answer. In bar 5, open the green A (library note 127, startup note 81). It takes its frequency from the following red E by a factor of 2/3. The held F takes its pitch from that A by a factor of 8/5. **Copy to Modules** also puts selections in Custom. Uploaded files go into whichever section’s **+** tile you choose.
 
 ## Where to go next
 

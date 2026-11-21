@@ -19,7 +19,7 @@ You will build a major chord whose three notes sound at once — and whose two u
 
 ## Root it properly
 
-There are two ways to write a chord, and only one of them is worth learning.
+Choose the anchor according to which pitches should move together.
 
 **Anchored to the BaseNote** — each tone is a ratio of `base.f`:
 
@@ -39,22 +39,22 @@ base.f
 
 Both sound identical. But in the second, the chord is a *structure*: retune or transpose Note 1 and the third and fifth follow it, staying a chord. In the first, they do not — they are three independent pitches that happen to line up.
 
-Every chord module shipped in the library uses the second form. So will you.
+Use the second form here so you can later move the chord by editing note 1.
 
 ## Step 1: Clear the workspace
 
 1. Click the **BaseNote** (the orange circle).
 2. Scroll to **DELETE ALL NOTES** and click **Clean Slate**, then **Yes, Clean Slate**.
 
-The BaseNote keeps its defaults: 263 Hz, 100 BPM.
+Clean Slate keeps the current BaseNote pitch and duration. The startup canon uses 263 Hz and `3/5` second (100 BPM). Save your current work before clearing if you want to reload it after the exercise.
 
 ## Step 2: Create the root
 
 1. Click the **BaseNote** again to reopen its widget.
-2. Scroll to **ADD NOTE / SILENCE**. Kind stays on **Note**.
+2. Scroll to **ADD NOTE / SILENCE / REFERENCE**. Kind stays on **Note**.
 3. Set the fields:
    - **Frequency:** `base.f`
-   - **Duration:** `beat(base) * 2` (a half note — long enough to hear the chord ring)
+   - **Duration:** `base.d * 2` (a half note — long enough to hear the chord ring)
    - **Start Time:** `base.t`
 4. Click **Create**.
 
@@ -64,7 +64,7 @@ You now have Note 1, selected, with its widget open.
 
 This is the step that makes it a chord rather than a melody.
 
-1. With **Note 1** selected, scroll to **ADD NOTE / SILENCE**.
+1. With **Note 1** selected, scroll to **ADD NOTE / SILENCE / REFERENCE**.
 2. Change the position radio from **At End** to **At Start**.
 
    Watch the **Start Time** field: it changes from `[1].t + [1].d` to `[1].t`. The new note will start *when Note 1 starts*, not after it.
@@ -74,7 +74,7 @@ This is the step that makes it a chord rather than a melody.
 (5/4) * [1].f
 ```
 
-4. Leave **Duration** as it is — it prefilled from Note 1, so the two notes are the same length.
+4. Enter `[1].d` for **Duration** so later changes to the root’s length also change the third.
 5. Click **Create Note**.
 
 ::: warning
@@ -84,14 +84,14 @@ If you forget to switch to **At Start**, you get an arpeggio, not a chord. The p
 ## Step 4: Create the fifth
 
 1. Select **Note 1** again — the root. Not Note 2.
-2. In **ADD NOTE / SILENCE**, set the position to **At Start** again.
+2. In **ADD NOTE / SILENCE / REFERENCE**, set the position to **At Start** again.
 3. Frequency:
 
 ```
 (3/2) * [1].f
 ```
 
-4. Click **Create Note**.
+4. Set **Duration** to `[1].d` and click **Create Note**.
 
 ## Step 5: Listen and look
 
@@ -119,10 +119,10 @@ The arrow interval is **not fixed to the octave**. It defaults to ×2 up and ×1
 The chord you just built ships as a module.
 
 1. In the module library, expand **Chords** (11 modules).
-2. Check that the drop mode is **Start** — the ⇤ button next to Undo/Redo in the module bar's toolbar should be filled (it is by default). **Start** makes the chord land *at* the note you drop on rather than after it.
+2. Check that the drop mode is **Start** — the ⇤ button next to Undo/Redo in the module bar's toolbar should be filled. **Start** makes the chord land *at* the note you drop on rather than after it.
 3. Drag **Major** onto any note.
 
-The module is exactly the structure you built: a root on `base.f`, and tones written `(5/4) * [1].f` and `(3/2) * [1].f`. Dropping it on a note re-roots the whole chord onto that note.
+The shipped chord sounds the same three pitches. All three frequency expressions in its file use `base.f`. After the drop, retune the target note to move the entire chord. In the handmade version above, retune note 1.
 
 ## Chord reference
 

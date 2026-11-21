@@ -1,6 +1,6 @@
 ---
 title: Picking
-description: How a click becomes a note in RMT Compose — a CPU rounded-rect scan over the instance arrays, plus the unused GPU picking scaffold and why it stays unused.
+description: How a click becomes a note in RMT Compose — an indexed CPU hit test against rounded note rectangles, plus the unused GPU picking scaffold and why it stays unused.
 ---
 
 # Picking
@@ -16,72 +16,60 @@ integration yet — `readAt()` will typically return null."* The file remains on
 canvas-sized FBO it would allocate never exists. (`Workspace` keeps a `this.picking` slot; it
 stays `null`.)
 
-**All picking is CPU-side.** That is not a stopgap: it costs **0.31 ms per call at 100,000 notes**,
-which is why no one has finished the GPU path.
+The workspace resolves point and rectangle hits on the CPU.
 :::
 
 ## What actually runs
 
 ```javascript
 const hit = workspace.pickAt(clientX, clientY);        // top-most hit, or null
-// -> { type: 'note' | 'measure' | 'base', id: number }
+// -> { type: 'note' | 'measure' | 'base' | 'reference', id: number }
 
 const stack = workspace.pickStackAt(clientX, clientY); // every hit, top-most first
 ```
 
-`Workspace.pickAt()` delegates straight to `RendererAdapter.pickAllAt()` and takes the first entry.
-`pickStackAt()` takes the whole list.
+`Workspace.pickAt()` returns the first hit from `RendererAdapter.pickTopAt()`. The first click with
+no previous selection needs only that hit. To cycle through overlaps, the workspace can request
+the complete stack from `RendererAdapter.pickAllAt()`.
 
-### `pickAllAt(clientX, clientY, expandCssPx = 2)`
+Both paths use the same priority, in order.
 
-The mixed-type entry point (`renderer.js:9109`). It concatenates three probes, in visual top-to-bottom
-order:
+1. Measure triangles use a barycentric point-in-triangle test in CSS pixels, in reverse draw order.
+2. The BaseNote uses a circle-radius test in CSS pixels.
+3. Notes use the indexed rounded-rectangle test described below.
+4. Reference lines respond within four CSS pixels of their drawn height, starting at their drawn left edge.
 
-1. **Measure triangles** — `pickTrianglesAt()`, a barycentric point-in-triangle test against cached
-   CSS-space triangles. Triangles sit on top of notes visually, so they are probed first.
-2. **The BaseNote circle** — `pickBaseCircleAt()`, a radius test against the cached circle.
-3. **Notes** — `pickStackAt()`, the rounded-rect scan below.
+### `RendererAdapter.pickAt(clientX, clientY, expandCssPx = 2)`
 
-Measure bars and the BaseNote **are** pickable. Any code that assumes a hit is a note will
-mis-handle a click on a measure triangle.
-
-### `pickAt(clientX, clientY, expandCssPx = 2)` — the note scan
-
-`RendererAdapter.pickAt()` (`renderer.js:3363`) walks the **instance arrays**, not `module.notes`:
-
-```javascript
-for (let i = N - 1; i >= 0; i--) {   // reverse: last-drawn is top-most
-  // 1. cheap AABB reject in world units, expanded by expandCssPx converted to WU
-  if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) continue;
-  // 2. precise rounded-rect containment
-  if (this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) return { type: 'note', id };
-}
-return null;
-```
+`InstanceRanges` indexes blocks of 64 consecutive draw slots by their world-space extents on both
+axes. The renderer queries the pointer bounds with the requested tolerance, visits candidate
+ranges backwards, and checks individual note bounds and rounded corners. `pickAt()` returns on
+the first hit. `pickStackAt()` collects every matching note. Scores with fewer than 512 instances
+and active geometry previews use the same exact test over the instance array.
 
 Three details matter:
 
 - **Reverse order.** `sync()` writes the selected note last, so the instance arrays are already in
   draw order and iterating backwards yields the top-most hit first. No depth sort at pick time.
 - **The precise test is a rounded-rect SDF**, the same one the body shader uses
-  (`_isPointInsideRoundedNote`, `renderer.js:3308`). An AABB alone would let you select a note by
+  (`_isPointInsideRoundedNote`). An AABB alone would let you select a note by
   clicking the empty pixels in its rounded corner.
 - **`expandCssPx` only applies along straight edges.** Inside the corner arcs the tolerance is
   dropped entirely — otherwise the expansion would reintroduce exactly the corner-selection artifact
   the SDF exists to prevent.
 
-There is **no spatial index**, and none is warranted: see the numbers below.
+A selection swap refreshes the bounds of both affected blocks.
 
 ### `hitTestSubRegion(clientX, clientY)`
 
-Resolves *which part* of a note was hit (`renderer.js:3426`):
+The result identifies which part of a note was hit.
 
 ```javascript
 // -> { id, region } where region is 'body' | 'tab' | 'octaveUp' | 'octaveDown'
 ```
 
-It calls `pickAt()` first, so it inherits the rounded-rect interior and only runs when a note body is
-genuinely hit. Then:
+Hover reuses one note probe for the note ring, mixed hit and subregion. A note whose controls
+are hidden in the current overview returns `body`. Visible controls use the following regions.
 
 - **Pull tab** — a full-height band on the inner right,
   `max(10, round(noteHeightCss * overlays.tabWidthFactor) - border)` px wide.
@@ -95,44 +83,34 @@ genuinely hit. Then:
 
 ### `pickRect(x0, y0, x1, y1)` — the marquee
 
-`renderer.js:1452`. The multi-select hit test (shift+drag on desktop, 500 ms long-press on touch).
+The workspace tracks Shift + pointer movement even when the pointer starts over a note body or measure handle. A stationary Shift-click toggles one item. A 500 ms touch hold on an item toggles it and arms a marquee at the same origin. Subsequent taps toggle group members.
 
-- Selects by **intersection**, not containment — any overlap with the rectangle counts.
-- **AABB only.** No rounded-rect refinement: a rubber band that skims a corner should still catch the
-  note.
-- **The BaseNote (id 0) is structurally excluded** (`if (id === 0) continue`), and measure bars are
-  never returned. A measure's `startTime` is its link in the measure chain, so a group move could
-  neither re-anchor it (that reflows the grid under the whole score) nor leave it behind (the group
-  tears on drop).
+`pickRectIds()` returns the intersected IDs. `pickRect()` labels each result as `measure` or `note`.
+
+- **Measures.** `_measureRectHits()` tests the triangle in canvas CSS pixels. It compares the rectangle with the widest horizontal slice of the triangle within their vertical overlap. The dashed vertical bar line has no hit area. Ordered triangles allow a binary search for the first candidate.
+- **Notes and silences.** The renderer transforms the selection rectangle to world coordinates, queries candidate instance ranges, and checks rectangle overlap against each instance. Skimming a rounded corner still counts.
+- **BaseNote and reference lines.** Neither supplies a selectable rectangle or triangle. The note instance pass also excludes ID 0.
 
 See [Selection](/user-guide/notes/selection) for the gestures.
 
 ## Instance indices go stale
 
-Ids are stable across a `sync()`. **Instance indices are not.** `sync()` mints a brand-new
-`_noteIdToIndex` Map and reorders instances (the selected note moves to the end so it draws on top).
-Any cached index silently starts pointing at a *different note*.
-
-This is why `_resolveMultiSelIndices()` re-derives the multi-selection's index cache after every
-rebuild of `_noteIdToIndex`, and why `_ensureMultiSelIndices()` compares the **Map identity** it was
-built from before trusting the cache. If you cache an instance index anywhere, key it on the Map
-identity or re-resolve it on every sync.
+A note keeps its ID across a sync. Its instance slot can change when the current selection moves
+to the end of the draw list. Full sync rebuilds the ID-to-slot map. Incremental sync updates the
+existing map and repairs the index bounds for the slots it changed. Consumers holding an instance
+slot across a sync must resolve it again.
 
 ## Performance
 
-Measured with `node scripts/perf/bench-pick.mjs --url http://localhost:3000`, headless Chromium with
-a real GPU:
+Run `node scripts/perf/bench-dense-playback.mjs 500000 http://localhost:3000 short --pointer` against
+a running dev server. During playback, the driver sweeps real mouse events over notes and empty
+space, records event durations and frame times, checks scheduled audio starts, and clicks through
+overlapping notes. `scripts/perf/bench-pick.mjs` measures isolated note queries.
 
-| Module | Notes | `pickAt` | `pickStackAt` | `hitTestSubRegion` |
-|---|---|---|---|---|
-| `voices-5000` | 5,000 | 0.017 ms | 0.018 ms | 0.017 ms |
-| `voices-100000` | 100,000 | **0.314 ms** | 0.351 ms | 0.318 ms |
-
-A linear scan of 100,000 notes costs a third of a millisecond — about 2% of a 16.6 ms frame, on a
-path that runs at most once per pointermove. Hover at 100k notes still holds 60 fps end to end.
-
-Neither a spatial index nor a GPU ID pass would buy anything a user could perceive, and both would
-add a cache to keep in step with `sync()`. That is the whole reason `picking.js` was never finished.
+With 500,000 notes visible, one 80-event sweep over notes and another over empty space each
+measured 0.1 ms at the 95th percentile in headless Edge. Frame intervals measured 8.4 ms at
+the 95th percentile and every scheduled note was scheduled ahead of its deadline. Three clicks
+advanced through a 695-note stack. Hardware, score layout, and pointer location affect these timings.
 
 ## The scaffold, for the record
 
@@ -161,7 +139,7 @@ picking.destroy();
   (`#version 300 es`, `layout(location=…) in`, `out vec4`) — this is a WebGL2 renderer and a WebGL1
   `attribute` / `gl_FragColor` shader will not compile.
 - Also note `readAt()` would be a synchronous `readPixels` — a GPU stall on the main thread. At the
-  measured CPU cost above, that trade is not obviously a win.
+  pointer frequencies, that stall would share the audio scheduler’s main thread.
 
 ## See also
 

@@ -5,20 +5,16 @@
  * using eval() or new Function(). Instead, it leverages the existing safe
  * compilation pipeline:
  *
- * 1. DSL expressions (e.g., "[1].f * (3/2)") → compileDSL() → BinaryExpression
- * 2. Legacy expressions (e.g., "new Fraction(...)") → ExpressionCompiler → BinaryExpression
- * 3. BinaryExpression → BinaryEvaluator → Safe evaluation
+ * 1. DSL expressions (e.g., "[1].f * (3/2)") → compiler.compile() → BinaryExpression
+ * 2. BinaryExpression → BinaryEvaluator → Safe evaluation
  *
  * This prevents arbitrary code execution from malicious module.json files.
  */
 
 import Fraction from 'fraction.js';
-import { ExpressionCompiler } from '../expression-compiler.js';
+import { compiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
-import { isDSLSyntax, compileDSL } from '../dsl/index.js';
-
-// Singleton compiler instance
-const safeCompiler = new ExpressionCompiler();
+import { findDependencyCycle } from '../variable-deps.js';
 
 /**
  * Validate that an expression string is safe to use.
@@ -70,16 +66,9 @@ export function validateExpressionSyntax(expr) {
         }
     }
 
-    // Try to compile the expression using the safe compiler
-    // If it fails to parse with our strict parser, it's invalid
+    // The DSL is inherently safe: it compiles to bytecode or fails to parse.
     try {
-        if (isDSLSyntax(exprStr)) {
-            // DSL syntax is inherently safe - it compiles to bytecode
-            compileDSL(exprStr);
-        } else {
-            // Legacy syntax - use our strict regex-based parser
-            safeCompiler.compile(exprStr);
-        }
+        compiler.compile(exprStr);
         return { valid: true };
     } catch (e) {
         return { valid: false, error: `Invalid expression: ${e.message}` };
@@ -115,12 +104,7 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
 
     try {
         // Compile to binary
-        let binary;
-        if (isDSLSyntax(exprStr)) {
-            binary = compileDSL(exprStr);
-        } else {
-            binary = safeCompiler.compile(exprStr);
-        }
+        const binary = compiler.compile(exprStr);
 
         // Build evaluation cache if not provided
         const cache = evalCache || buildEvaluationCache(moduleInstance);
@@ -137,7 +121,7 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
             return result;
         }
         if (typeof result.toFraction === 'function') {
-            // Exact either way: MusicValue yields a Fraction, Fraction-likes an 'n/d' string
+            // Exact either way: a Fraction-like toFraction() gives a Fraction or an 'n/d' string
             const exact = result.toFraction();
             return exact instanceof Fraction ? exact : new Fraction(exact);
         }
@@ -174,9 +158,9 @@ export function buildEvaluationCache(moduleInstance) {
                 startTime: safeGetVariable(baseNote, 'startTime'),
                 duration: safeGetVariable(baseNote, 'duration'),
                 frequency: safeGetVariable(baseNote, 'frequency'),
-                tempo: safeGetVariable(baseNote, 'tempo'),
-                beatsPerMeasure: safeGetVariable(baseNote, 'beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null
+                amplitude: safeGetVariable(baseNote, 'amplitude'),
+                attack: safeGetVariable(baseNote, 'attack'),
+                release: safeGetVariable(baseNote, 'release')
             });
         } catch (e) {
             console.warn('buildEvaluationCache: Error caching baseNote:', e);
@@ -197,9 +181,9 @@ export function buildEvaluationCache(moduleInstance) {
                     startTime: safeGetVariable(note, 'startTime'),
                     duration: safeGetVariable(note, 'duration'),
                     frequency: safeGetVariable(note, 'frequency'),
-                    tempo: moduleInstance.findTempo ? moduleInstance.findTempo(note) : null,
-                    beatsPerMeasure: safeGetVariable(note, 'beatsPerMeasure'),
-                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null
+                    amplitude: safeGetVariable(note, 'amplitude'),
+                    attack: safeGetVariable(note, 'attack'),
+                    release: safeGetVariable(note, 'release')
                 });
             } catch (e) {
                 // Skip notes that can't be cached
@@ -244,17 +228,16 @@ export function validateAndNormalizeExpression(expr, moduleInstance, noteId, var
         throw new Error(validation.error);
     }
 
-    // Check for self-reference
+    // Check for self-reference and circular dependencies. Per (note, variable),
+    // like evaluation: reading another variable of the same note is fine, a
+    // variable that ends up reading itself is not.
     if (noteId !== undefined && noteId !== null) {
-        // DSL syntax self-reference check
-        const dslSelfRef = new RegExp(`\\[${noteId}\\]\\.`);
-        if (dslSelfRef.test(exprStr)) {
-            throw new Error('Expression cannot reference itself directly');
-        }
-
-        // Legacy syntax self-reference check
-        if (exprStr.includes(`getNoteById(${noteId})`)) {
-            throw new Error('Expression cannot reference itself directly');
+        const binary = compiler.compile(exprStr);
+        const cycle = findDependencyCycle(moduleInstance, noteId, variableType, binary);
+        if (cycle) {
+            throw new Error(cycle.length === 1
+                ? 'Expression cannot reference itself directly'
+                : 'Circular dependency detected in expression');
         }
     }
 

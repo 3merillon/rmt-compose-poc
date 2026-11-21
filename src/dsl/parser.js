@@ -9,24 +9,26 @@
  *   multiplicative -> unary (('*' | '/') unary)*
  *   unary          -> '-' unary | power
  *   power          -> primary ('^' unary)?
- *   primary        -> fraction | noteRef | helperCall | '(' expression ')' | number
+ *   primary        -> fraction | noteRef | '(' expression ')' | number
  *   fraction       -> '(' number '/' number ')'
  *   noteRef        -> '[' number ']' '.' property | 'base' '.' property
- *   helperCall     -> HELPER '(' noteArg ')'
- *   noteArg        -> '[' number ']' | 'base'
+ *
+ * There are no functions. The old time helpers beat(), tempo() and measure()
+ * are refused with a message saying what to write instead.
  */
 
-import { TokenType, PropertyMap, HelperFunctions, isPropertyName, isHelperFunction, getCanonicalPropertyName } from './constants.js';
+import { TokenType, PropertyMap, RetiredTimeFunctions, RetiredTimeProperties, isPropertyName, getCanonicalPropertyName } from './constants.js';
 import { DSLParseError, ErrorMessages } from './errors.js';
 import { decimalStringToBigFraction } from '../utils/fraction-num.js';
+import { MAX_NOTE_ID } from '../binary-note.js';
 import {
   NodeType,
   createNumberLiteral,
   createFractionLiteral,
+  createApproximate,
   createNoteReference,
   createBinaryOp,
   createUnaryOp,
-  createHelperCall,
 } from './ast.js';
 
 /**
@@ -131,12 +133,17 @@ export class DSLParser {
   }
 
   /**
-   * primary -> fraction | noteRef | helperCall | '(' expression ')' | number
+   * primary -> fraction | noteRef | '(' expression ')' | number
    */
   primary() {
     // Try fraction literal: (num/den)
     if (this.check(TokenType.LPAREN)) {
       return this.fractionOrGrouped();
+    }
+
+    // An approximate number: ~261.63, ~-3, ~(3/2)
+    if (this.check(TokenType.TILDE)) {
+      return this.approximate();
     }
 
     // Try note reference: [id].prop
@@ -149,9 +156,9 @@ export class DSLParser {
       return this.baseReference();
     }
 
-    // Try helper call: tempo(...), measure(...), beat(...)
-    if (this.checkIdentifierIsHelper()) {
-      return this.helperCall();
+    // beat(...), tempo(...), measure(...): the old time model
+    if (this.check(TokenType.IDENTIFIER) && RetiredTimeFunctions.includes(this.peek().value)) {
+      throw new DSLParseError(ErrorMessages.retiredTimeFunction(this.peek().value), this.peek());
     }
 
     // Number literal
@@ -163,6 +170,31 @@ export class DSLParser {
       ErrorMessages.unexpectedToken(this.peek().value, 'expression'),
       this.peek()
     );
+  }
+
+  /**
+   * `~` before a number: the number is approximate (a measurement, a rounded
+   * value). It marks a literal only — `~261.63`, `~-3`, `~(3/2)` — never an
+   * expression: what is computed from it is approximate by propagation.
+   */
+  approximate() {
+    const tilde = this.advance(); // consume '~'
+    let literal = null;
+    if (this.check(TokenType.MINUS)) {
+      this.advance();
+      if (this.check(TokenType.NUMBER)) literal = createUnaryOp('-', this.numberLiteral(this.advance()));
+    } else if (this.check(TokenType.NUMBER)) {
+      literal = this.numberLiteral(this.advance());
+    } else if (this.check(TokenType.LPAREN)) {
+      const node = this.fractionOrGrouped();
+      const isLit = (n) => n && (n.type === NodeType.NumberLiteral || n.type === NodeType.FractionLiteral ||
+        (n.type === NodeType.UnaryOp && n.operator === '-' && isLit(n.operand)));
+      if (isLit(node)) literal = node;
+    }
+    if (!literal) {
+      throw new DSLParseError(ErrorMessages.approximateNeedsNumber(), tilde);
+    }
+    return createApproximate(literal);
   }
 
   /**
@@ -248,9 +280,8 @@ export class DSLParser {
     const idToken = this.advance();
     const noteId = parseInt(idToken.value, 10);
 
-    // 65535 cap matches the u16 note-id field LOAD_REF writes — anything
-    // larger would silently truncate to a different note.
-    if (!Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
+    // MAX_NOTE_ID (src/binary-note.js), the largest id a note can have
+    if (!Number.isInteger(noteId) || noteId < 0 || noteId > MAX_NOTE_ID) {
       throw new DSLParseError(
         ErrorMessages.invalidNoteId(idToken.value),
         idToken
@@ -295,6 +326,9 @@ export class DSLParser {
     const token = this.advance();
     const canonical = getCanonicalPropertyName(token.value);
 
+    if (!canonical && RetiredTimeProperties.includes(token.value)) {
+      throw new DSLParseError(ErrorMessages.retiredTimeProperty(token.value), token);
+    }
     if (!canonical) {
       throw new DSLParseError(
         ErrorMessages.unknownProperty(token.value),
@@ -303,62 +337,6 @@ export class DSLParser {
     }
 
     return canonical;
-  }
-
-  /**
-   * Parse helper call: tempo([id]), measure(base), beat([id])
-   */
-  helperCall() {
-    const funcToken = this.advance(); // consume function name
-    const funcName = funcToken.value;
-
-    this.consume(TokenType.LPAREN, `Expected '(' after '${funcName}'`);
-
-    const noteArg = this.parseNoteArg();
-
-    this.consume(TokenType.RPAREN, ErrorMessages.unclosedBracket('('));
-
-    return createHelperCall(funcName, noteArg);
-  }
-
-  /**
-   * Parse note argument for helper: [id] or base
-   * @returns {number|'base'}
-   */
-  parseNoteArg() {
-    if (this.match(TokenType.BASE)) {
-      return 'base';
-    }
-
-    if (this.match(TokenType.LBRACKET)) {
-      if (!this.check(TokenType.NUMBER)) {
-        throw new DSLParseError(
-          ErrorMessages.invalidNoteId(this.peek().value),
-          this.peek()
-        );
-      }
-
-      const idToken = this.advance();
-      const noteId = parseInt(idToken.value, 10);
-
-      // Same u16 cap as noteReference().
-      if (!Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
-        throw new DSLParseError(
-          ErrorMessages.invalidNoteId(idToken.value),
-          idToken
-        );
-      }
-
-      this.consume(TokenType.RBRACKET, ErrorMessages.unclosedBracket('['));
-
-      // [0] is treated as base
-      return noteId === 0 ? 'base' : noteId;
-    }
-
-    throw new DSLParseError(
-      ErrorMessages.missingHelperArgument(this.previous().value),
-      this.peek()
-    );
   }
 
   /**
@@ -389,14 +367,6 @@ export class DSLParser {
   check(type) {
     if (this.isAtEnd()) return false;
     return this.peek().type === type;
-  }
-
-  /**
-   * Check if current identifier is a helper function
-   */
-  checkIdentifierIsHelper() {
-    if (!this.check(TokenType.IDENTIFIER)) return false;
-    return isHelperFunction(this.peek().value);
   }
 
   /**

@@ -1,0 +1,8 @@
+{
+  "baseNote": { "frequency": "300", "startTime": "1/2", "tempo": "75", "beatsPerMeasure": "3", "measureLength": "beat(base) * base.bpm" },
+  "notes": [
+    { "id": 1, "startTime": "base.t", "duration": "beat(base)", "frequency": "base.f" },
+    { "id": 2, "startTime": "[1].t + [1].d", "duration": "measure(base) * (1/3)", "frequency": "[1].f * (5/4)" },
+    { "id": 3, "startTime": "[2].t + [2].d", "duration": "base.ml / base.bpm", "frequency": "[2].f * (6/5)" }
+  ]
+}

@@ -53,6 +53,8 @@ const SCENES = [
   { name: 'selected-hub-zoomed', setup: { selectHub: true, zoom: 2.5 } },
   { name: 'hover-note', setup: { hoverFirst: true } },
   { name: 'selected-and-hover', setup: { selectHub: true, hoverFirst: true } },
+  { name: 'drag-mixed-rings', setup: { dragRings: true } },
+  { name: 'drag-resize-rings', setup: { dragRings: true, resize: true } },
 ];
 
 async function applyScene(page, setup) {
@@ -65,6 +67,7 @@ async function applyScene(page, setup) {
     if (window.__CULL_OFF) r.__cullOff = true;
     if (window.__METRICS_MEMO_OFF) r.__metricsMemoOff = true;
     if (window.__ATLAS_CACHE_OFF) r.__atlasCacheOff = true;
+    if (r._dragActive) { r.clearDragOffsetPreview(); r.setMultiSelection([]); }
     try { r.setHoverNoteId(null); } catch {}
     try { r.setHoverMeasureId(null); } catch {}
 
@@ -83,7 +86,9 @@ async function applyScene(page, setup) {
     }
 
     if (s.selectHub) {
-      const hub = P.pickHubNoteId();
+      // HUB_ID pins the selected note: the hub pick can change between builds when
+      // dependency counts tie (v2: every note relates to base.d, so the BaseNote wins).
+      const hub = window.__HUB_ID != null ? { id: window.__HUB_ID } : P.pickHubNoteId();
       window.__rmtSelectedForShot = hub.id;
       r.sync({
         evaluatedNotes: P.getEvaluatedNotesRef(),
@@ -94,6 +99,24 @@ async function applyScene(page, setup) {
       });
     }
 
+    if (s.dragRings) {
+      cam.scale = 1;
+      cam.onChange();
+      // Put the first note at the centre so the screenshots actually show the
+      // moving and stationary rings, independent of the preceding pan.
+      const x = r.posSize[0] + r.posSize[2] / 2, y = r.posSize[1] + r.posSize[3] / 2;
+      cam.tx += innerWidth / 2 - (r.matrix[0] * x + r.matrix[6]);
+      cam.ty += innerHeight / 2 - (r.matrix[4] * y + r.matrix[7]);
+      cam.onChange();
+      const ids = Array.from(r._instanceNoteIds.subarray(0, Math.min(r.instanceCount, 128)));
+      const anchor = ids[0];
+      r.sync({ module: P.getModuleRef(), evaluatedNotes: P.getEvaluatedNotesRef(),
+        xScaleFactor: r.currentXScaleFactor || 1, yScaleFactor: r.currentYScaleFactor || 1, selectedNoteId: anchor });
+      r.setMultiSelection(ids);
+      r.setDragOffsetPreview({ noteIds: ids.filter((_, i) => i % 3 !== 2), anchorId: anchor,
+        dxWorld: s.resize ? 0 : 24, dwWorld: s.resize ? 15 : 0 });
+      if (!r._dragActive) throw new Error('Expected active drag rings');
+    }
     if (s.hoverFirst) {
       const mod = P.getModuleRef();
       const ids = Object.keys(mod.notes).map(Number).filter((i) => i !== 0).sort((a, b) => a - b);
@@ -130,16 +153,25 @@ async function shootModule(browser, moduleName, dir) {
   // attributed to culling vs. the other renderer changes.
   if (process.env.CULL_OFF) await page.addInitScript(() => { window.__CULL_OFF = true; });
   if (process.env.METRICS_MEMO_OFF) await page.addInitScript(() => { window.__METRICS_MEMO_OFF = true; });
+  if (process.env.HUB_ID) await page.addInitScript((id) => { window.__HUB_ID = id; }, Number(process.env.HUB_ID));
   if (process.env.ATLAS_CACHE_OFF) await page.addInitScript(() => { window.__ATLAS_CACHE_OFF = true; });
 
+  let body;
   if (moduleName !== 'defaultModule') {
     const res = await page.request.get(`${URL_BASE}/modules/perf/${moduleName}.json`);
     if (!res.ok()) throw new Error(`fetch ${moduleName}: ${res.status()}`);
-    const body = await res.text();
-    await page.route('**/modules/defaultModule.json', (r) =>
-      r.fulfill({ status: 200, contentType: 'application/json', body })
-    );
+    body = await res.text();
   }
+  // The first atlas can be rasterized before or after the webfont arrives.
+  // Compare the same font state on both servers, including the first draw.
+  await page.route('**/modules/defaultModule.json', async route => {
+    await page.evaluate(async () => {
+      await Promise.all([400, 700].map(weight => document.fonts.load(weight + ' 64px "Roboto Mono"', '0123456789[]')));
+      await document.fonts.ready;
+    });
+    if (body === undefined) return route.continue();
+    return route.fulfill({ status: 200, contentType: 'application/json', body });
+  });
 
   await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
   await page.waitForFunction(
@@ -194,6 +226,7 @@ const diffDir = join(OUT, 'diff');
 for (const d of [OUT, baseDir, curDir, diffDir]) mkdirSync(d, { recursive: true });
 
 const browser = await chromium.launch({
+  channel: process.env.PW_CHANNEL || undefined, // PW_CHANNEL=msedge where bundled Chromium is absent
   headless: true,
   args: ['--use-angle=default', '--enable-gpu', '--ignore-gpu-blocklist']
 });

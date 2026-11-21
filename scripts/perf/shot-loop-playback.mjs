@@ -49,7 +49,7 @@ const check = (name, pass, detail) => {
 // Deliberately NOT passing --autoplay-policy=no-user-gesture-required: the real
 // gesture rules are part of what we are testing. Relaxing them here would hide a
 // play() that never actually reaches a running AudioContext.
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.PW_CHANNEL || undefined }); // PW_CHANNEL=msedge where bundled Chromium is absent
 
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 4 });
 const page = await ctx.newPage();
@@ -404,6 +404,39 @@ console.log('\nTEST G — first-touch long-press unlocks audio in the gesture');
   check('first-touch long-press → AUDIO rolling', after.advanced && after.voices > 0, JSON.stringify(after));
   await fresh.close();
 }
+
+const pending = await page.evaluate(async () => {
+  const { audioEngine } = await import('/src/player/audio-engine.js');
+  const prepare = audioEngine.preparePlayback;
+  let finish;
+  try {
+    audioEngine.preparePlayback = () => new Promise(resolve => { finish = resolve; });
+    document.querySelector('#stopButton').click();
+    document.querySelector('#playPauseBtn').click();
+    document.querySelector('#stopButton').click();
+    finish([]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return !audioEngine._streamingState && !document.querySelector('.pp').classList.contains('open');
+  } finally {
+    audioEngine.preparePlayback = prepare;
+  }
+});
+check('Stop during preparation keeps the transport stopped', pending);
+
+const label = await page.evaluate(async () => {
+  const { setDisplayTransposition, clearDisplayTransposition } = await import('/src/player/display-transpose.js');
+  const renderer = window.__rmtRenderer;
+  const base = renderer._baseFreqExact;
+  const ratio = base.div(base).mul(2);
+  const old = [renderer._baseFracNum, renderer._baseFracDen];
+  const epoch = renderer._posEpoch;
+  setDisplayTransposition(1, ratio);
+  const transposed = base.mul(ratio);
+  const matches = renderer._baseFracNum === String(transposed.n) && renderer._baseFracDen === String(transposed.d);
+  clearDisplayTransposition();
+  return matches && renderer._baseFracNum === old[0] && renderer._baseFracDen === old[1] && renderer._posEpoch === epoch;
+});
+check('transposed repeat updates and restores the base label without rebuilding notes', label);
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 

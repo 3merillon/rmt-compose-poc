@@ -53,7 +53,7 @@ Dependencies are tracked **per property**, not per note. Note 4 can take its pit
 - **Drag previews** only move the notes whose *start time* traces back to the note in your hand.
 - **Cascade updates** only recompute the notes that are actually downstream of what changed.
 
-When a value changes, every note that depends on it — directly or transitively — is marked stale and recomputed in **topological order**, so a note is never evaluated before the notes it is built from.
+When a value changes, every note that depends on it — directly or transitively — is marked stale and recomputed in **dependency order**, property by property, so a value is never computed before the values it is built from.
 
 ```
 BaseNote  (frequency 263)
@@ -66,32 +66,35 @@ Retune the BaseNote to 220 and all three follow, keeping their intervals exactly
 
 ## The BaseNote
 
-The BaseNote (ID 0) is the root. It depends on nothing, and nearly everything depends on it — directly, or by way of a chain. It carries the properties the rest of the module reads: `frequency`, `startTime`, `tempo`, `beatsPerMeasure` and `measureLength`.
+The BaseNote (ID 0) usually provides the starting frequency in hertz and the start and duration in seconds. Its duration, `base.d`, is the time unit. Notes written against it follow changes to the unit. A literal duration on an individual note stays fixed. A BaseNote expression may itself read another value when the dependency is acyclic. Its amplitude, attack and release supply defaults for notes without their own values.
 
 `base.f` and `[0].f` are the same reference.
 
 ## Measure chains
 
-Measure bars are notes too — a measure is a note with a `startTime` and nothing else. They form their own chain, each measure hanging off the previous one:
+Measure bars are notes too — a measure bar is a silent note with a start and a duration and the flag `measure`. They form their own chain, each bar hanging off the previous one through both its start and its length:
 
 ```
-# Measure 1
-base.t
+# Bar 1
+startTime:  base.t
+duration:   base.d * 4
 
-# Measure 2
-[1].t + measure([1])
+# Bar 2
+startTime:  [1].t + [1].d
+duration:   [1].d
 
-# Measure 3
-[2].t + measure([2])
+# Bar 3
+startTime:  [2].t + [2].d
+duration:   [2].d
 ```
 
-Change the BaseNote's tempo or beats-per-measure and the whole bar grid re-lays itself, because every measure's start time is expressed in terms of the one before it. `measure(x)` is the measure length of `x`, in seconds. (The widget redisplays it as `[1].ml` — see [Expressions](/user-guide/notes/expressions#the-three-helper-functions).)
+Change the BaseNote's duration, or any one bar's duration, and the bars after it re-lay themselves, because every bar's start and length are expressed in terms of the one before it. A meter change is one bar's `duration`. See [Working with Measures](/tutorials/intermediate/measures).
 
-## Instruments ride the frequency edge
+## Instruments ride the start-time edge
 
-A surprising consequence of the graph: **instruments are inherited along the frequency reference**. A note with no instrument of its own plays with the instrument of the note its *frequency* points at, recursively up the chain, until something sets one or the chain reaches the BaseNote — at which point the global default from Settings → Audio applies.
+A consequence of the graph: **instruments are inherited along the start-time reference**, not the frequency one. A note whose start is written from the end of another note (`[1].t + [1].d`) is in that note's line, a *player*, and plays with its instrument; a silence in the line carries it on. A note that sets its own instrument starts a new player.
 
-Set note 1 to `violin`, and every note whose frequency reads `[1].f * …` becomes a violin. Repoint a note's frequency at a different parent and its instrument may change with it. See [Instruments](/user-guide/playback/instruments).
+Set note 1 to `violin`, and every note that follows note 1 along such starts becomes a violin, until one of them sets its own. A note whose frequency reads `[1].f * …` but whose start is written from elsewhere is not thereby in note 1's line. See [Instruments](/user-guide/playback/instruments#players).
 
 ## Reshaping the graph
 
@@ -120,7 +123,7 @@ base.f * (45/16)
 
 because 3/2 × 5/4 × 3/2 = 45/16. Note 3 now transposes with the BaseNote but no longer follows notes 1 and 2.
 
-The conversion traces the chain **algebraically**, so a TET note stays a TET note — `base.f * 2^(7/12)` does not degrade into a decimal approximation.
+The conversion traces the chain **algebraically**, so a TET note stays a TET note — the exact relation `base.f * 2^(7/12)` is written, never a fraction derived from a float. An approximate value is written with `~`, for example `base.f * ~(14983/8000)`.
 
 **`Evaluate Module`**, on the BaseNote, does this to every note at once. Useful for flattening a module before you share it.
 
@@ -148,13 +151,15 @@ Use it when you want to break a note out of the middle of a chain while keeping 
 
 Deleting a multi-selection **liberates rather than cascades**. Every dependent that lies *outside* the selection is liberated — the deleted notes' expressions are inlined into it, so it keeps its exact position, length and pitch. Only what you selected is destroyed.
 
-The confirmation dialog describes the delete as irreversible. It isn't: it lands as one undo entry. See [Selecting Notes](/user-guide/notes/selection).
+Undo restores the group in one step. See [Selecting Notes](/user-guide/notes/selection).
 
 ## Two edges the graph will not accept
 
-The graph must stay acyclic, so a note cannot reference itself and two notes cannot reference each other. Both are rejected on `Save`, with the reason shown in red under the Save button.
+No property may end up depending on itself. A frequency that reads its own note's frequency is a self-reference; note 5's frequency reading `[6].f` while note 6's frequency reads `[5].f` is a cycle. Both are rejected on `Save`, with the reason shown in red under the Save button.
 
-A reference to a note that **does not exist** is a different problem: it produces no edge, no line and no warning, and the evaluator quietly substitutes 440 Hz. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
+The rule is per property, like everything else on this page. A note's start time may read the same note's duration, and two notes may read each other — one for its pitch, the other for its timing — as long as no property comes back to itself.
+
+A reference to a note that **does not exist** is a different problem: it produces no edge, no line and nothing on screen. The evaluator names the reference in the browser console. Its substitute depends on the field, for example 440 Hz for missing frequency, zero for start time, or one second for duration. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
 
 ## Patterns
 

@@ -44,16 +44,6 @@ The parentheses are part of the fraction literal — `(3/2)` is one exact ration
 Every shipped interval module stores its ratio coefficient-first — the fifth is `(3/2) * base.f` — and when you drag a note or click an arrow, RMT folds the factor into that leading coefficient. `base.f * (3/2)` is equally valid and evaluates to the same pitch; it survives a save exactly as you typed it. The coefficient-first form is what the app writes when it writes for you, not something it imposes on what you write.
 :::
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.baseNote.getVariable('frequency').div(new Fraction(5, 4))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(7, 4))
-```
-</details>
-
 ## The Intervals section of the library
 
 You rarely need to type a ratio at all. The module library — the bar under the top bar — ships **46 interval modules** in its **Intervals** section. Each one is a single note whose frequency is `(N/D) * base.f`. Drop it on a note and you get that interval above that note.
@@ -71,12 +61,12 @@ Each tile draws its ratio as a stacked fraction, with the interval's size in cen
 To find one fast, click the **magnifier** in the library toolbar and type into **Search name, ratio, tag…**. It matches the display name, the ratio, the family, the cents value and the tags — so `3/2`, `fifth`, `septimal` and `comma` all work, and matches surface even inside collapsed sections.
 
 ::: warning A module must land on a note
-Drag the tile onto an existing note or onto the BaseNote circle. Dropping it on empty canvas is rejected with *"Drop onto a note or the BaseNote circle to import a module."*, and dropping it on a silence is rejected with *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."*
+Choose **Start** to stack the interval on its target or **End** to hear the two in sequence. Drag the tile onto an existing note or onto the BaseNote circle. Dropping it on empty canvas is rejected with *"Drop onto a note or the BaseNote circle to import a module."*, and dropping it on a silence is rejected with *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."*
 :::
 
 ## The Chords section
 
-The **Chords** section ships 11 chords, each written as a ratio over its own root. The root is `base.f`; every chord tone is a ratio of the root, so the chord is a subtree, not three loose pitches. Move or retune the root and the whole chord follows.
+The **Chords** section ships 11 chords, each written as a ratio over its own root. In the Major module all three pitches refer to `base.f`. After a drop onto a note, all three follow that target note when you retune it.
 
 | Chord | Ratio | Tones above the root |
 |---|---|---|
@@ -94,14 +84,14 @@ The **Chords** section ships 11 chords, each written as a ratio over its own roo
 
 Two of these deserve a note. **Dominant 7th** uses `16/9` for its seventh, not `7/4` — `16/9` against the `5/4` third gives the classic `64/45` tritone. The septimal chord with `7/4` in it is the separate **Harmonic 7th** (4:5:6:7). And **Base-3** / **Base-5** are the RMT-native shapes: consecutive odd harmonics stacked over an odd root.
 
-The shipped Major chord looks like this:
+The shipped Major chord looks like this (its root is the BaseNote; the other tones start with the root tone and last as long):
 
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "beat(base) * 2" },
-    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "beat(base) * 2" },
-    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "beat(base) * 2" }
+    { "id": 1, "frequency": "base.f",          "startTime": "base.t", "duration": "base.d * 2" },
+    { "id": 2, "frequency": "(5/4) * base.f",  "startTime": "[1].t",  "duration": "[1].d" },
+    { "id": 3, "frequency": "(3/2) * base.f",  "startTime": "[1].t",  "duration": "[1].d" }
   ]
 }
 ```
@@ -144,11 +134,9 @@ Set the interval to **3/2** and every ▲ click walks the note up a pure fifth. 
 
 The interval must be a ratio of positive integers between 1/16 and 16 — you cannot bind an arrow to a TET step like `2^(1/12)`, and an invalid ratio resets to the default octave 2/1. The controls, the quick-pick chips and the folding rules are all on [Transposing with Arrows](/user-guide/notes/transposing).
 
-## Pure ratios never show ≈
+## Read an exact ratio
 
-A note built from ratios evaluates to an exact fraction. It renders with a plain fraction label and no hatching. The moment a note's frequency involves an irrational power — a TET step — it gets flagged: the label picks up an **≈** prefix and the note is cross-hatched.
-
-That contrast is the fastest way to see, at a glance, which parts of a piece are just and which are tempered. See [Equal Temperament](/user-guide/tuning/equal-temperament) for what happens on the other side of the line.
+Select a note and read **Evaluated** on its frequency row for the exact fraction. A long fraction can have a shortened canvas label marked ≈. The widget distinguishes a rounded label from a value actually stored as approximate. [How the display marks exact and approximate values](/getting-started/concepts#the-symbol-approximation)
 
 ## Just versus 12-TET
 
@@ -168,7 +156,7 @@ The fifth is nearly right. The thirds and sixths are off by more than a seventh 
 
 ## Playing ratios back
 
-Any frequency plays on any instrument. The sampled **piano** and **violin** are multisampled and pitch-shift each zone by `frequency / rootHz`, so an 11/8 or a 531441/524288 comes out at exactly the pitch you asked for — they are not quantized to a keyboard. The synth voices (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`) are oscillators and have never cared.
+Any frequency plays on any instrument. The sampled **piano** and **violin** are multisampled and pitch-shift each zone by `frequency / rootHz`, so an 11/8 or a 531441/524288 comes out at exactly the pitch you asked for — they are not quantized to a keyboard. The synth voices (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) are oscillators and have never cared.
 
 Pick the default in **Settings → Audio → Default instrument**, or set `instrument` on an individual note.
 

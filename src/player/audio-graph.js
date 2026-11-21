@@ -25,6 +25,8 @@
  *   audio.reverb.preDelayMs→ preDelay.delayTime (live, no IR regen)
  *   audio.reverb.{roomSize,decaySec,damping} → IR regen (debounced 250 ms)
  *   audio.stereo.{enabled,width} → per-voice StereoPanner (applied at schedule)
+ *   audio.tempered.enabled → which of a note's two pitches its voice is given
+ *                            (applied at schedule; see AudioEngine._scheduleNote)
  */
 
 import { settingsStore } from '../settings/settings-store.js';
@@ -45,6 +47,23 @@ export class AudioGraph {
 
     this.limiter = ctx.createDynamicsCompressor();
     this._configureLimiter();
+    // The musical compressor can still pass peaks above full scale on a dense
+    // chord. Catch those with a second lookahead stage before the device clips.
+    this.peakLimiter = ctx.createDynamicsCompressor();
+    const thresholdDb = -3;
+    const ratio = 20;
+    this.peakLimiter.threshold.value = thresholdDb;
+    this.peakLimiter.knee.value = 0;
+    this.peakLimiter.ratio.value = ratio;
+    this.peakLimiter.attack.value = 0;
+    this.peakLimiter.release.value = 0.1;
+    this.outputTrim = ctx.createGain();
+    // Cancel Web Audio's automatic makeup gain for a zero-knee compressor.
+    // Below threshold the second stage therefore keeps the original level.
+    const fullScaleReductionDb = thresholdDb * (1 - 1 / ratio);
+    this.outputTrim.gain.value = 10 ** (0.6 * fullScaleReductionDb / 20);
+    this.limiter.connect(this.peakLimiter);
+    this.peakLimiter.connect(this.outputTrim);
     this._limiterEnabled = !(s.limiter && s.limiter.enabled === false); // default ON
     this._connectMasterChain();
 
@@ -76,6 +95,11 @@ export class AudioGraph {
     this.stereoEnabled = !!st.enabled;
     this.stereoWidth = clamp01(st.width != null ? st.width : 0.6);
 
+    // --- tempered playback (read by the engine as each voice is scheduled) ---
+    this.temperedEnabled = !!(s.tempered && s.tempered.enabled);
+    // The voice limit the engine keeps (Settings > Audio > Most voices at once).
+    this.maxVoices = Number(s.maxVoices) > 0 ? Number(s.maxVoices) : 256;
+
     // --- per-instrument buses (created lazily) -----------------------------
     /** @type {Map<string,{bus:GainNode,send:GainNode}>} */
     this._buses = new Map();
@@ -100,10 +124,10 @@ export class AudioGraph {
   _connectMasterChain() {
     const dest = this.ctx.destination;
     try { this.masterGain.disconnect(); } catch {}
-    try { this.limiter.disconnect(); } catch {}
+    try { this.outputTrim.disconnect(); } catch {}
     if (this._limiterEnabled) {
       this.masterGain.connect(this.limiter);
-      this.limiter.connect(dest);
+      this.outputTrim.connect(dest);
     } else {
       this.masterGain.connect(dest);
     }
@@ -187,6 +211,11 @@ export class AudioGraph {
     // Stereo (applied to newly-scheduled voices).
     this.stereoEnabled = !!st.enabled;
     this.stereoWidth = clamp01(st.width != null ? st.width : 0.6);
+
+    // Tempered playback (likewise: newly-scheduled voices).
+    this.temperedEnabled = !!(s.tempered && s.tempered.enabled);
+    // The voice limit the engine keeps (Settings > Audio > Most voices at once).
+    this.maxVoices = Number(s.maxVoices) > 0 ? Number(s.maxVoices) : 256;
 
     // Reverb enable + wet + pre-delay (all live params, no IR regen).
     this._reverbEnabled = !!rv.enabled;

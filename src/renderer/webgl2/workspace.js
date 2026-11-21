@@ -9,6 +9,110 @@ import { RendererAdapter } from './renderer.js';
 import { CameraController } from './camera-controller.js';
 import { eventBus } from '../../utils/event-bus.js';
 import { toNumber } from '../../utils/fraction-num.js';
+import { isMeasureNote } from '../../note.js';
+
+// ── Reading the time structure from expression text ───────────────────────────
+// Shared with player.js, which imports these.
+
+const START_PROP = String.raw`(?:t|s|start|startTime)\b`;
+const DUR_PROP = String.raw`(?:d|dur|duration)\b`;
+const RE_START_REF = new RegExp(String.raw`\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP);
+const RE_BASE_START = new RegExp(String.raw`\bbase\s*\.\s*` + START_PROP);
+const RE_CHAIN_LINK = new RegExp(
+  String.raw`^\s*\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP + String.raw`\s*\+\s*\[\s*(\d+)\s*\]\s*\.\s*` + DUR_PROP + String.raw`\s*$`
+);
+
+/**
+ * The note a start expression is measured from: the note whose start it reads
+ * (`[N].t`), else the BaseNote when it reads `base.t`, else the first note it
+ * names at all. So `[5].t + base.d * 2` hangs from 5 although it also reads the
+ * BaseNote's duration (the time unit), and `base.t + [3].d` hangs from the BaseNote.
+ * @returns {number} note id, 0 for the BaseNote, -1 when the text names no note
+ */
+export function startParentIdFromRaw(raw) {
+  if (!raw || typeof raw !== 'string') return -1;
+  let m = raw.match(RE_START_REF);
+  if (m) return parseInt(m[1], 10);
+  if (RE_BASE_START.test(raw)) return 0;
+  m = raw.match(/\[\s*(\d+)\s*\]/);
+  if (m) return parseInt(m[1], 10);
+  if (/\bbase\s*\./.test(raw)) return 0;
+  return -1;
+}
+
+// Set iteration visits newly added IDs. Shared downstream chains are traversed once.
+function expandStartTimeDependents(graph, moving) {
+  for (const id of moving) {
+    for (const dependent of graph.getStartTimeDependents(id)) moving.add(dependent);
+  }
+}
+
+/**
+ * A measure chain link starts exactly where the bar before it ends: `[P].t + [P].d`.
+ * Any other start (an offset, another note, the BaseNote) begins a chain of its own.
+ * The caller checks that P is a bar.
+ * @returns {number|null} P, or null when `raw` is not a chain link
+ */
+export function measureChainLinkParentId(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const m = raw.match(RE_CHAIN_LINK);
+  if (!m || m[1] !== m[2]) return null;
+  return parseInt(m[1], 10);
+}
+
+/** Whether `note` is a bar chained onto bar `parentId` (see measureChainLinkParentId). */
+function isChainLinkOf(note, parentId) {
+  try {
+    if (!isMeasureNote(note)) return false;
+    const pid = measureChainLinkParentId(note.variables?.startTimeString || '');
+    return pid != null && pid === Number(parentId);
+  } catch { return false; }
+}
+
+/** The bar that is chained onto `bar` (earliest start, then lowest id), or null. */
+function nextBarInChain(mod, bar) {
+  try {
+    if (!mod || !isMeasureNote(bar)) return null;
+    let best = null, bestStart = Infinity;
+    for (const id in mod.notes) {
+      const nn = mod.getNoteById(Number(id));
+      if (!isChainLinkOf(nn, bar.id)) continue;
+      const st = toNumber(nn.getVariable('startTime'), Infinity);
+      if (st < bestStart || (st === bestStart && best && Number(nn.id) < Number(best.id))) {
+        best = nn;
+        bestStart = st;
+      }
+    }
+    return best;
+  } catch { return null; }
+}
+
+/**
+ * Start-time ancestors of `from`, itself first, ending with the BaseNote when the
+ * walk reaches it: [{ id, startSec }].
+ */
+function startAncestorChain(mod, from) {
+  const out = [];
+  try {
+    const baseStartSec = () => toNumber(mod?.baseNote?.getVariable?.('startTime'), 0);
+    let cur = from;
+    let guard = 0;
+    while (cur && guard++ < 1024) {
+      out.push({ id: Number(cur.id || 0), startSec: toNumber(cur.getVariable?.('startTime'), 0) });
+      if (Number(cur.id || 0) === 0) break;
+      const ref = startParentIdFromRaw(cur?.variables?.startTimeString || '');
+      if (ref === 0) { out.push({ id: 0, startSec: baseStartSec() }); break; }
+      if (ref < 0) break;
+      cur = mod?.getNoteById?.(ref);
+    }
+  } catch {}
+  return out;
+}
+
+/** A bar's length in seconds: its own duration. */
+function barLengthSec(bar) {
+  try { return toNumber(bar?.getVariable?.('duration'), 0) || 0; } catch { return 0; }
+}
 
 /**
  * CameraController is provided by camera-controller.js
@@ -60,7 +164,7 @@ export class Workspace {
       cachedDependents: null  // Set<number> of dependent note IDs
     };
 
-    // Module snapshot for snapping/tempo info (filled in sync)
+    // Module snapshot for snapping (time unit) and chain info (filled in sync)
     this._module = null;
 
     // Bound DOM handlers (set in init)
@@ -120,9 +224,15 @@ export class Workspace {
           locked = !!(lb && lb.classList && lb.classList.contains('locked'));
         } catch {}
         if (locked) return;
+        // A fresh contact is independent of the compatibility click from the last release.
+        if (e.isPrimary && e.button === 0) {
+          this.containerEl.__rmtSuppressClickUntil = 0;
+          if (this._postDropClick) document.removeEventListener('click', this._postDropClick, true);
+        }
 
         // Disable multi-touch while dragging/resizing to avoid erratic placement
         if (e.pointerType === 'touch') {
+          if (this._touchActiveCount >= 2) return;
           if (this._interaction && this._interaction.active) {
             // A second finger during a pending marquee means the user actually wants to
             // pinch-zoom. Give the gesture up rather than fight the camera for it.
@@ -137,38 +247,28 @@ export class Workspace {
         }
 
         // ── Multi-select entry ──────────────────────────────────────────────────
-        // Long-press IS the touch equivalent of shift: on empty background it rubber-bands
-        // a marquee, on a note it toggles that note in or out of the selection. Group drag
-        // is NOT handled here — a note already in the group falls through to the normal
-        // move gesture below, which is then decorated as a group drag, so it inherits all
-        // the existing snapping and clamping for free.
-        {
+        if ((e.shiftKey && e.button === 0) || e.pointerType === 'touch') {
           const hit = this._pickAny(e.clientX, e.clientY);
-
-          if (!hit) {
-            if (e.pointerType !== 'touch' && e.shiftKey) {
-              this._beginMarquee(e, this._multiSelIds().size > 0);
-              return;
-            }
-            if (e.pointerType === 'touch') {
-              this._armLongPress(e, { kind: 'marquee', additive: this._multiSelIds().size > 0 });
-            }
-          } else if (e.pointerType === 'touch' && hit.type === 'note') {
-            this._armLongPress(e, { kind: 'toggle', noteId: Number(hit.id) });
+          const id = hit && (hit.type === 'note' || hit.type === 'measure') ? Number(hit.id) : null;
+          if (e.pointerType !== 'touch') {
+            // Shift owns this gesture even over an octave control or a resize handle.
+            this._beginMarquee(e, this._multiSelIds().size > 0, id);
+            return;
           }
-          // Deliberately FALL THROUGH in both touch cases. Until the timer fires this is
-          // still an ordinary pan (on background) or a pending note drag (on a note);
-          // travel, a second finger, or an early release all cancel it. So pan, pinch-zoom
-          // and note dragging are untouched, and we never take a gesture on speculation.
+          if (!hit || id != null) {
+            this._armLongPress(e, { kind: id == null ? 'marquee' : 'toggle', noteId: id,
+              additive: this._multiSelIds().size > 0 });
+          }
         }
 
         if (!this.renderer || typeof this.renderer.hitTestSubRegion !== 'function') return;
         const subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY);
 
-        // If no note subregion hit, allow measure-triangle dragging via mixed pick
-        if (!subHit || !subHit.id) {
+        // A triangle is painted above any note underneath it.
+        const triangle = subHit?.id ? this.renderer.pickTrianglesAt?.(e.clientX, e.clientY, true)?.[0] : null;
+        if (triangle || !subHit || !subHit.id) {
           try {
-            let mixedTop = this.pickAt(e.clientX, e.clientY, 3);
+            let mixedTop = triangle || this.pickAt(e.clientX, e.clientY, 3);
             // If a different measure is currently selected and also under the pointer, prefer it.
             // pickAt returns the top-most triangle, but the user may have stack-clicked to select a lower one.
             if (mixedTop && mixedTop.type === 'measure' && this.renderer?._lastSelectedNoteId != null) {
@@ -189,143 +289,6 @@ export class Workspace {
               const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
               const pointerOffsetWorld = pointerWX0 - startWorldX;
 
-              // INTERACTION CACHE (measure): Capture linear chain and index at pointerdown.
-              // - cachedMeasureChain: Array<{id,startSec}> from earliest ancestor -> last dependent
-              // - cachedMeasureIndex: index of active measure within chain
-              // - cachedMeasureMovingIds: closure of downstream measures + normal-note dependents (computed below)
-              // These caches are reused on every preview frame and invalidated in _endInteraction.
-              // Cache measure chain once at pointerdown to avoid O(n^2) rebuilds per frame
-              const chain0 = this._collectMeasureChainFor(Number(measureId)) || [];
-              let cidx0 = chain0.findIndex(m => Number(m.id) === Number(measureId));
-              if (cidx0 < 0) cidx0 = 0;
-
-              // Build moving-set cache for measure drag: downstream measures + all normal notes whose startTime depends on them
-              // OPTIMIZED: Uses DependencyGraph.getAllStartTimeDependents() for O(d) instead of O(N×M) regex scanning
-              const moveSet0 = new Set();
-              try {
-                const mod = this._module;
-                const depGraph = mod._dependencyGraph;
-
-                // 1) Seed measures: downstream along the linear chain (including the anchor)
-                const seedMeasures = new Set();
-                for (let j = cidx0; j < chain0.length; j++) {
-                  const mid = Number(chain0[j].id);
-                  seedMeasures.add(mid);
-                  moveSet0.add(mid);
-                }
-                if (!seedMeasures.size) {
-                  seedMeasures.add(Number(measureId));
-                  moveSet0.add(Number(measureId));
-                }
-
-                // 2) & 3) Use DependencyGraph to get ALL transitive startTime dependents efficiently
-                // Include ALL dependent measures (both chain links AND anchors) for preview
-                // Anchors depend on this measure so they should move in preview
-                // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
-                if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
-                  // Get all transitive startTime dependents of each seed measure
-                  for (const seedId of seedMeasures) {
-                    const allDeps = depGraph.getAllStartTimeDependents(seedId);
-                    for (const depId of allDeps) {
-                      moveSet0.add(Number(depId));
-                    }
-                  }
-                } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
-                  // Fallback to old behavior
-                  for (const seedId of seedMeasures) {
-                    const allDeps = depGraph.getAllDependents(seedId);
-                    for (const depId of allDeps) {
-                      moveSet0.add(Number(depId));
-                    }
-                  }
-                } else {
-                  // Fallback to original O(N×M) implementation if DependencyGraph not available
-                  // Include ALL dependent measures (both chain links AND anchors) for preview
-                  const isMeasure = (n) => {
-                    try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-                    catch { return false; }
-                  };
-
-                  // Expand to ALL transitive dependent measures (including anchors)
-                  const measureClosure = (seedSet) => {
-                    const out = new Set(seedSet);
-                    if (!mod || !mod.notes) return out;
-                    let changed = true;
-                    while (changed) {
-                      changed = false;
-                      for (const idStr in mod.notes) {
-                        const nn = mod.getNoteById(Number(idStr));
-                        if (!isMeasure(nn)) continue;
-                        const nid = Number(nn.id);
-                        if (out.has(nid)) continue;
-                        const sts = nn.variables?.startTimeString || '';
-                        // Include ANY measure that references a seed (both chain links and anchors)
-                        for (const sid of out) {
-                          if (sts.includes(`getNoteById(${sid})`) || sts.includes(`[${sid}]`) || sts.includes(`measure([${sid}])`)) {
-                            out.add(nid);
-                            changed = true;
-                            break;
-                          }
-                        }
-                      }
-                    }
-                    return out;
-                  };
-
-                  const allMeasuresToMove = measureClosure(seedMeasures);
-                  for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
-
-                  // Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
-                  if (mod && mod.notes) {
-                    const notesObj = mod.notes || {};
-                    const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-                    const getStartTimeStr = (nid) => {
-                      try {
-                        const n = mod.getNoteById(Number(nid));
-                        return n && n.variables && typeof n.variables.startTimeString === 'string'
-                          ? n.variables.startTimeString
-                          : null;
-                      } catch { return null; }
-                    };
-                    const refersStartOf = (nid, refId) => {
-                      const s = getStartTimeStr(nid);
-                      if (!s) return false;
-                      // Legacy
-                      if (s.includes(`getNoteById(${refId})`) &&
-                          (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
-                           s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`))) return true;
-                      // DSL: [refId].t, [refId].d, beat([refId]), measure([refId])
-                      if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`) ||
-                          s.includes(`beat([${refId}])`) || s.includes(`measure([${refId}])`)) return true;
-                      return false;
-                    };
-                    const closureStartRefs = (seedSet) => {
-                      const affected = new Set(seedSet);
-                      let changed = true;
-                      while (changed) {
-                        changed = false;
-                        for (const nid of allIds) {
-                          if (affected.has(nid)) continue;
-                          for (const refId of affected) {
-                            if (refersStartOf(nid, refId)) {
-                              affected.add(nid);
-                              changed = true;
-                              break;
-                            }
-                          }
-                        }
-                      }
-                      return affected;
-                    };
-
-                    const closure = closureStartRefs(allMeasuresToMove);
-                    for (const did of closure) {
-                      moveSet0.add(Number(did));
-                    }
-                  }
-                }
-              } catch {}
-
               this._interaction = {
                 active: true,
                 type: 'measure',
@@ -342,10 +305,7 @@ export class Workspace {
                 origDurationSec: 0,
                 baselineStartSec: null,
                 lastPreview: { startSec: origStartSec, durationSec: 0 },
-                // Per-interaction cached chain/index + dependency closure for GPU preview
-                cachedMeasureChain: chain0,
-                cachedMeasureIndex: cidx0,
-                cachedMeasureMovingIds: moveSet0
+                prepareMeasureDrag: true
               };
 
               // Keep existing selection during measure drag (match normal note behavior)
@@ -462,7 +422,6 @@ export class Workspace {
             baselineStartSec: null,
             lastPreview: { startSec: 0, durationSec: 0 }
           };
-          this._decorateAsGroupDrag(this._interaction);
 
           // Do NOT gate camera yet; allow pinch if a second touch appears.
           // Attach doc-level listeners to track pointer moves for promotion/cancel.
@@ -511,68 +470,6 @@ export class Workspace {
           pointerOffsetWorld = pointerWX0 - startWorldX;
         }
 
-        // PERFORMANCE: Capture baseline startSec and compute affected dependents ONCE at pointerdown
-        const baseline = new Map();
-        baseline.set(id, origStartSec);
-        let affectedIds = new Set();
-        
-        try {
-          const mod = this._module;
-          const anchorId = Number(id);
-
-          // PERFORMANCE: Use DependencyGraph for O(V+E) traversal instead of O(n²) string matching
-          if (type === 'move') {
-            // For MOVE: include notes whose startTime depends on the dragged note's startTime
-            // When we move a note (change its startTime), only notes referencing its startTime should move
-            const graph = mod._dependencyGraph;
-            if (graph && typeof graph.getAllStartTimeOnStartTimeDependents === 'function') {
-              affectedIds = graph.getAllStartTimeOnStartTimeDependents(anchorId);
-            } else if (graph && typeof graph.getAllStartTimeDependents === 'function') {
-              // Fallback to old behavior if property-specific tracking not available
-              affectedIds = graph.getAllStartTimeDependents(anchorId);
-            } else if (graph && typeof graph.getAllDependents === 'function') {
-              affectedIds = graph.getAllDependents(anchorId);
-            }
-          } else if (type === 'resize') {
-            // For RESIZE: include notes whose startTime depends on the dragged note's duration
-            // When we resize a note (change its duration), only notes referencing its duration should move
-            const graph = mod._dependencyGraph;
-            if (graph && typeof graph.getAllStartTimeOnDurationDependents === 'function') {
-              affectedIds = graph.getAllStartTimeOnDurationDependents(anchorId);
-            } else if (graph && typeof graph.getAllDependents === 'function') {
-              // Fallback: no preview for resize if property-specific tracking not available
-              affectedIds = new Set();
-            }
-          }
-          // octave type does not preview position changes, affectedIds stays empty
-
-          // Remove anchor from dependents set (it's not affected by its own movement)
-          affectedIds.delete(anchorId);
-
-          // Record baselines for affected set
-          for (const did of affectedIds) {
-            let s0 = 0;
-            try {
-              const n = mod.getNoteById(Number(did));
-              s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
-            } catch {
-              // Fallback to current renderer position (safe at pointerdown since no preview yet)
-              try {
-                const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
-                  ? this.renderer._noteIdToIndex.get(Number(did))
-                  : null;
-                if (idx != null && idx >= 0 && this.renderer.posSize) {
-                  const base = idx * 4;
-                  const xwLocal = this.renderer.posSize[base + 0];
-                  const xScale = this.renderer.currentXScaleFactor || 1.0;
-                  s0 = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
-                }
-              } catch {}
-            }
-            baseline.set(Number(did), Math.max(0, s0 || 0));
-          }
-        } catch {}
-
         this._interaction = {
           active: true,
           type,
@@ -587,125 +484,16 @@ export class Workspace {
           pointerOffsetWorld,
           origStartSec,
           origDurationSec,
-          baselineStartSec: baseline,
+          prepareNoteDrag: type === 'move' || type === 'resize',
+          baselineStartSec: null,
           lastPreview: { startSec: origStartSec, durationSec: origDurationSec },
-          // PERFORMANCE: Cache to avoid recomputing on every mousemove
-          cachedDependents: affectedIds,
+          cachedDependents: null,
           // Per-interaction caches for fast parent resolution during drag (note move/resize)
           // cachedParentChain: { list: [{id,startSec,endSec}], idx, anchorParentId }
           cachedParentChain: null,
           // cachedAncestorChain: [{id,startSec}] from current parent up to BaseNote (id 0)
           cachedAncestorChain: null
         };
-        // Grabbing a note that is already in the multi-selection turns this into a GROUP
-        // drag: identical gesture, identical snapping — only the commit differs.
-        this._decorateAsGroupDrag(this._interaction);
-        // Seed per-interaction parent/ancestor caches for note drags (move/resize)
-        try {
-          const mod = this._module;
-          const n0 = mod?.getNoteById?.(Number(id));
-          const raw0 = n0?.variables?.startTimeString || '';
-          // Parse current parent (legacy + DSL)
-          let parent0 = null;
-          try {
-            if (raw0.includes('module.baseNote')) {
-              parent0 = mod?.baseNote || null;
-            } else {
-              const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
-            }
-            // DSL fallback
-            if (!parent0) {
-              const dm = raw0.match(/\[(\d+)\]\./);
-              if (dm) parent0 = mod?.getNoteById?.(parseInt(dm[1], 10)) || null;
-              if (!parent0) {
-                const dh = raw0.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                if (dh) parent0 = mod?.getNoteById?.(parseInt(dh[1], 10)) || null;
-              }
-              if (!parent0 && (/\bbase\./.test(raw0) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw0))) {
-                parent0 = mod?.baseNote || null;
-              }
-            }
-          } catch {}
-          if (!parent0) parent0 = mod?.baseNote || null;
-
-          const isMeasure = (nn) => {
-            try { return !!(nn && nn.hasExpression && nn.hasExpression('startTime') && !nn.hasExpression('duration') && !nn.hasExpression('frequency')); }
-            catch { return false; }
-          };
-
-          // Build ancestor chain from current parent up to BaseNote (legacy + DSL)
-          const anc = [];
-          try {
-            let curA = parent0;
-            let guardA = 0;
-            while (curA && guardA++ < 1024) {
-              const st = toNumber(curA.getVariable?.('startTime'), 0);
-              anc.push({ id: Number(curA.id || 0), startSec: st });
-              if (Number(curA.id || 0) === 0) break;
-              const rawA = curA?.variables?.startTimeString || '';
-              if (rawA.includes('module.baseNote')) {
-                anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                break;
-              }
-              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mm) {
-                curA = mod?.getNoteById?.(parseInt(mm[1], 10));
-                if (!curA) break;
-              } else {
-                const dslM = rawA.match(/\[(\d+)\]\./);
-                const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                if (dslId >= 0) {
-                  if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                  curA = mod?.getNoteById?.(dslId);
-                  if (!curA) break;
-                } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                  break;
-                } else {
-                  break;
-                }
-              }
-            }
-          } catch {}
-          this._interaction.cachedAncestorChain = anc;
-
-          // Build linear measure chain if current parent is a measure
-          if (isMeasure(parent0)) {
-            const chain = (this._collectMeasureChainFor && typeof this._collectMeasureChainFor === 'function')
-              ? (this._collectMeasureChainFor(Number(parent0.id)) || [])
-              : [];
-            const list = [];
-            let idx = -1;
-            for (let i = 0; i < chain.length; i++) {
-              const mid = Number(chain[i].id);
-              const st = Number(chain[i].startSec || 0);
-              let ml = 0;
-              try {
-                const mnote = mod?.getNoteById?.(mid);
-                const mlVal = mod?.findMeasureLength?.(mnote);
-                ml = toNumber(mlVal, 0) || 0;
-              } catch {}
-              list.push({ id: mid, startSec: st, endSec: st + ml });
-              if (mid === Number(parent0.id)) idx = i;
-            }
-            if (idx < 0 && list.length) idx = 0;
-            this._interaction.cachedParentChain = { list, idx, anchorParentId: Number(parent0.id) };
-          } else {
-            this._interaction.cachedParentChain = null;
-          }
-        } catch {}
-
-        // Defer drag overlay until user actually drags (avoid bar pop on simple selection)
-        // Precompute and set initial prospective parent at zero-delta so link line is correct immediately
-        try {
-          if (this.renderer?.setProspectiveParentId) {
-            const cand0 = this._resolveProspectiveParentCandidate(Number(id), Number(origStartSec) || 0, e.clientX, e.clientY);
-            this.renderer.setProspectiveParentId(cand0);
-          }
-        } catch {}
-
         // Gate camera input during interaction
         try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
 
@@ -804,25 +592,13 @@ export class Workspace {
           return;
         }
 
-        // Prefer precise subregion hit testing first so octave/tab bands can highlight even at edges.
-        let subHit = null;
-        if (this.renderer?.hitTestSubRegion) {
-          try { subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY); } catch {}
-        }
- 
-        // Derive hovered id from subHit when available; otherwise fall back to general note pick.
-        let newHoveredId = null;
-        if (subHit && subHit.id) {
-          newHoveredId = (subHit.id | 0);
-        } else {
-          const hit = this.pickAt(e.clientX, e.clientY, 2);
-          newHoveredId = (hit && hit.type === 'note') ? (hit.id | 0) : null;
-        }
- 
+        const noteHit = this.renderer.pickAt(e.clientX, e.clientY, 2);
+        const subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY, noteHit);
+        const mixedTop = this.renderer.pickTopAt(e.clientX, e.clientY, 2, noteHit);
+        const newHoveredId = noteHit?.id ?? null;
+
         // Update hover ring when note under cursor changes
-        if (this.renderer?.setHoverNoteId && newHoveredId !== this._hoveredId) {
-          this.renderer.setHoverNoteId(newHoveredId);
-        }
+        this.renderer.setHoverNoteId(newHoveredId);
  
         // Drive background emphasis for non-body subregions, else clear
         if (this.renderer?.setHoverSubRegion) {
@@ -832,7 +608,6 @@ export class Workspace {
           this.renderer.setHoverSubRegion(target);
         }
         // Update BaseNote and Measure hover from mixed top-most hit
-        const mixedTop = this.pickAt(e.clientX, e.clientY, 2);
         if (this.renderer?.setHoverBase) {
           this.renderer.setHoverBase(!!(mixedTop && mixedTop.type === 'base'));
         }
@@ -904,6 +679,18 @@ export class Workspace {
           }
         } catch {}
 
+        if (this._interaction.prepareMeasureDrag) {
+          const start = this._interaction.startClient;
+          if (Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4) return;
+          this._prepareMeasureDrag(this._interaction);
+          this._interaction.prepareMeasureDrag = false;
+        }
+        if (this._interaction.prepareNoteDrag) {
+          const start = this._interaction.startClient;
+          if (e.clientX === start.x && e.clientY === start.y) return;
+          this._prepareNoteDrag(this._interaction);
+          this._interaction.prepareNoteDrag = false;
+        }
         const { type, noteId } = this._interaction;
         const xScale = this.renderer?.currentXScaleFactor || 1.0;
 
@@ -918,26 +705,13 @@ export class Workspace {
           }
 
           st.lastClient = { x: e.clientX, y: e.clientY };
+          if (!st.marqueeDragged && Math.hypot(e.clientX - st.startClient.x, e.clientY - st.startClient.y) <= 4) return;
+          st.marqueeDragged = true;
           const rect = {
             x0: st.startClient.x, y0: st.startClient.y,
-            x1: e.clientX,        y1: e.clientY
+            x1: e.clientX,        y1: e.clientY, additive: st.marqueeAdditive, seedId: st.seedId
           };
           try { this.renderer?.setMarqueeRect?.(rect); } catch {}
-
-          let ids = [];
-          try {
-            const hits = this.renderer?.pickRect?.(rect.x0, rect.y0, rect.x1, rect.y1) || [];
-            for (const h of hits) {
-              const hid = Number(h && h.id);
-              if (Number.isFinite(hid) && hid !== 0) ids.push(hid);
-            }
-          } catch {}
-          st.marqueeIds = ids;
-
-          // Live preview only — the authoritative set is player.js's, and it is written
-          // once on release (workspace:marqueeCommit).
-          const live = st.marqueeAdditive ? new Set([...st.marqueeBaseIds, ...ids]) : new Set(ids);
-          try { this.renderer?.setMultiSelection?.(live); } catch {}
           try { if (e.cancelable) e.preventDefault(); } catch {}
           return;
         }
@@ -982,47 +756,6 @@ export class Workspace {
           const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
           const pointerOffsetWorld = pointerWX0 - startWorldX;
 
-          // PERFORMANCE: Build baseline set and compute dependents ONCE during promotion
-          // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n²) string matching
-          const baseline = new Map();
-          baseline.set(Number(noteId), origStartSec);
-          let affectedIds = new Set();
-
-          try {
-            const mod = this._module;
-            const anchorId = Number(noteId);
-            const depGraph = mod && mod._dependencyGraph;
-
-            // Use startTime-specific DependencyGraph for fast transitive dependent lookup
-            // This ensures we only move notes whose startTime actually depends on the dragged note
-            if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
-              affectedIds = depGraph.getAllStartTimeDependents(anchorId);
-            } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
-              // Fallback to old behavior
-              affectedIds = depGraph.getAllDependents(anchorId);
-            }
-            affectedIds.delete(anchorId);
-            for (const did of affectedIds) {
-              let s0 = 0;
-              try {
-                const n = mod.getNoteById(Number(did));
-                s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
-              } catch {
-                try {
-                  const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
-                    ? this.renderer._noteIdToIndex.get(Number(did))
-                    : null;
-                  if (idx != null && idx >= 0 && this.renderer.posSize) {
-                    const base = idx * 4;
-                    const xwLocal = this.renderer.posSize[base + 0];
-                    s0 = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
-                  }
-                } catch {}
-              }
-              baseline.set(Number(did), Math.max(0, s0 || 0));
-            }
-          } catch {}
-
           // Switch to a real move interaction and gate camera input
           this._interaction.type = 'move';
           this._interaction.startWorldX = startWorldX;
@@ -1030,113 +763,7 @@ export class Workspace {
           this._interaction.pointerOffsetWorld = pointerOffsetWorld;
           this._interaction.origStartSec = origStartSec;
           this._interaction.origDurationSec = origDurationSec;
-          this._interaction.baselineStartSec = baseline;
-          this._interaction.cachedDependents = affectedIds;
-          // Initialize caches
-          this._interaction.cachedParentChain = null;
-          this._interaction.cachedAncestorChain = null;
-          // Group drags must re-decorate AFTER the rebuild above: it just clobbered
-          // cachedDependents with the grabbed note's own dependents, which detaches the
-          // glyph atlas (fraction labels, octave arrows) from the rest of the selection.
-          // Desktop decorates after building the full state (see the pointerdown path);
-          // promotion has to do the same or the two drag caches disagree.
-          if (this._interaction.groupMode) this._decorateAsGroupDrag(this._interaction);
-
-          // Seed per-interaction parent/ancestor caches for note drags (move/resize) on promotion
-          try {
-            const mod = this._module;
-            const n0 = mod?.getNoteById?.(Number(noteId));
-            const raw0 = n0?.variables?.startTimeString || '';
-            // Parse current parent (legacy + DSL)
-            let parent0 = null;
-            try {
-              if (raw0.includes('module.baseNote')) {
-                parent0 = mod?.baseNote || null;
-              } else {
-                const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
-                if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
-              }
-              if (!parent0) {
-                const dm = raw0.match(/\[(\d+)\]\./);
-                if (dm) parent0 = mod?.getNoteById?.(parseInt(dm[1], 10)) || null;
-                if (!parent0) {
-                  const dh = raw0.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                  if (dh) parent0 = mod?.getNoteById?.(parseInt(dh[1], 10)) || null;
-                }
-                if (!parent0 && (/\bbase\./.test(raw0) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw0))) {
-                  parent0 = mod?.baseNote || null;
-                }
-              }
-            } catch {}
-            if (!parent0) parent0 = mod?.baseNote || null;
-
-            const isMeasure = (nn) => {
-              try { return !!(nn && nn.hasExpression && nn.hasExpression('startTime') && !nn.hasExpression('duration') && !nn.hasExpression('frequency')); }
-              catch { return false; }
-            };
-
-            // Build ancestor chain (legacy + DSL)
-            const anc = [];
-            try {
-              let curA = parent0;
-              let guardA = 0;
-              while (curA && guardA++ < 1024) {
-                const st = toNumber(curA.getVariable?.('startTime'), 0);
-                anc.push({ id: Number(curA.id || 0), startSec: st });
-                if (Number(curA.id || 0) === 0) break;
-                const rawA = curA?.variables?.startTimeString || '';
-                if (rawA.includes('module.baseNote')) {
-                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                  break;
-                }
-                const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-                if (mm) {
-                  curA = mod?.getNoteById?.(parseInt(mm[1], 10));
-                  if (!curA) break;
-                } else {
-                  const dslM = rawA.match(/\[(\d+)\]\./);
-                  const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                  const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                  if (dslId >= 0) {
-                    if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                    curA = mod?.getNoteById?.(dslId);
-                    if (!curA) break;
-                  } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                    break;
-                  } else {
-                    break;
-                  }
-                }
-              }
-            } catch {}
-            this._interaction.cachedAncestorChain = anc;
-
-            // Build linear measure chain if current parent is a measure
-            if (isMeasure(parent0)) {
-              const chain = (this._collectMeasureChainFor && typeof this._collectMeasureChainFor === 'function')
-                ? (this._collectMeasureChainFor(Number(parent0.id)) || [])
-                : [];
-              const list = [];
-              let idx = -1;
-              for (let i = 0; i < chain.length; i++) {
-                const mid = Number(chain[i].id);
-                const st = Number(chain[i].startSec || 0);
-                let ml = 0;
-                try {
-                  const mnote = mod?.getNoteById?.(mid);
-                  const mlVal = mod?.findMeasureLength?.(mnote);
-                  ml = toNumber(mlVal, 0) || 0;
-                } catch {}
-                list.push({ id: mid, startSec: st, endSec: st + ml });
-                if (mid === Number(parent0.id)) idx = i;
-              }
-              if (idx < 0 && list.length) idx = 0;
-              this._interaction.cachedParentChain = { list, idx, anchorParentId: Number(parent0.id) };
-            } else {
-              this._interaction.cachedParentChain = null;
-            }
-          } catch {}
+          this._prepareNoteDrag(this._interaction, true);
 
           try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
           // Fall through to normal move-preview path below
@@ -1155,24 +782,18 @@ export class Workspace {
         const dxWorld = curWorldX - baseEdgeX - offsetWorld;
         const dxSec = dxWorld / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
 
-        // Snapping helpers (use tempo at the context note when available)
-        const getBeatLengthSec = (ctxNoteId) => {
+        // Snapping helpers. A sixteenth is a quarter of the time unit, base.d (one
+        // beat). The unit is the same for every note, so the context note passed by
+        // the callers below no longer matters.
+        const getBeatLengthSec = () => {
           try {
-            const mod = this._module;
-            let tempoVal = null;
-            if (ctxNoteId != null && mod && typeof mod.getNoteById === 'function' && typeof mod.findTempo === 'function') {
-              const ctx = mod.getNoteById(Number(ctxNoteId));
-              tempoVal = mod.findTempo(ctx);
-            } else {
-              tempoVal = mod?.findTempo?.(mod?.baseNote);
-            }
-            const tempo = toNumber(tempoVal, 0);
-            if (tempo && isFinite(tempo) && tempo > 0) return 60 / tempo;
+            const unit = toNumber(this._module?.getTimeUnit?.(), 0);
+            if (unit && isFinite(unit) && unit > 0) return unit;
           } catch {}
-          return 60 / 120; // fallback 120 BPM
+          return 1; // the same fallback Module.getTimeUnit() uses
         };
-        const snapSixteenth = (sec, ctxNoteId) => {
-          const bl = getBeatLengthSec(ctxNoteId);
+        const snapSixteenth = (sec) => {
+          const bl = getBeatLengthSec();
           const beats = sec / bl;
           const snappedBeats = Math.round(beats * 4) / 4;
           return Math.max(0, snappedBeats * bl);
@@ -1185,16 +806,16 @@ export class Workspace {
         let startSec = this._interaction.origStartSec;
         let durationSec = this._interaction.origDurationSec;
 
-        if (type === 'move') {
+        if (type === 'move' || (type === 'measure' && this._interaction.groupMode)) {
           let next = this._interaction.origStartSec + dxSec;
           // Snap and clamp to base start
-          next = snapSixteenth(next, noteId);
+          next = snapSixteenth(next);
           if (next < baseStart) next = baseStart;
           startSec = next;
         } else if (type === 'resize') {
-          const minDur = snapSixteenth(1e-6, noteId) || (getBeatLengthSec(noteId) / 4);
+          const minDur = snapSixteenth(1e-6) || (getBeatLengthSec() / 4);
           let next = this._interaction.origDurationSec + dxSec;
-          next = Math.max(minDur, snapSixteenth(next, noteId));
+          next = Math.max(minDur, snapSixteenth(next));
           durationSec = next;
         } else if (type === 'measure') {
           // PERF: optional per-frame marker for measure drag preview (enable via window.__RMT_PERF.measureDrag = true)
@@ -1230,13 +851,8 @@ export class Workspace {
           try {
             const mod = this._module;
             const n = mod?.getNoteById?.(Number(noteId));
-            const s = n?.variables?.startTimeString || '';
-            if (s && (s.includes('module.baseNote') || /\bbase\./.test(s) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(s))) {
-              // Also ensure no note-specific ref precedes the base ref
-              if (!(/\[\d+\]\./.test(s)) && !(/getNoteById\(\s*\d+\s*\)/.test(s))) {
-                parentIsBaseNote = true;
-              }
-            }
+            // Hangs from base.t (a start may also read base.d, the time unit, from any note)
+            parentIsBaseNote = startParentIdFromRaw(n?.variables?.startTimeString || '') === 0;
           } catch {}
           // Compute left bound:
           // - For subsequent measures in chain (cidx > 0): previous measure's start
@@ -1255,7 +871,7 @@ export class Workspace {
             if (parentIsBaseNote) {
               // Anchored to BaseNote: clamp against baseStart (time 0)
               // If inside the first 1/16 bucket from origin, force exact origin.
-              const bl = getBeatLengthSec(noteId);
+              const bl = getBeatLengthSec();
               const sixteenthLen = bl / 4;
 
               // Clamp to base start first so we never go negative
@@ -1266,18 +882,17 @@ export class Workspace {
                 next = left;
               } else {
                 // Otherwise quantize normally to 1/16
-                next = snapSixteenth(next, noteId);
+                next = snapSixteenth(next);
               }
             } else {
               // Parent is a measure or normal note: move freely, will relink on drop
-              next = snapSixteenth(next, noteId);
+              next = snapSixteenth(next);
             }
           } else {
             // For subsequent measures, respect a minimum gap to avoid overlapping previous measure
-            const prevId = Number(chain[cidx - 1]?.id ?? noteId);
-            const gap = snapSixteenth(1e-6, prevId) || (getBeatLengthSec(prevId) / 4);
+            const gap = snapSixteenth(1e-6) || (getBeatLengthSec() / 4);
             // Snap next, then enforce minimum gap from previous
-            next = Math.max(left + gap, snapSixteenth(next, noteId));
+            next = Math.max(left + gap, snapSixteenth(next));
           }
           startSec = next;
 
@@ -1294,54 +909,9 @@ export class Workspace {
                 const note = mod?.getNoteById?.(Number(noteId));
 
                 if (note && mod) {
-                  // Parse current parent from startTimeString (legacy + DSL)
-                  const parseParent = (n) => {
-                    try {
-                      const raw = n?.variables?.startTimeString || '';
-                      // Legacy
-                      const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                      if (m) return mod.getNoteById(parseInt(m[1], 10)) || mod.baseNote;
-                      if (raw.includes('module.baseNote')) return mod.baseNote;
-                      // DSL
-                      const dslM = raw.match(/\[(\d+)\]\./);
-                      if (dslM) return mod.getNoteById(parseInt(dslM[1], 10)) || mod.baseNote;
-                      const dslH = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                      if (dslH) return mod.getNoteById(parseInt(dslH[1], 10)) || mod.baseNote;
-                      if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return mod.baseNote;
-                    } catch {}
-                    return mod.baseNote;
-                  };
-
-                  // Check if note is a measure
-                  const isMeasure = (n) => {
-                    try {
-                      return !!(n && n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency);
-                    } catch { return false; }
-                  };
-
-                  // Find next measure in chain (CHAIN LINK only, legacy + DSL)
-                  const findNextInChain = (measure) => {
-                    if (!isMeasure(measure)) return null;
-                    const legacyLink = `findMeasureLength(module.getNoteById(${measure.id}))`;
-                    const dslLink = `measure([${measure.id}])`;
-                    let best = null;
-                    let bestStart = Infinity;
-                    for (const id in mod.notes) {
-                      const nn = mod.getNoteById(Number(id));
-                      if (!isMeasure(nn)) continue;
-                      const sts = nn.variables?.startTimeString || '';
-                      if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-                        const st = toNumber(nn.getVariable('startTime'), Infinity);
-                        if (st < bestStart) {
-                          bestStart = st;
-                          best = nn;
-                        }
-                      }
-                    }
-                    return best;
-                  };
-
-                  let parent = parseParent(note);
+                  // Current parent from startTimeString (legacy + DSL)
+                  const ref0 = startParentIdFromRaw(note.variables?.startTimeString || '');
+                  let parent = (ref0 > 0 && mod.getNoteById(ref0)) || mod.baseNote;
                   let parentStart = toNumber(parent?.getVariable?.('startTime'), 0);
                   const origStart = toNumber(note.getVariable?.('startTime'), 0);
 
@@ -1349,18 +919,17 @@ export class Workspace {
                   if (Math.abs(startSec - origStart) < tol) {
                     prospectiveParent = Number(parent?.id ?? 0);
                   } else if (startSec > parentStart + tol) {
-                    // Forward drag: walk forward through parent's chain
-                    if (isMeasure(parent)) {
+                    // Forward drag: walk forward through parent's chain (a bar ends at start + its own duration)
+                    if (isMeasureNote(parent)) {
                       let cur = parent;
                       let curStart = parentStart;
                       let advanced = true;
-                      while (advanced) {
+                      let guard = 0;
+                      while (advanced && guard++ < 4096) {
                         advanced = false;
-                        const mlVal = mod.findMeasureLength(cur);
-                        const ml = toNumber(mlVal, 0);
-                        const end = curStart + ml;
+                        const end = curStart + barLengthSec(cur);
                         if (startSec >= end - tol) {
-                          const next = findNextInChain(cur);
+                          const next = nextBarInChain(mod, cur);
                           if (next) {
                             cur = next;
                             curStart = toNumber(next.getVariable('startTime'), 0);
@@ -1373,46 +942,16 @@ export class Workspace {
                     }
                     prospectiveParent = Number(parent?.id ?? 0);
                   } else if (startSec < parentStart - tol) {
-                    // Backward drag: climb ancestor chain (legacy + DSL)
-                    let ancestorChain = [];
-                    let cur = parent;
-                    while (cur && cur.id !== 0) {
-                      const raw = cur.variables?.startTimeString || '';
-                      // Legacy
-                      const m = raw.match(/getNoteById\((\d+)\)/);
-                      if (m) {
-                        cur = mod.getNoteById(parseInt(m[1], 10));
-                        if (cur) ancestorChain.push(cur);
-                        else break;
-                      } else if (raw.includes('module.baseNote')) {
-                        ancestorChain.push(mod.baseNote);
-                        break;
-                      // DSL
-                      } else {
-                        const dslM = raw.match(/\[(\d+)\]\./);
-                        const dslH = !dslM && raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                        const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                        if (dslId > 0) {
-                          cur = mod.getNoteById(dslId);
-                          if (cur) ancestorChain.push(cur);
-                          else break;
-                        } else if (dslId === 0 || /\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) {
-                          ancestorChain.push(mod.baseNote);
-                          break;
-                        } else {
-                          break;
-                        }
-                      }
-                    }
+                    // Backward drag: climb the start ancestors (the parent itself excluded)
+                    const ancestorChain = startAncestorChain(mod, parent).slice(1);
                     if (ancestorChain.length === 0 || ancestorChain[ancestorChain.length - 1]?.id !== 0) {
-                      ancestorChain.push(mod.baseNote);
+                      ancestorChain.push({ id: 0, startSec: toNumber(mod.baseNote?.getVariable?.('startTime'), 0) });
                     }
 
                     for (let i = 0; i < ancestorChain.length; i++) {
                       const anc = ancestorChain[i];
-                      const ancStart = toNumber(anc?.getVariable?.('startTime'), 0);
-                      if (startSec >= ancStart - tol) {
-                        parent = anc;
+                      if (startSec >= Number(anc.startSec || 0) - tol) {
+                        parent = mod.getNoteById(Number(anc.id)) || mod.baseNote;
                         break;
                       }
                     }
@@ -1462,7 +1001,7 @@ export class Workspace {
         // here — before the preview and before lastPreview, which the commit reads — so
         // the ghost stops where the drop will actually land instead of sliding past the
         // base note and snapping back.
-        if (type === 'move' && this._interaction.groupMode
+        if (this._interaction.groupMode
             && Number.isFinite(this._interaction.groupMinDeltaSec)) {
           const minStart = (this._interaction.origStartSec || 0) + this._interaction.groupMinDeltaSec;
           if (startSec < minStart) startSec = minStart;
@@ -1583,8 +1122,7 @@ export class Workspace {
                   const did = Number(didRaw);
                   try {
                     const n = this._module?.getNoteById?.(did);
-                    const isMeasure = !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-                    if (!isMeasure) continue;
+                    if (!isMeasureNote(n)) continue;
                     let baseS = 0;
                     if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
                     else baseS = toNumber(n.getVariable('startTime'), 0);
@@ -1609,14 +1147,14 @@ export class Workspace {
             let chain = (this._interaction && Array.isArray(this._interaction.cachedMeasureChain))
               ? this._interaction.cachedMeasureChain
               : null;
-            if (!chain || !chain.length) {
+            if (!this._interaction.groupMode && (!chain || !chain.length)) {
               chain = this._collectMeasureChainFor(Number(noteId)) || [];
               if (this._interaction) this._interaction.cachedMeasureChain = chain;
             }
             let cidx = (this._interaction && typeof this._interaction.cachedMeasureIndex === 'number')
               ? this._interaction.cachedMeasureIndex
               : -1;
-            if (cidx < 0) {
+            if (!this._interaction.groupMode && cidx < 0) {
               cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
               if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
             }
@@ -1655,7 +1193,9 @@ export class Workspace {
                   // Use DependencyGraph for transitive startTime dependents (fast path)
                   // Include ALL startTime dependents (both chain links AND anchors) for preview
                   // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
-                  if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+                  if (depGraph?.getStartTimeDependents) {
+                    expandStartTimeDependents(depGraph, moveIds);
+                  } else if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
                     for (const seedId of seedMeasures) {
                       const allDeps = depGraph.getAllStartTimeDependents(seedId);
                       for (const depId of allDeps) {
@@ -1746,7 +1286,7 @@ export class Workspace {
             
             // Only include dependents that will actually move this frame
             if (Math.abs(shift) > EPS) {
-              movingIds = Array.from(depIdsSet);
+              movingIds = this._interaction.cachedOverlayIds ??= Array.from(depIdsSet);
             }
           }
         } catch {}
@@ -1774,7 +1314,7 @@ export class Workspace {
         } catch {}
         // Live parent remapping visualization: derive candidate that mirrors commit-time logic
         try {
-          if (this.renderer?.setProspectiveParentId && (type === 'move' || type === 'resize')) {
+          if (!this._interaction.groupMode && this.renderer?.setProspectiveParentId && (type === 'move' || type === 'resize')) {
             const cand = this._resolveProspectiveParentCandidate(Number(noteId), startSec, e.clientX, e.clientY);
             this.renderer.setProspectiveParentId(cand);
           }
@@ -1830,6 +1370,7 @@ export class Workspace {
             try { document.removeEventListener('click', suppressOnce, true); } catch {}
           };
           // Capture phase to intercept before app handlers
+          this._postDropClick = suppressOnce;
           document.addEventListener('click', suppressOnce, true);
           // Safety removal in case no click fires
           setTimeout(() => { try { document.removeEventListener('click', suppressOnce, true); } catch {} }, 50);
@@ -1842,6 +1383,14 @@ export class Workspace {
 
       // Clear cursor (hover handler will reapply)
       try { this.containerEl.style.cursor = this._currentCursor || 'default'; } catch {}
+
+      // A click on a note/touch tap never published a preview. No geometry,
+      // selection or dependent positions need to be restored on release.
+      if (st.prepareNoteDrag || st.prepareMeasureDrag || st.type === 'movePending') {
+        this._interaction = { active: false };
+        this._interactionEdgeCache = null;
+        return;
+      }
 
       // Clear GL preview (shader-based and legacy)
       try {
@@ -1877,14 +1426,6 @@ export class Workspace {
       // Take the rubber-band rectangle down (on cancel as well as commit)
       try { this.renderer?.setMarqueeRect?.(null); } catch {}
       this._cancelLongPress();
-      // An ABANDONED marquee (pinch, pointercancel) must not strand its live preview
-      // highlight — restore what was selected before the drag. On commit we leave it
-      // alone: player.js overwrites it from marqueeCommit a moment later.
-      try {
-        if (st && st.type === 'marquee' && !commit) {
-          this.renderer?.setMultiSelection?.(st.marqueeBaseIds || new Set());
-        }
-      } catch {}
 
       // Commit
       try {
@@ -1909,13 +1450,18 @@ export class Workspace {
               try { if (this._lastSyncArgs) this.sync(this._lastSyncArgs); } catch {}
             }
           } else if (st.type === 'marquee') {
-            // Hand the result to player.js, which owns the authoritative selection.
-            // Emitted even when empty: a shift-drag across nothing should clear.
-            eventBus.emit('workspace:marqueeCommit', {
-              ids: Array.isArray(st.marqueeIds) ? st.marqueeIds : [],
-              additive: !!st.marqueeAdditive
-            });
-          } else if (st.type === 'move' && st.groupMode) {
+            const dragged = st.marqueeDragged || Math.hypot(st.lastClient.x - st.startClient.x, st.lastClient.y - st.startClient.y) > 4;
+            if (!dragged && st.tapId != null) {
+              if (!st.heldItem) eventBus.emit('workspace:multiSelectToggle', { id: st.tapId });
+            } else {
+              const ids = this.renderer.pickRectIds(st.startClient.x, st.startClient.y, st.lastClient.x, st.lastClient.y);
+              if (st.seedId != null && !ids.includes(st.seedId)) ids.push(st.seedId);
+              eventBus.emit('workspace:marqueeCommit', {
+                ids,
+                additive: !!st.marqueeAdditive, touch: st.touch
+              });
+            }
+          } else if (st.groupMode) {
             // GROUP move: the grabbed note's resolved start gives the delta; player.js
             // decides which selected notes actually get it applied (movers vs riders).
             const startSec = (st.lastPreview?.startSec != null) ? st.lastPreview.startSec : st.origStartSec;
@@ -1983,6 +1529,10 @@ export class Workspace {
     };
 
     try {
+      this._onContextMenu = (event) => {
+        if (this._lp || this._interaction?.touch) event.preventDefault();
+      };
+      this.containerEl.addEventListener('contextmenu', this._onContextMenu);
       this.containerEl.addEventListener('pointermove', this._onPointerMove, { passive: true });
       this.containerEl.addEventListener('pointerleave', this._onPointerLeave, { passive: true });
       this.containerEl.addEventListener('pointerdown', this._onPointerDown, { passive: true, capture: true });
@@ -1993,6 +1543,10 @@ export class Workspace {
       this._onGlobalTouchDown = (ev) => {
         if (ev && ev.pointerType === 'touch') {
           this._touchActiveCount = (this._touchActiveCount || 0) + 1;
+          if (this._touchActiveCount >= 2) {
+            this._cancelLongPress();
+            if (this._interaction?.type === 'marquee') this._endInteraction(false);
+          }
           // If a second touch arrives while a move is pending, cancel the pending move
           // so the user can pinch-zoom instead of starting a drag.
           try {
@@ -2027,6 +1581,8 @@ export class Workspace {
       if (this.containerEl && this._onPointerDown) {
         this.containerEl.removeEventListener('pointerdown', this._onPointerDown, true);
       }
+      this.containerEl?.removeEventListener('contextmenu', this._onContextMenu);
+      this._cancelLongPress();
       // Detach any doc listeners
       if (this._onDocPointerMove) document.removeEventListener('pointermove', this._onDocPointerMove, true);
       if (this._onDocPointerUp) document.removeEventListener('pointerup', this._onDocPointerUp, true);
@@ -2068,11 +1624,11 @@ export class Workspace {
     if (!this.renderer) return;
     try {
       const payload = args || {};
-      // Keep a reference to module for snapping (tempo) and clamps
+      // Keep a reference to module for snapping (time unit) and clamps
       try { this._module = payload && payload.module ? payload.module : this._module; } catch {}
       // Cache an authoritative snapshot (without tempOverrides) to restore after a cancel/no-op
       try {
-        const clone = { ...(payload || {}) };
+        const clone = { ...(payload || {}), incremental: true };
         if ('tempOverrides' in clone) clone.tempOverrides = null;
         this._lastSyncArgs = clone;
       } catch {}
@@ -2089,6 +1645,7 @@ export class Workspace {
   // Mixed-type picking (measure/base/notes). Returns first/top-most hit.
   pickAt(clientX, clientY, expandCssPx = 2) {
     try {
+      if (this.renderer?.pickTopAt) return this.renderer.pickTopAt(clientX, clientY, expandCssPx);
       if (this.renderer && typeof this.renderer.pickAllAt === 'function') {
         const list = this.renderer.pickAllAt(clientX, clientY, expandCssPx) || [];
         return (list && list.length) ? list[0] : null;
@@ -2127,7 +1684,7 @@ export class Workspace {
   //
   // Gesture arbitration, in priority order:
   //
-  //   MOUSE   shift + drag on empty space ....... marquee
+  //   MOUSE   shift + drag anywhere ............. marquee
   //           drag a note that is in the group .. group drag
   //           anything else ..................... unchanged (single note, pan, zoom)
   //
@@ -2164,6 +1721,7 @@ export class Workspace {
       this._onDocPointerUp = (ev) => {
         try {
           if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+          if (this._interaction?.type === 'marquee') this._interaction.lastClient = { x: ev.clientX, y: ev.clientY };
           this._endInteraction(true);
         } catch {}
       };
@@ -2181,7 +1739,7 @@ export class Workspace {
     document.addEventListener('pointercancel', this._onDocPointerCancel, true);
   }
 
-  _beginMarquee(e, additive = false) {
+  _beginMarquee(e, additive = false, tapId = null, heldItem = false) {
     this._cancelLongPress();
 
     // Take the camera out of the gesture for its duration, or we rubber-band and pan at
@@ -2189,6 +1747,8 @@ export class Workspace {
     try { this.camera?.setInputEnabled?.(false); } catch {}
     try { this.camera?.setSingleFingerPanEnabled?.(false); } catch {}
 
+    const selected = this.renderer?._lastSelectedNoteId;
+    const seedId = !this._multiSelIds().size && Number(selected) > 0 ? Number(selected) : null;
     this._interaction = {
       active: true,
       type: 'marquee',
@@ -2198,15 +1758,14 @@ export class Workspace {
       pointerId: e.pointerId,
       startClient: { x: e.clientX, y: e.clientY },
       lastClient:  { x: e.clientX, y: e.clientY },
-      marqueeAdditive: !!additive,
-      marqueeBaseIds: additive ? new Set(this._multiSelIds()) : new Set(),
-      marqueeIds: [],
+      marqueeAdditive: !!additive || seedId != null,
+      seedId,
+      tapId, heldItem, marqueeDragged: false, touch: e.pointerType === 'touch',
       lastPreview: { startSec: 0, durationSec: 0 }
     };
 
     this._attachDocInteractionListeners();
 
-    try { this.renderer?.setMarqueeRect?.({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY }); } catch {}
     try { this.containerEl.style.cursor = 'crosshair'; } catch {}
     // NO preventDefault here. We are called from the pointerdown listener, which is
     // registered { passive: true } — the call would be ignored and would log
@@ -2256,13 +1815,14 @@ export class Workspace {
             // are in the middle of building.
             try { this._endInteraction(false); } catch {}
             this._suppressTapAfterLongPress();
-            eventBus.emit('workspace:multiSelectToggle', { id: Number(opts.noteId) });
+            eventBus.emit('workspace:multiSelectToggle', { id: Number(opts.noteId), touch: true });
+            this._beginMarquee({ clientX: startX, clientY: startY, pointerId: pid, pointerType: 'touch' }, true, Number(opts.noteId), true);
             return;
           }
 
           // Marquee: nothing should be interacting yet (we pressed empty background).
           if (this._interaction && this._interaction.active) return;
-          const synthetic = { clientX: startX, clientY: startY, pointerId: pid, preventDefault() {} };
+          const synthetic = { clientX: startX, clientY: startY, pointerId: pid, pointerType: 'touch', preventDefault() {} };
           this._beginMarquee(synthetic, !!opts.additive);
         } catch { cancel(); }
       }, Workspace.MARQUEE_LONG_PRESS_MS)
@@ -2318,9 +1878,9 @@ export class Workspace {
   // preview — only _endInteraction's commit differs.
   _decorateAsGroupDrag(st) {
     try {
-      if (!st || (st.type !== 'move' && st.type !== 'movePending')) return;
+      if (!st || !['move', 'movePending', 'measure'].includes(st.type)) return;
       const sel = this._multiSelIds();
-      if (sel.size < 1 || !sel.has(Number(st.noteId))) return;
+      if (!sel.has(Number(st.noteId)) || (st.type === 'measure' && sel.size === 1)) return;
 
       st.groupMode = true;
       st.groupIds = [...sel];
@@ -2333,7 +1893,9 @@ export class Workspace {
       const moving = new Set(st.groupIds.map(Number));
       try {
         const graph = this._module?._dependencyGraph;
-        if (graph?.getAllStartTimeDependents) {
+        if (graph?.getStartTimeDependents) {
+          expandStartTimeDependents(graph, moving);
+        } else if (graph?.getAllStartTimeDependents) {
           for (const id of st.groupIds) {
             for (const d of (graph.getAllStartTimeDependents(Number(id)) || [])) {
               moving.add(Number(d));
@@ -2353,6 +1915,7 @@ export class Workspace {
       // dependents, which may or may not overlap the group.
       // setDragOverlay's set omits the anchor, matching how the single-note path builds it.
       st.cachedAffectedIds = moving;
+      if (st.type === 'measure') st.cachedMeasureMovingIds = moving;
       const deps = new Set(moving);
       deps.delete(Number(st.noteId));
       st.cachedDependents = deps;
@@ -2403,72 +1966,17 @@ export class Workspace {
       const note = mod.getNoteById(Number(noteId));
       if (!note) return null;
 
-      // Helper: is a "measure" note (has startTime but no duration/frequency)
-      const isMeasure = (n) => {
-        try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-        catch { return false; }
-      };
-
       // Helper: parse current parent from startTimeString or parentId; fall back to BaseNote
       const parseParent = (n) => {
         try {
-          const raw = n?.variables?.startTimeString || '';
-          // Legacy: module.getNoteById(N)
-          const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
-            const p = mod.getNoteById(pid);
-            return p || mod.baseNote;
-          }
-          if (raw.includes('module.baseNote')) return mod.baseNote;
-          // DSL: [N].t or [N].d or beat([N]) etc.
-          const dslM = raw.match(/\[(\d+)\]\./);
-          if (dslM) {
-            const pid = parseInt(dslM[1], 10);
-            const p = mod.getNoteById(pid);
-            return p || mod.baseNote;
-          }
-          // DSL: beat([N]) / tempo([N]) / measure([N])
-          const dslHelper = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-          if (dslHelper) {
-            const pid = parseInt(dslHelper[1], 10);
-            const p = mod.getNoteById(pid);
-            return p || mod.baseNote;
-          }
-          if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return mod.baseNote;
+          const ref = startParentIdFromRaw(n?.variables?.startTimeString || '');
+          if (ref >= 0) return mod.getNoteById(ref) || mod.baseNote;
           if (typeof n.parentId === 'number') {
             const p2 = mod.getNoteById(n.parentId);
             return p2 || mod.baseNote;
           }
         } catch {}
         return mod.baseNote;
-      };
-
-      // Helper: next measure in chain (CHAIN LINK that uses findMeasureLength/measure(), not anchors)
-      const findNextMeasureInChain = (measure) => {
-        try {
-          if (!isMeasure(measure)) return null;
-          const legacyLink = `findMeasureLength(module.getNoteById(${measure.id}))`;
-          const dslLink = `measure([${measure.id}])`;
-          const chainLinks = [];
-          for (const id in mod.notes) {
-            const nn = mod.getNoteById(Number(id));
-            if (!isMeasure(nn)) continue;
-            const sts = nn.variables?.startTimeString || '';
-            if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-              chainLinks.push(nn);
-            }
-          }
-          if (!chainLinks.length) return null;
-          chainLinks.sort((a, b) => {
-            const sa = toNumber(a.getVariable('startTime'), NaN);
-            const sb = toNumber(b.getVariable('startTime'), NaN);
-            if (sa < sb) return -1;
-            if (sa > sb) return 1;
-            return Number(a.id) - Number(b.id);
-          });
-          return chainLinks[0];
-        } catch { return null; }
       };
 
       // Current parent and starts
@@ -2483,7 +1991,7 @@ export class Workspace {
 
       if (startSec > parentStart + tol) {
         // Dragging forward
-        if (isMeasure(parent)) {
+        if (isMeasureNote(parent)) {
           // Advance across measure chain using cached linear chain (no per-frame scans)
           const ensureParentChain = () => {
             try {
@@ -2493,23 +2001,7 @@ export class Workspace {
               }
             } catch {}
             // Rebuild if missing or anchor changed
-            const chain = this._collectMeasureChainFor(Number(parent.id)) || [];
-            const list = [];
-            let idxLocal = -1;
-            for (let i = 0; i < chain.length; i++) {
-              const mid = Number(chain[i].id);
-              const st = Number(chain[i].startSec || 0);
-              let ml = 0;
-              try {
-                const mnote = mod.getNoteById(mid);
-                const mlVal = mod.findMeasureLength(mnote);
-                ml = toNumber(mlVal, 0) || 0;
-              } catch {}
-              list.push({ id: mid, startSec: st, endSec: st + ml });
-              if (mid === Number(parent.id)) idxLocal = i;
-            }
-            if (idxLocal < 0 && list.length) idxLocal = 0;
-            const out = { list, idx: idxLocal, anchorParentId: Number(parent.id) };
+            const out = this._parentChainListFor(Number(parent.id));
             try { if (this._interaction) this._interaction.cachedParentChain = out; } catch {}
             return out;
           };
@@ -2549,41 +2041,7 @@ export class Workspace {
             // Refresh ancestor chain only if the parent index actually changed
             if (idx !== prevIdx) {
               try {
-                const anc = [];
-                let curA = parent;
-                let guardA = 0;
-                while (curA && guardA++ < 1024) {
-                  const st = toNumber(curA.getVariable?.('startTime'), 0);
-                  anc.push({ id: Number(curA.id || 0), startSec: st });
-                  if (Number(curA.id || 0) === 0) break;
-                  const rawA = curA?.variables?.startTimeString || '';
-                  // Legacy
-                  if (rawA.includes('module.baseNote')) {
-                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                    break;
-                  }
-                  const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-                  if (mm) {
-                    curA = mod.getNoteById(parseInt(mm[1], 10));
-                    if (!curA) break;
-                  // DSL
-                  } else {
-                    const dslM = rawA.match(/\[(\d+)\]\./);
-                    const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                    const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                    if (dslId >= 0) {
-                      if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                      curA = mod.getNoteById(dslId);
-                      if (!curA) break;
-                    } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                      anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                      break;
-                    } else {
-                      break;
-                    }
-                  }
-                }
-                if (this._interaction) this._interaction.cachedAncestorChain = anc;
+                if (this._interaction) this._interaction.cachedAncestorChain = startAncestorChain(mod, parent);
               } catch {}
             }
           }
@@ -2594,42 +2052,8 @@ export class Workspace {
           const ac = this._interaction && this._interaction.cachedAncestorChain;
           if (ac && Array.isArray(ac) && ac.length && Number(ac[0]?.id ?? -1) === Number(parent.id ?? -2)) return ac;
           // Rebuild when missing or parent changed
-          const arr = [];
           try {
-            let curA = parent;
-            let guardA = 0;
-            while (curA && guardA++ < 1024) {
-              const st = toNumber(curA.getVariable?.('startTime'), 0);
-              arr.push({ id: Number(curA.id || 0), startSec: st });
-              if (Number(curA.id || 0) === 0) break;
-              const rawA = curA?.variables?.startTimeString || '';
-              // Legacy
-              if (rawA.includes('module.baseNote')) {
-                arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                break;
-              }
-              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mm) {
-                curA = mod.getNoteById(parseInt(mm[1], 10));
-                if (!curA) break;
-              // DSL
-              } else {
-                const dslM = rawA.match(/\[(\d+)\]\./);
-                const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                if (dslId >= 0) {
-                  if (dslId === 0) { arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                  curA = mod.getNoteById(dslId);
-                  if (!curA) break;
-                } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                  break;
-                } else {
-                  break;
-                }
-              }
-            }
-            if (this._interaction) this._interaction.cachedAncestorChain = arr;
+            if (this._interaction) this._interaction.cachedAncestorChain = startAncestorChain(mod, parent);
           } catch {}
           return (this._interaction && this._interaction.cachedAncestorChain) || [];
         };
@@ -2656,33 +2080,229 @@ export class Workspace {
     }
   }
 
-  // Return measure note { id, startSec } whose [startSec, nextStartSec) contains tSec.
-  // If none contains it, return the nearest measure with startSec <= tSec; otherwise null.
+  // Build the baseline only on the first movement. Pointerdown also starts a
+  // plain selection; on a heavily referenced note that click needs no drag graph.
+  _prepareMeasureDrag(st) {
+    this._decorateAsGroupDrag(st);
+    if (st.groupMode) return;
+    const measureId = st.noteId;
+    const chain0 = this._collectMeasureChainFor(Number(measureId)) || [];
+    let cidx0 = chain0.findIndex(m => Number(m.id) === Number(measureId));
+    if (cidx0 < 0) cidx0 = 0;
+
+    // Build moving-set cache for measure drag: downstream measures + all normal notes whose startTime depends on them
+    // OPTIMIZED: Uses DependencyGraph.getAllStartTimeDependents() for O(d) instead of O(N×M) regex scanning
+    const moveSet0 = new Set();
+    try {
+      const mod = this._module;
+      const depGraph = mod._dependencyGraph;
+
+      // 1) Seed measures: downstream along the linear chain (including the anchor)
+      const seedMeasures = new Set();
+      for (let j = cidx0; j < chain0.length; j++) {
+        const mid = Number(chain0[j].id);
+        seedMeasures.add(mid);
+        moveSet0.add(mid);
+      }
+      if (!seedMeasures.size) {
+        seedMeasures.add(Number(measureId));
+        moveSet0.add(Number(measureId));
+      }
+
+      // 2) & 3) Use DependencyGraph to get ALL transitive startTime dependents efficiently
+      // Include ALL dependent measures (both chain links AND anchors) for preview
+      // Anchors depend on this measure so they should move in preview
+      // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
+      if (depGraph?.getStartTimeDependents) {
+        expandStartTimeDependents(depGraph, moveSet0);
+      } else if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+        // Get all transitive startTime dependents of each seed measure
+        for (const seedId of seedMeasures) {
+          const allDeps = depGraph.getAllStartTimeDependents(seedId);
+          for (const depId of allDeps) {
+            moveSet0.add(Number(depId));
+          }
+        }
+      } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
+        // Fallback to old behavior
+        for (const seedId of seedMeasures) {
+          const allDeps = depGraph.getAllDependents(seedId);
+          for (const depId of allDeps) {
+            moveSet0.add(Number(depId));
+          }
+        }
+      } else {
+        // Fallback to original O(N×M) implementation if DependencyGraph not available
+        // Include ALL dependent measures (both chain links AND anchors) for preview
+        const isMeasure = isMeasureNote;
+
+        // Expand to ALL transitive dependent measures (including anchors)
+        const measureClosure = (seedSet) => {
+          const out = new Set(seedSet);
+          if (!mod || !mod.notes) return out;
+          let changed = true;
+          while (changed) {
+            changed = false;
+            for (const idStr in mod.notes) {
+              const nn = mod.getNoteById(Number(idStr));
+              if (!isMeasure(nn)) continue;
+              const nid = Number(nn.id);
+              if (out.has(nid)) continue;
+              const sts = nn.variables?.startTimeString || '';
+              // Include ANY measure that references a seed (both chain links and anchors)
+              for (const sid of out) {
+                if (sts.includes(`[${sid}]`)) {
+                  out.add(nid);
+                  changed = true;
+                  break;
+                }
+              }
+            }
+          }
+          return out;
+        };
+
+        const allMeasuresToMove = measureClosure(seedMeasures);
+        for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
+
+        // Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
+        if (mod && mod.notes) {
+          const notesObj = mod.notes || {};
+          const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
+          const getStartTimeStr = (nid) => {
+            try {
+              const n = mod.getNoteById(Number(nid));
+              return n && n.variables && typeof n.variables.startTimeString === 'string'
+                ? n.variables.startTimeString
+                : null;
+            } catch { return null; }
+          };
+          const refersStartOf = (nid, refId) => {
+            const s = getStartTimeStr(nid);
+            if (!s) return false;
+            // [refId].t, [refId].d
+            if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`)) return true;
+            return false;
+          };
+          const closureStartRefs = (seedSet) => {
+            const affected = new Set(seedSet);
+            let changed = true;
+            while (changed) {
+              changed = false;
+              for (const nid of allIds) {
+                if (affected.has(nid)) continue;
+                for (const refId of affected) {
+                  if (refersStartOf(nid, refId)) {
+                    affected.add(nid);
+                    changed = true;
+                    break;
+                  }
+                }
+              }
+            }
+            return affected;
+          };
+
+          const closure = closureStartRefs(allMeasuresToMove);
+          for (const did of closure) {
+            moveSet0.add(Number(did));
+          }
+        }
+      }
+    } catch {}
+    st.cachedMeasureChain = chain0;
+    st.cachedMeasureIndex = cidx0;
+    st.cachedMeasureMovingIds = moveSet0;
+  }
+
+  _prepareNoteDrag(st, touch = false) {
+    const mod = this._module;
+    const id = st.noteId, graph = mod?._dependencyGraph;
+    this._decorateAsGroupDrag(st);
+    if (st.groupMode && this.renderer?.setDragOffsetPreview) {
+      st.baselineStartSec = new Map([[id, st.origStartSec]]);
+      return;
+    }
+    let dependents;
+    if (st.groupMode) {
+      dependents = st.cachedDependents;
+    } else if (touch) {
+      dependents = graph?.getAllStartTimeDependents?.(id) ?? graph?.getAllDependents?.(id);
+    } else if (st.type === 'move') {
+      dependents = graph?.getAllStartTimeOnStartTimeDependents?.(id) ??
+        graph?.getAllStartTimeDependents?.(id) ?? graph?.getAllDependents?.(id);
+    } else {
+      dependents = graph?.getAllStartTimeOnDurationDependents?.(id);
+    }
+    st.cachedDependents = dependents || new Set();
+    st.cachedDependents.delete(id);
+    st.baselineStartSec = new Map([[id, st.origStartSec]]);
+    for (const did of st.cachedDependents) {
+      let startSec = 0;
+      try {
+        const note = mod.getNoteById(Number(did));
+        startSec = toNumber(note?.getVariable?.('startTime'), 0);
+      } catch {
+        const r = this.renderer, index = r._noteIdToIndex?.get(Number(did));
+        if (index != null) startSec = r.posSize[index * 4] / (r._cfgSX() * (r.currentXScaleFactor || 1));
+      }
+      st.baselineStartSec.set(Number(did), Math.max(0, startSec || 0));
+    }
+    this._seedParentCaches(id);
+  }
+
+  // Seed the per-interaction parent caches for a note drag (move/resize): the note's
+  // start ancestors up to the BaseNote and, when its start parent is a bar, that
+  // bar's chain with each bar's [start, end).
+  _seedParentCaches(noteId) {
+    try {
+      const mod = this._module;
+      const n0 = mod?.getNoteById?.(Number(noteId));
+      const ref = startParentIdFromRaw(n0?.variables?.startTimeString || '');
+      let parent0 = (ref > 0) ? (mod?.getNoteById?.(ref) || null) : null;
+      if (!parent0) parent0 = mod?.baseNote || null;
+
+      this._interaction.cachedAncestorChain = startAncestorChain(mod, parent0);
+      this._interaction.cachedParentChain = isMeasureNote(parent0)
+        ? this._parentChainListFor(Number(parent0.id))
+        : null;
+    } catch {}
+  }
+
+  // A bar's chain as { list: [{ id, startSec, endSec }], idx, anchorParentId }, idx
+  // being barId's place in it. A bar ends at its start plus its own duration.
+  _parentChainListFor(barId) {
+    const mod = this._module;
+    const chain = this._collectMeasureChainFor(Number(barId)) || [];
+    const list = [];
+    let idx = -1;
+    for (let i = 0; i < chain.length; i++) {
+      const mid = Number(chain[i].id);
+      const st = Number(chain[i].startSec || 0);
+      list.push({ id: mid, startSec: st, endSec: st + barLengthSec(mod?.getNoteById?.(mid)) });
+      if (mid === Number(barId)) idx = i;
+    }
+    if (idx < 0 && list.length) idx = 0;
+    return { list, idx, anchorParentId: Number(barId) };
+  }
+
+  // Return the bar { id, startSec, endSec } whose [startSec, endSec) contains tSec, a
+  // bar lasting its own duration (the latest-starting one if bars overlap). If none
+  // contains it, return the nearest bar with startSec <= tSec; otherwise null.
   _findMeasureAtTime(tSec) {
     try {
       const ms = this._collectMeasureNotes();
-      if (!ms.length) return null;
-
-      // Sorted ascending by startSec
-      let last = null;
-      for (let i = 0; i < ms.length; i++) {
-        const cur = ms[i];
-        const next = ms[i + 1];
-        if (tSec < cur.startSec) {
-          // Before first measure's start -> no containing interval; return previous (if any)
-          return last || null;
-        }
-        if (next && tSec >= cur.startSec && tSec < next.startSec) {
-          return cur;
-        }
+      let last = null, containing = null;
+      for (const cur of ms) {
+        if (tSec < cur.startSec) break;
+        if (tSec < cur.endSec) containing = cur;
         last = cur;
       }
-      // After last measure start
-      return last;
+      return containing || last;
     } catch { return null; }
   }
 
-  // Collect measure note ids and starts from current module snapshot.
+  // Collect measure bars (ids, starts and ends) from the current module snapshot.
   _collectMeasureNotes() {
     try {
       const mod = this._module;
@@ -2690,14 +2310,12 @@ export class Workspace {
       const out = [];
       for (const idStr in mod.notes) {
         const n = mod.notes[idStr];
-        if (!n) continue;
-        const hasStart = !!n.variables?.startTime;
-        const isMeasure = hasStart && !n.variables?.duration && !n.variables?.frequency;
-        if (!isMeasure) continue;
+        if (!isMeasureNote(n)) continue;
         try {
           const st = n.getVariable('startTime');
           if (st == null) continue;
-          out.push({ id: Number(idStr), startSec: toNumber(st, 0) || 0 });
+          const startSec = toNumber(st, 0) || 0;
+          out.push({ id: Number(idStr), startSec, endSec: startSec + barLengthSec(n) });
         } catch {}
       }
       out.sort((a, b) => a.startSec - b.startSec);
@@ -2741,23 +2359,20 @@ export class Workspace {
  * instead of O(N × M) regex scanning.
  * Usage:
  * - Cached at pointerdown as this._interaction.cachedMeasureChain and index as cachedMeasureIndex.
- * - Reused in [JavaScript.Workspace.prototype._updateInteraction()](src/renderer/webgl2/workspace.js:734) for snapping/clamping
+ * - Reused in Workspace._updateInteraction() for snapping/clamping
  *   and in the GPU preview path to build moving sets efficiently.
  * Notes:
- * - A "measure" is any note with startTime but without duration/frequency.
- * - The chain is defined by repeatedly selecting the earliest dependent measure.
+ * - A "measure" is a bar: a note flagged `measure` (isMeasureNote).
+ * - A chain runs through chain links, bars starting exactly where the previous bar
+ *   ends (`[P].t + [P].d`); a bar anchored any other way starts a chain of its own.
  */
 Workspace.prototype._collectMeasureChainFor = function(measureId) {
   try {
     const mod = this._module;
     if (!mod || !mod.notes) return [];
 
-    // Check if note is a measure (has startTime but no duration/frequency)
     const isMeasureById = (id) => {
-      try {
-        const n = mod.getNoteById(Number(id));
-        return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-      } catch { return false; }
+      try { return isMeasureNote(mod.getNoteById(Number(id))); } catch { return false; }
     };
 
     const note = mod.getNoteById(Number(measureId));
@@ -2775,16 +2390,8 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       }
     };
 
-    // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
-    const isChainLinkById = (depId, parentId) => {
-      try {
-        const n = mod.getNoteById(Number(depId));
-        const expr = (n && n.variables && n.variables.startTimeString) || '';
-        const legacyLink = `findMeasureLength(module.getNoteById(${parentId}))`;
-        const dslLink = `measure([${parentId}])`;
-        return expr.includes(legacyLink) || expr.includes(dslLink);
-      } catch { return false; }
-    };
+    // Is a dependent a chain link of this parent, or an anchor starting a new chain?
+    const isChainLinkById = (depId, parentId) => isChainLinkOf(mod.getNoteById(Number(depId)), parentId);
 
     // Use DependencyGraph if available (O(d) vs O(N×M))
     const depGraph = mod._dependencyGraph;
@@ -2792,45 +2399,15 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       return depGraph.getMeasureChain(Number(measureId), isMeasureById, getStartTime, isChainLinkById);
     }
 
-    // Fallback to original O(N×M) implementation if DependencyGraph not available
-    const isMeasure = (n) => {
-      try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-      catch { return false; }
-    };
-
-    // Get the parent measure id ONLY if this note is a CHAIN LINK (uses findMeasureLength/measure())
-    // If it's an anchor (no findMeasureLength/measure()), return null to stop backward walk
-    const getChainLinkParentId = (n) => {
-      try {
-        const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-        // Legacy chain link: findMeasureLength(module.getNoteById(N))
-        const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
-        if (linkMatch) {
-          const pid = parseInt(linkMatch[1], 10);
-          const pn = mod.getNoteById(pid);
-          return isMeasure(pn) ? pid : null;
-        }
-        // DSL chain link: measure([N])
-        const dslMatch = raw.match(/\bmeasure\s*\(\s*\[(\d+)\]\s*\)/);
-        if (dslMatch) {
-          const pid = parseInt(dslMatch[1], 10);
-          const pn = mod.getNoteById(pid);
-          return isMeasure(pn) ? pid : null;
-        }
-        // If no findMeasureLength, this is an anchor (or root) - stop backward walk
-        return null;
-      } catch {}
-      return null;
-    };
-
+    // Fallback (no DependencyGraph): scan the notes.
     // Backward to the earliest measure in this chain (only through chain links, not anchors)
     let cur = note;
     let guard = 0;
     while (guard++ < 1024) {
-      const pid = getChainLinkParentId(cur);
+      const pid = measureChainLinkParentId(cur?.variables?.startTimeString || '');
       if (pid == null) break; // Stop at anchors or roots
       const p = mod.getNoteById(pid);
-      if (!p || !isMeasure(p)) break;
+      if (!isMeasureNote(p)) break;
       cur = p;
     }
 
@@ -2847,38 +2424,11 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     };
     pushWithStart(cur);
 
-    // Forward linearly: at each step choose the next CHAIN LINK measure (not anchors from other chains)
-    // A chain link uses findMeasureLength(getNoteById(X)) to compute start time
-    // An anchor uses getNoteById(X).getVariable('startTime') directly (starts a new chain)
-    const findNextChainLink = (m) => {
-      const candidates = [];
-      try {
-        const legacyLink = `findMeasureLength(module.getNoteById(${m.id}))`;
-        const dslLink = `measure([${m.id}])`;
-        for (const id in mod.notes) {
-          const nn = mod.getNoteById(Number(id));
-          if (!isMeasure(nn)) continue;
-          const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-          if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-            candidates.push(nn);
-          }
-        }
-      } catch {}
-      // Sort by startTime and return earliest (there should typically be only one chain link)
-      candidates.sort((a, b) => {
-        const sa = toNumber(a.getVariable('startTime'), NaN);
-        const sb = toNumber(b.getVariable('startTime'), NaN);
-        if (sa < sb) return -1;
-        if (sa > sb) return 1;
-        return Number(a.id) - Number(b.id);
-      });
-      return candidates.length > 0 ? candidates[0] : null;
-    };
-
+    // Forward linearly: at each step take the next chain link
     guard = 0;
     let curN = cur;
     while (guard++ < 2048) {
-      const next = findNextChainLink(curN);
+      const next = nextBarInChain(mod, curN);
       if (!next) break;
       pushWithStart(next);
       curN = next;
@@ -2891,41 +2441,20 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
 /**
  * Determine the role of a measure in chain structure based on its startTimeString expression.
  * @param {Object} note - The note object with variables.startTimeString
- * @returns {Object} { role: 'root'|'anchor'|'link', parentId: number|null }
+ * @returns {Object} { role: 'root'|'anchor'|'link'|'orphan', parentId: number|null }
  *   - 'root': anchored directly to BaseNote (first measure at time 0)
- *   - 'link': chain link using findMeasureLength (subsequent measure in same chain)
- *   - 'anchor': first measure of a dependent chain (references another measure's startTime directly)
+ *   - 'link': chain link `[P].t + [P].d` (subsequent measure in same chain)
+ *   - 'anchor': first measure of a dependent chain (starts from another note any other way)
  */
 function getMeasureChainRole(note) {
   const expr = (note && note.variables && note.variables.startTimeString) || '';
 
-  // Root: anchored directly to BaseNote (legacy or DSL)
-  if (expr.includes('module.baseNote') ||
-      (/\bbase\./.test(expr) && !/\[\d+\]\./.test(expr)) ||
-      (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(expr) && !/\[\d+\]/.test(expr))) {
-    return { role: 'root', parentId: 0 };
-  }
+  const linkParent = measureChainLinkParentId(expr);
+  if (linkParent != null) return { role: 'link', parentId: linkParent };
 
-  // Check for chain link pattern (uses findMeasureLength or DSL measure())
-  const linkMatch = expr.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
-  if (linkMatch) {
-    return { role: 'link', parentId: parseInt(linkMatch[1], 10) };
-  }
-  const dslLinkMatch = expr.match(/\bmeasure\s*\(\s*\[(\d+)\]\s*\)/);
-  if (dslLinkMatch) {
-    return { role: 'link', parentId: parseInt(dslLinkMatch[1], 10) };
-  }
-
-  // Check for anchor pattern (direct getNoteById or DSL [N] reference without findMeasureLength/measure())
-  const anchorMatch = expr.match(/getNoteById\s*\(\s*(\d+)\s*\)/);
-  if (anchorMatch) {
-    return { role: 'anchor', parentId: parseInt(anchorMatch[1], 10) };
-  }
-  const dslAnchorMatch = expr.match(/\[(\d+)\]\./);
-  if (dslAnchorMatch) {
-    return { role: 'anchor', parentId: parseInt(dslAnchorMatch[1], 10) };
-  }
-
+  const ref = startParentIdFromRaw(expr);
+  if (ref === 0) return { role: 'root', parentId: 0 };
+  if (ref > 0) return { role: 'anchor', parentId: ref };
   return { role: 'orphan', parentId: null };
 }
 

@@ -1,163 +1,143 @@
 ---
 title: Working with Measures
-description: Build measure chains from the note widget, set per-measure time signatures, and position notes by measure and beat instead of absolute time.
+description: Build a chain of measure bars from the note widget, change the meter on one bar, and attach notes to bars instead of absolute time.
 ---
 
 # Working with Measures
 
-Measures are the dashed vertical lines that divide the workspace into bars. They are notes — a special kind, with a start time and nothing else — and you build them into chains, where each bar starts where the last one ended.
+Measure bars are the dashed vertical lines that divide the workspace into bars. A bar is a note: a silent one with a start and a duration, no frequency, and the flag `"measure": true`. You build bars into a chain, where each bar starts where the one before it ends and, unless you say otherwise, lasts as long.
 
 **Prerequisites:** [Note Dependencies](/tutorials/intermediate/dependencies), [Add Rhythm](/tutorials/beginner/rhythm).
 
-## Tempo lives on the BaseNote
+## The time unit and the first bar
 
-Click the **BaseNote** and you get rows for `startTime`, `frequency`, **`tempo`**, **`beatsPerMeasure`**, and `instrument`. The defaults:
+Click the **BaseNote**. Its rows are `startTime`, `frequency`, `duration`, the interpretation rows (`amplitude`, `attack`, `release`) and `instrument`. There is no tempo row and no beats-per-measure row. The BaseNote's `duration` is the **time unit**, and next to it the widget shows the same number as a tempo, for example "= 100 BPM". That reading is only a view; to change the pace you edit the duration.
 
-| Property | Default |
-|---|---|
-| `tempo` | `100` BPM |
-| `beatsPerMeasure` | `4` |
+At the defaults `base.d` is 3/5 s. A bar of four time units lasts `base.d * 4`, which is 2.4 s.
 
-Click any ordinary note and you get `startTime`, `duration`, `frequency`, `color` and `instrument` — **no tempo row**. Tempo is a property of the piece, not of a note.
-
-From tempo, two derived quantities fall out:
-
-```
-beat(base)              # one beat, in seconds: 60 / tempo
-measure(base)           # one measure, in seconds: beatsPerMeasure × 60 / tempo
-```
-
-At the defaults, `beat(base)` is 0.6 s and `measure(base)` is 2.4 s.
-
-::: info Helpers are input sugar
-You type `measure(base)` and `tempo(base)`; the app stores the same bytecode as `base.ml` and `base.tempo`, and that is what the `Raw:` field will show you afterwards. `beat()` is the one helper that survives the round trip and is displayed back to you as `beat(...)`. All three forms are equivalent — do not be surprised when your `measure([1])` reappears as `[1].ml`.
-:::
-
-## Build a measure chain
+## Build a bar chain
 
 1. Click the **BaseNote**, **Clean Slate** the workspace, and click the BaseNote again.
 2. Find the row labelled **Add New Measure Chain** and click **Add**.
 
-A dashed vertical line appears at time 0 with a small triangle at the top. That triangle is the measure's handle. The widget re-opens on it, titled **Measure [1] Variables**.
+A dashed vertical line appears at time 0 with a small triangle at the top. That triangle is the bar's handle. The widget re-opens on it, titled **Measure [1] Variables**. Its expressions are:
 
-3. With Measure 1 selected, the widget now offers **Add Measure**. Click **Add**.
+```
+startTime:  base.t
+duration:   base.d * 4
+```
 
-Measure 2 appears one measure-length later. Click **Add** again for Measure 3, and again for Measure 4.
+3. With bar 1 selected, the widget offers **Add Measure**. Click **Add**.
+
+Bar 2 appears one bar-length later. Click **Add** again for bar 3, and again for bar 4. Select bar 2 and read it:
+
+```
+startTime:  [1].t + [1].d
+duration:   [1].d
+```
+
+"Start where bar 1 ends, and be as long as bar 1." Each bar depends on the one before it, so lengthening any bar pushes every later bar along.
 
 ::: info
-**Add Measure** only appears on the **last** measure of a chain. If you select a measure in the middle, the button is not there — you cannot insert a bar into the middle of a chain from the widget.
+**Add Measure** only appears on the **last** bar of a chain. If you select a bar in the middle, the button is not there. You cannot insert a bar into the middle of a chain from the widget.
 :::
 
-Select any measure and read its `startTime`:
+## A bar widget is nearly empty
 
-```
-[1].t + [1].ml
-```
-
-"Start where measure 1 starts, plus measure 1's length." That is the chain. Each bar depends on the one before it, so lengthening any bar pushes every later bar along.
-
-## A measure widget is nearly empty
-
-Click a measure triangle and you get:
+Click a bar's triangle and you get:
 
 - a **startTime** row,
-- a **Measure Duration** row,
-- **Add Measure**, if it is the last in its chain,
-- **EVALUATE** (Evaluate to BaseNote only — no Liberate),
+- a **duration (bar length)** row, which shows "= 4 time units" beside the value,
+- **Add Measure**, if it is the last bar in its chain,
+- **EVALUATE** (Evaluate to BaseNote only; no Liberate),
 - **DELETE NOTE**.
 
-No frequency, no duration, no colour, no instrument, and no **ADD NOTE / SILENCE** section. You cannot hang a note directly off a measure bar from the widget — but you *can* drag a library module onto one, and you can reference it from any note's expression.
+No frequency, no colour, no instrument, and no **ADD NOTE / SILENCE / REFERENCE** section. You cannot create a note directly from a bar in the widget, but you can drag a library module onto one, and you can reference the bar from any note's expression.
 
-## Change a time signature
+## Change the meter on one bar
 
-The **Measure Duration** row edits that measure's `beatsPerMeasure` — how many beats the bar holds.
+A bar's length is its own duration, an expression like any other. There is no separate meter property.
 
-1. Click **Measure 3**'s triangle.
-2. In the **Measure Duration** row, the `Raw:` field shows `4` (inherited from the BaseNote).
-3. Change it to `3`.
+1. Click bar 3's triangle.
+2. In the **duration (bar length)** row, the `Raw:` field shows `[2].d`.
+3. Change it to `base.d * 3`.
 4. Click **Save**.
 
-Measure 3 becomes a 3-beat bar. It visibly narrows, and **Measure 4 and everything after it slide left**, because they are chained to it. You have a 4/4, 4/4, 3/4, 4/4 piece.
+Bar 3 becomes a 3-unit bar. It visibly narrows, and **bar 4 slides left**, because bar 4 starts at `[3].t + [3].d`. Bar 4 also lasts `[3].d`, so it is a 3-unit bar too: the lengths are now 4, 4, 3, 3. To return to four after one short bar, give bar 4 a duration of `base.d * 4`.
 
-::: warning
-The Save button on this row is hidden until you type in the field, and the row has no `Evaluated:` readout — you get the raw value only. Odd meters work too: `(7/8)` and `(5/4)` are both valid.
+::: tip
+Odd meters work too: `base.d * (7/2)` is a bar of seven eighth notes, which reads as 7/8. The MIDI export writes a time signature from the first bar only; see [Exporting MIDI](/user-guide/modules/exporting-midi).
 :::
 
-To change the whole piece's meter instead, set `beatsPerMeasure` on the **BaseNote**. Every measure that has not overridden it follows.
+You can also drag a bar's triangle. Dragging changes the length of the **previous** bar; the dragged bar keeps its own length.
 
-## Positioning notes by measure
+## Attach notes to bars
 
 ### On a bar line
 
-The cleanest way to say "start at measure 3" is to reference measure 3. Put this in the note's **startTime**:
+The cleanest way to say "start at bar 3" is to reference bar 3. Put this in the note's **startTime**:
 
 ```
 [3].t
 ```
 
-This is robust: it stays correct even if you change the length of measure 1 or 2. Use it.
+This stays correct whatever you do to bars 1 and 2.
 
-### Counting from the BaseNote
+### A fraction of a bar
 
-```
-base.t                          # measure 1
-base.t + measure(base)          # measure 2
-base.t + measure(base) * 2      # measure 3
-```
-
-::: warning
-This arithmetic only works while **every** measure is the same length. The moment you give one bar a different `beatsPerMeasure`, `measure(base) * 2` stops being "the start of measure 3". Reference the measure bar instead.
-:::
-
-### A beat inside a measure
-
-Beat 3 of measure 2 — two beats past the bar line:
+To place a note a quarter of the way into bar 2, and give it a quarter of the bar's length:
 
 ```
-[2].t + beat(base) * 2
+startTime:  [2].t + [2].d * (1/4)
+duration:   [2].d * (1/4)
 ```
 
-Beats are counted from zero, so "beat 3" is `* 2`.
+Both are written against the bar's own start and duration, so the note moves and stretches with the bar. In a bar you shortened to three units, a quarter is three quarters of a time unit; in a bar of four units it is one.
+
+### A fixed number of beats into a bar
+
+Beat 3 of bar 2, two time units past the bar line:
+
+```
+[2].t + base.d * 2
+```
+
+Beat three begins two time units after the start of bar 2. Changing the bar’s length leaves this offset at `base.d * 2`.
 
 ## Practical: a kick-snare pattern
 
-Four bars of the workspace, a note on beat 1 and beat 3 of each.
-
-Build a measure chain of four bars first, then create notes from the BaseNote and set their start times:
+Build a chain of four bars first, then create notes from the BaseNote and set their expressions:
 
 | Note | startTime | duration |
 |---|---|---|
-| Kick, bar 1 | `[1].t` | `beat(base)` |
-| Snare, bar 1 | `[1].t + beat(base) * 2` | `beat(base)` |
-| Kick, bar 2 | `[2].t` | `beat(base)` |
-| Snare, bar 2 | `[2].t + beat(base) * 2` | `beat(base)` |
+| Kick, bar 1 | `[1].t` | `base.d` |
+| Snare, bar 1 | `[1].t + base.d * 2` | `base.d` |
+| Kick, bar 2 | `[2].t` | `base.d` |
+| Snare, bar 2 | `[2].t + base.d * 2` | `base.d` |
 
-Now change the BaseNote's tempo. The bars, the kicks and the snares all move together, and the pattern stays a pattern. Change measure 2's **Measure Duration** to `3` and the second bar's snare lands correctly inside the shorter bar, while measure 3 slides left to meet it.
+Now change the BaseNote's `duration`. The bars, the kicks and the snares all stretch together, and the pattern stays a pattern. Shorten bar 2 to `base.d * 3` and bar 3 slides left to meet it. The bar 2 snare, written as two time units in, still lands on its third unit.
 
-## On per-note tempo
+## One pace per module
 
 ::: warning There is no tempo change mid-composition
-The note widget exposes no `tempo` field on an ordinary note, so **a tempo change cannot be authored in the app**. Tempo is a BaseNote property, and one piece has one tempo.
+Tempo is not stored on any note. A single time unit, `base.d`, sets the pace for everything written in time units, so one module has one pace.
 
-You may see `beat([1])` in an expression — the app writes that form itself when you drag a note. It reads note 1's tempo and, because no ordinary note can carry one, falls back to the BaseNote's. So in practice `beat([N])` and `beat(base)` give the same answer for every note you can build in the app.
+You can still write a stretch of music against another note's length: `[7].d * 2` is twice as long as note 7, however long that is. Change note 7 and everything written against it follows.
 :::
 
 ## One duration this page adds
 
-The note-length table — whole through triplet eighth, all as multiples of `beat(base)` — is in
-[Add Rhythm](/tutorials/beginner/rhythm#duration-reference). Measures add one entry to it: a
-duration of one full bar is `measure(base)`, or equivalently `beat(base) * base.bpm`. Both are
-tempo-independent, like every duration written in beats.
+The note-length table, from whole to triplet eighth, all as multiples of `base.d`, is in [Add Rhythm](/tutorials/beginner/rhythm#duration-reference). Bars add one entry to it: a bar's length is its own duration, `[bar].d`, and a bar that follows another can copy it with `[p].d`.
 
 ## Exercises
 
 ### 1. A waltz
 
-Set the BaseNote's `beatsPerMeasure` to `3` and its `tempo` to `150`. Build a four-bar chain and put a note on each beat. Compare with the shipped **Greensleeves** and **Bach Minuet in G** melodies in the library, both of which are in 3.
+Set the first bar of a four-bar chain to `base.d * 3` and set the BaseNote's `duration` to `2/5` (150 BPM). Put a note on each beat. Compare with the shipped **Greensleeves** and **Bach Minuet in G** melodies in the library, both of which are in 3.
 
 ### 2. A hemiola
 
-Give measures 1 and 2 a Measure Duration of `3`, and measure 3 a Measure Duration of `2`. Watch the chain re-flow.
+In a four-bar chain, give bar 1 a length of `base.d * 3`, and bar 2 a length of `base.d * 2`. Bar 3 copies bar 2, so give it `base.d * 3` to move on. Watch the chain re-flow.
 
 ### 3. Two chains
 
@@ -165,17 +145,18 @@ From the **BaseNote**, click **Add New Measure Chain** a second time. You get a 
 
 ### 4. Drop a melody onto a bar line
 
-Drag **Ode to Joy** from the library's **Melodies** section onto a measure triangle. Its timing anchors to that bar; its pitches stay anchored to `base.f`, because a measure bar has no frequency to inherit.
+Drag **Ode to Joy** from the library's **Melodies** section onto a bar triangle. Its start maps to that bar; its pitches stay anchored to the BaseNote's frequency, because a bar has no frequency to map to, and its durations stay in the workspace's time unit, `base.d`.
 
 ## What you learned
 
-- Tempo and `beatsPerMeasure` live on the BaseNote; ordinary notes have neither.
-- Measure chains are built with **Add New Measure Chain** and **Add Measure**, and each bar depends on the one before it.
-- **Measure Duration** sets a per-measure time signature.
-- Reference a bar (`[3].t`) rather than counting measure lengths.
+- The BaseNote's `duration` is the time unit. There is no stored tempo or beats-per-measure.
+- Bars are silent notes flagged `measure`. A chain is `[p].t + [p].d` for the start and `[p].d` for the length.
+- A meter change is one bar's duration; the bars after it follow.
+- Attach notes to bars with `[bar].t` and `[bar].d * (1/4)` rather than counting lengths.
 
 ## Next
 
 - [Microtonal Composition](/tutorials/advanced/microtonal) — alternative tunings
 - [Complex Dependencies](/tutorials/advanced/complex-dependencies) — deeper structures
-- [beatsPerMeasure reference](/reference/properties/beats-per-measure) — the property in full
+- [Measure bars](/reference/module-schema#measure-bars) — the bar in the file format
+- [The time unit](/reference/properties/duration#the-time-unit) — `base.d` in full

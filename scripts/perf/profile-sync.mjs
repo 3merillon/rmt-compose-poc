@@ -13,16 +13,14 @@ const URL_BASE = flag('--url', 'http://localhost:3000');
 const MODULE = flag('--module', 'voices-100000');
 const ITER = Number(flag('--iter', 10));
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=default', '--enable-gpu'] });
+const browser = await chromium.launch({ channel: process.env.PW_CHANNEL || 'msedge', headless: true, args: ['--use-angle=default', '--enable-gpu'] });
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 const page = await ctx.newPage();
 await page.addInitScript(() => { try { localStorage.removeItem('rmt:moduleSnapshot:v1'); } catch {} });
 
 if (MODULE !== 'defaultModule') {
-  const res = await page.request.get(`${URL_BASE}/modules/perf/${MODULE}.json`);
-  const body = await res.text();
   await page.route('**/modules/defaultModule.json', (r) =>
-    r.fulfill({ status: 200, contentType: 'application/json', body }));
+    r.fulfill({ status: 302, headers: { location: `/modules/perf/${MODULE}.json` } }));
 }
 
 await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });

@@ -108,6 +108,11 @@ class ThemeManager {
       noteHeightWU: noteCfg.heightWU ?? preset.geometry.noteHeightWU,
       borderPxAtZoom1: noteCfg.borderPxAtZoom1 ?? preset.geometry.borderPxAtZoom1,
       roundedCornerPxAtZoom1: noteCfg.roundedCornerPxAtZoom1 ?? preset.geometry.roundedCornerPxAtZoom1,
+      // Not a preset property: a view choice that travels with the note geometry
+      // because it changes the note rects sync() builds.
+      envelopeMode: ['own', 'all', 'none'].includes(appearance.envelopes) ? appearance.envelopes : 'own',
+      detailCutoff: appearance.neverReduceDetail ? Infinity : appearance.detailCutoff,
+      showTails: appearance.showTails === true,
     };
     return { id: preset.id, tokens, geometry };
   }
@@ -160,6 +165,9 @@ class ThemeManager {
           heightWU: geometry.noteHeightWU,
           borderPxAtZoom1: geometry.borderPxAtZoom1,
           roundedCornerPxAtZoom1: geometry.roundedCornerPxAtZoom1,
+          envelopeMode: geometry.envelopeMode,
+          detailCutoff: geometry.detailCutoff,
+          showTails: geometry.showTails,
         },
         ...(playRgba ? { playhead: { color: playRgba } } : {}),
       });
@@ -182,7 +190,7 @@ class ThemeManager {
       }
       // Geometry affects note rects computed in sync(); re-sync only when it
       // actually changed to avoid needless full rebuilds on color-only edits.
-      const geoKey = `${geometry.noteHeightWU}:${geometry.borderPxAtZoom1}:${geometry.roundedCornerPxAtZoom1}`;
+      const geoKey = `${geometry.noteHeightWU}:${geometry.borderPxAtZoom1}:${geometry.roundedCornerPxAtZoom1}:${geometry.envelopeMode}:${geometry.showTails}`;
       if (geoKey !== this._lastGeometryKey) {
         this._lastGeometryKey = geoKey;
         if (this._requestResync) this._requestResync();

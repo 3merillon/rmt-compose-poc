@@ -12,7 +12,7 @@ synthesised in the browser, at runtime, by `generateImpulseResponse()` in `src/p
 That is a licensing decision as much as a size one: a recorded IR would drag someone else's licence
 into an MIT-licensed repo. Rendering our own keeps the relicense clean.
 
-Reverb is **on by default** (`audio.reverb.enabled: true`, `settings-schema.js:72`) at 25% wet.
+Reverb is **on by default** (`audio.reverb.enabled: true`, `settings-schema.js`) at 25% wet.
 
 ## The function
 
@@ -152,21 +152,9 @@ An IR is also generated **at construction, even when reverb is off**, so the fir
 enables it there is no pause and no pop. Offline rendering works fine while the `AudioContext` is
 still suspended.
 
-## A known limitation you cannot fix
+## Listening to the tail {#a-known-limitation-you-cannot-fix}
 
-A **sustained tone's reverb tail warbles** — measured at roughly 5.5 dB standard deviation around the
-smooth decay, at about 3.4 Hz.
-
-This is Rayleigh statistics, not a bug in the algorithm. The tail of a narrowband input is the IR's
-spectrum sampled over a narrow band, and *every* IR with a random spectrum does this — recorded ones
-included.
-
-::: warning Allpass "diffusion" cannot help
-An allpass filter leaves `|H(f)|` unchanged by construction. Adding diffusion stages to the IR will
-not smooth the warble, and any proposal to do so is founded on a misunderstanding. The only levers on
-how present the tail is in a musical rest are **`decaySec`** and **`wet`** — `1.0 / 0.12` measures
-−19 dB against the shipped `1.8 / 0.25`.
-:::
+Play a sustained sine, stop adding notes, and listen to the decay. With this noise-based impulse response the tail can fluctuate. Compare two decay lengths at the same wet level, then change the wet level alone. The dry path retains its gain throughout.
 
 ## Notes for maintainers
 

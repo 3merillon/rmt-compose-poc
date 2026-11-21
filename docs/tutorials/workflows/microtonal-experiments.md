@@ -6,20 +6,17 @@ description: Structured listening experiments for TET systems, neutral and septi
 # Microtonal Experiments
 
 Seven experiments. Each one is a listening test with a controlled setup, and each takes a few
-minutes. Do the setup first — without it, most of these experiments measure your reverb rather than
-your tuning.
+minutes. Use the same instrument and effects for both versions of each comparison.
 
 ## Setup: make the app honest
 
-::: danger Turn reverb off before you listen to anything
-Reverb ships **on** (25% wet, 1.8 s decay). Every experiment below depends on hearing **beating** —
-the slow throb between two nearly-coincident partials — and reverb smears exactly that. An
-experiment run with reverb on is worthless.
+::: tip Hearing beating
+For comparisons of nearly coincident partials, temporarily turn reverb off so the tails from the previous tones fade quickly.
 
 Open the Settings panel from the **top-bar gear** → **Audio** tab → switch off **Enable reverb**.
 :::
 
-![The Audio tab of the Settings panel showing Enable reverb, Room size, Decay, Damping, Pre-delay and Reverb amount controls](/img/settings-audio.png)
+![Room and reverb controls for size, decay, damping, pre-delay and reverb amount](/img/settings-reverb.png)
 
 While you are there:
 
@@ -30,17 +27,22 @@ While you are there:
 | **Limiter** | on (default) | Stops a stack of sustained sines from clipping |
 | **Default instrument** | `sine-wave` | A pure tone shows the beat rate between fundamentals most cleanly |
 
-**Use long notes.** Beating takes time to become audible. `beat(base) * 4` is a sensible minimum.
+**Set the library drop mode to Start** before stacking an interval or chord onto a sounding note. Choose **End** when you want to hear a scale after the target.
+
+**Use long notes.** Beating takes time to become audible. `base.d * 4` is a sensible minimum.
 
 **Loop it.** Shift-click (or long-press) the **Play** button. The play icon's bars become dashes
 orbiting a figure-8 while the loop runs. Park on a sustained dyad and let it beat at you while you
 retune the upper note. Shift-click again to exit.
 
-**Nine instruments ship:** `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
-`vibraphone`, `fm-epiano`, `piano`, `violin`. `piano` and `violin` are multisampled. A sine isolates
-the fundamentals; `organ` and `violin` add upper partials that expose roughness a sine will hide.
+**Eleven instruments ship:** `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
+`vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`. `piano` and `violin` are
+multisampled. A sine isolates the fundamentals; `organ` and `violin` add upper partials that expose
+roughness a sine will hide. `harmonium` has every partial up to the 16th and holds them still, so the
+overtones two notes share beat plainly when an interval is mistuned.
 The instrument is a **per-note** property — set it from the note widget — and a note without one
-inherits it up its frequency chain.
+takes the instrument of its player, the line of notes it belongs to (see
+[Instruments](/user-guide/playback/instruments#players)).
 
 ## The basic rig
 
@@ -48,7 +50,7 @@ Two notes, sounding together, one of which you retune.
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 (reference) | `base.f` | `base.t` | `beat(base) * 4` |
+| 1 (reference) | `base.f` | `base.t` | `base.d * 4` |
 | 2 (the variable) | `[1].f * 2^(1/19)` | `[1].t` | `[1].d` |
 
 Edit note 2's `frequency` in its `Raw:` field, press **Save**, listen. Repeat.
@@ -77,8 +79,8 @@ or build them as four separate pairs).
 - **19-TET** — 7.4¢ *flat*. Beats the other way, slower than 12-TET.
 - **31-TET** — 0.8¢ sharp. Very nearly as still as pure.
 
-Notes 3, 4 and 5 will be **crosshatched** and show `≈` — their powers are irrational and have been
-approximated. Note 2 is clean. That is correct, and it is worth knowing why:
+Notes 3, 4 and 5 will be **crosshatched** — their powers are irrational, kept exact but tempered
+rather than pure. Note 2 is clean. That is correct, and it is worth knowing why:
 [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
 ::: tip Skip the typing
@@ -122,8 +124,7 @@ Neutral intervals that ship as modules:
 | 4 | `[1].f * (7/4)` | 968.83 | harmonic 7th |
 
 **The barbershop seventh.** Compare `[1].f * (7/4)` (968.83¢) against `[1].f * 2^(10/12)` (1000¢) —
-31 cents apart. The 7/4 *locks*; the tempered one grinds. This is the interval barbershop quartets
-tune by ear and no keyboard can play.
+about 31 cents apart. With a sustained harmonium root, listen for the seventh partial of the root meeting the fourth partial of the upper note at 7/4. Switching the upper note to the tempered seventh separates those partials.
 
 Then drop the shipped **Harmonic 7th** chord (4:5:6:7) onto a note and hear all four tones lock at
 once. Note that the **Dominant 7th** chord module is a different thing — its seventh is 16/9, not
@@ -271,18 +272,8 @@ There is one level of section — no nested folders. Use **Add Category** to mak
 for everything else.
 :::
 
-## Habits that make the difference
-
-**Always A/B.** A tuning never sounds like anything on its own; it sounds like something *compared*
-to another. Keep the reference note in every test.
-
-**Rest your ears.** Ear fatigue is real and it arrives faster than you think during beat-counting.
-
-**Trust your ears over the cents.** The numbers tell you what you *should* hear. They are frequently
-less interesting than what you actually hear.
-
 ## Next
 
 - [Microtonal Composition](/tutorials/advanced/microtonal) — turn discoveries into music
 - [Building a Module Library](/tutorials/workflows/module-library) — organise what you keep
-- [Exploring Intervals](/tutorials/workflows/intervals) — the 46 shipped ratios in full
+- [Exploring Intervals](/tutorials/workflows/intervals) — build a two-note comparison

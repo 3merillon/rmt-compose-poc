@@ -23,8 +23,8 @@
 
 import { getModule, getEvaluatedNotes } from '../store/app-state.js';
 import { eventBus } from '../utils/event-bus.js';
+import { replaceSavedModule, clearSavedModule } from '../store/autosave.js';
 
-const SNAPSHOT_KEY = 'rmt:moduleSnapshot:v1';
 
 function percentile(sorted, p) {
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
@@ -65,13 +65,14 @@ async function loadStress(name) {
   const res = await fetch(`modules/perf/${name}.json`);
   if (!res.ok) throw new Error(`[perf] fetch failed for ${name}: ${res.status}`);
   const data = await res.json();
-  localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(data));
+  // The autosave (src/store/autosave.js) opens it after the reload
+  await replaceSavedModule(JSON.stringify(data));
   console.log(`[perf] snapshot set to ${name} (${data.notes.length} notes); reloading…`);
   location.reload();
 }
 
-function restoreDefault() {
-  localStorage.removeItem(SNAPSHOT_KEY);
+async function restoreDefault() {
+  await clearSavedModule({ hold: true });
   console.log('[perf] snapshot cleared; reloading to default module…');
   location.reload();
 }

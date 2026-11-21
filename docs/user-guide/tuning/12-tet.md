@@ -5,7 +5,7 @@ description: Twelve-tone equal temperament in RMT Compose — the step table, ce
 
 # 12-TET
 
-12-TET divides the octave into twelve equal semitones. It is the tuning of every piano, every fretted guitar, and almost every recording made in the last two centuries. In RMT Compose it is one option among several, and it is the useful reference point for all the others.
+12-TET divides the octave into twelve equal semitones. Use its 100-cent semitone as a reference when comparing the library’s just and tempered intervals.
 
 | Property | Value |
 |---|---|
@@ -16,9 +16,11 @@ description: Twelve-tone equal temperament in RMT Compose — the step table, ce
 
 ## The chromatic scale
 
-| Step | Note | Expression | Cents |
+With the BaseNote as C, multiply `base.f` by the ratio in the third column to enter a frequency.
+
+| Step | Note | Ratio above C | Cents |
 |---|---|---|---|
-| 0 | C | `base.f` | 0 |
+| 0 | C | `1` | 0 |
 | 1 | C♯/D♭ | `2^(1/12)` | 100 |
 | 2 | D | `2^(2/12)` | 200 |
 | 3 | D♯/E♭ | `2^(3/12)` | 300 |
@@ -48,16 +50,6 @@ base.f * 2 ^ (4/12)     # a major third above the BaseNote
 
 You can reduce the exponent by hand — `4/12` is `1/3`, so `2^(1/3)` is the same major third — but you do not have to. Save the expression and the simplifier reduces the fraction for you.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(2).pow(new Fraction(7, 12))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(4, 12)))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
-
 ## Every interval
 
 | Interval | Semitones | Expression | Nearest just ratio | 12-TET is off by |
@@ -85,17 +77,16 @@ The library's **Scale Systems** section ships a **12-TET** module. (The file is 
 |---|---|
 | Notes | 13 — twelve steps plus the note you start on |
 | Base frequency | `(263/4)` = 65.75 Hz |
-| Tempo | 100 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/5` s, shown as 100 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (3/4)` |
+| Note duration | `base.d * (3/4)` |
 | Step | `[n].f * 2 ^ (1/12)` |
 
 Note 1 is `base.f`. Every later note is the previous note times one semitone, so the scale is a chain — lift note 1 and all thirteen move with it.
 
-To load it, drag the tile from **Scale Systems** (or search `12` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The module's `base` references are rewritten to your drop target, so the scale re-roots onto that note. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
+For a melodic continuation, choose **End** in the module bar. To compare against a sustained target, choose **Start**. Drag the tile from **Scale Systems** (or search `12` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The scale takes its pitch from the target and its time unit from the workspace BaseNote. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-Once loaded, twelve of the thirteen notes show a **≈** prefix and cross-hatching. That is correct: `2^(1/12)` is irrational, and the fraction the app draws is the note's approximate ratio to the BaseNote, not its exact value. Only note 1 — plain `base.f` — is unhatched.
+Once loaded, the notes are cross-hatched and each label shows its exact step above the BaseNote: `2^(1/12)`, `2^(1/6)`, `2^(1/4)` … `2^(11/12)` (the exponents are reduced, so the third step reads `2^(1/4)`). That is correct: `2^(1/12)` is irrational, and the app keeps it as the power it is. The octave note's label reads `2/1`, exactly. Only note 1 — plain `base.f` — is unhatched.
 
 ## Why 12-TET won
 
@@ -107,7 +98,7 @@ Once loaded, twelve of the thirteen notes show a **≈** prefix and cross-hatchi
 
 ## What it costs
 
-**The thirds.** Fourteen cents sharp on the major third is the single loudest compromise in Western music, and it is baked into every piano you have heard.
+**The thirds.** Compare the four-step third with `(5/4) * base.f`. The 12-TET third is about fourteen cents higher.
 
 **Every key sounds the same.** The historical character of keys — the reason a composer chose E♭ major over D major — is gone by construction.
 

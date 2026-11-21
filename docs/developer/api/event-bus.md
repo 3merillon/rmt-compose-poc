@@ -107,16 +107,16 @@ This is every topic in `src/` at the current commit. Payloads are exact.
 | `player:requestPause` | — | modals, workspace commits, history restore, the note widget | `player.js` — stops playback before a mutating edit |
 | `player:octaveChange` | `{ noteId, direction: 'up' \| 'down' }` | the ▲/▼ arrows (note widget and canvas), the perf harness | `player.js` — applies the arrow interval to the frequency expression |
 | `player:selectNote` | `{ noteId }` | note/measure creation, so the new note lands selected | `player.js` |
-| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library icon is dropped on a note | `player.js` — grafts the module in |
+| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library tile is dropped on a note, a measure triangle or the BaseNote | `player.js` — grafts the module in |
 
 ### history (undo / redo)
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `history:capture` | `{ label, snapshot, snapshotStr? }` | every undoable action | `store/history.js` (push) **and** `player.js` (write the localStorage autosave) |
-| `history:seedIfEmpty` | `{ label: 'Initial', snapshot, snapshotStr? }` | the same call sites, just before `history:capture` | `store/history.js` |
+| `history:capture` | `{ label, snapshotStr, version }` for editor checkpoints. Standalone `snapshotStr` or `snapshot` payloads are also accepted. | every undoable action | `store/history.js` retains the version. `player.js` passes the string to autosave. |
+| `history:seedIfEmpty` | The same checkpoint or standalone payload with `label: 'Initial'` | the same call sites, just before `history:capture` | `store/history.js` |
 | `history:undo` / `history:redo` | — | the module-bar buttons, the + menu buttons, Ctrl/⌘+Z and Ctrl/⌘+Y | `store/history.js` |
-| `history:requestRestore` | `{ snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` — rebuilds the module from the snapshot; also clears the selection |
+| `history:requestRestore` | `{ version, snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` patches compatible versions in place. A full restore reads the lazy `snapshot` and reloads the module. |
 | `history:stackChanged` | `{ undo, redo, canUndo, canRedo }` | `HistoryManager`, after every push/undo/redo | the undo/redo buttons in the module bar and the + menu |
 
 ### workspace (canvas gestures → authoritative commit)
@@ -127,11 +127,11 @@ The WebGL2 workspace previews a gesture on the GPU and emits a commit event on r
 | Event | Payload | Emitted on |
 |---|---|---|
 | `workspace:noteMoveCommit` | `{ noteId, newStartSec }` | drag of a single note |
-| `workspace:groupMoveCommit` | `{ ids, deltaSec }` | drag of a multi-selection |
+| `workspace:groupMoveCommit` | `{ ids, deltaSec }` | drag of a selected note or triangle in a group |
 | `workspace:noteResizeCommit` | `{ noteId, newDurationSec }` | drag of a note's right edge |
 | `workspace:measureResizeCommit` | `{ measureId, newStartSec }` | drag of a measure bar |
-| `workspace:marqueeCommit` | `{ ids, additive }` | marquee release — **emitted even when `ids` is empty**, so a drag across nothing clears the selection |
-| `workspace:multiSelectToggle` | `{ id }` | long-press on a note (the touch path into multi-select) |
+| `workspace:marqueeCommit` | `{ ids, additive, touch }` | Rectangle release. IDs can include note bodies and measure handles. An empty additive rectangle preserves the active group. |
+| `workspace:multiSelectToggle` | `{ id, touch? }` | Shift-click an item, or long-press a note or triangle on touch. The hold toggles before a subsequent drag. |
 
 All six are consumed by `player.js`.
 
@@ -161,6 +161,15 @@ eventBus.on('settings:changed', ({ path }) => {
 | `modals:cleared` | — | the widget, when it closes | `player.js` subscribes, but the handler is an empty placeholder — nothing happens today |
 | `modals:requestRefresh` | `{ note, measureId, clickedElement }` | `player.js` and the widget's own controls, after a commit | the widget — rebuilds itself in place |
 | `modals:init` | — | the widget, once | nothing today |
+
+### Toolbar, repeat and history restoration
+
+| Event | Payload | When it fires |
+|---|---|---|
+| `toolbar:built` | none | The menu bar has built its controls. The player refreshes the live tempo controls. |
+| `display:transposition` | `{ pass, factor }` | The displayed loop pass changes. A null factor means the written pitches. The player and open note widget refresh their displayed values. |
+| `module:repeatChanged` | `{ repeat }` | A module is installed or its repeat expression changes. The Audio settings show the new expression or null. |
+| `history:restored` | `{ source }` | The player finishes applying a history snapshot. The player and settings panel refresh the restored state. |
 
 ### audio
 

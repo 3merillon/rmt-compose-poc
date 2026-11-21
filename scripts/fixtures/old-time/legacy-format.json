@@ -1,0 +1,11 @@
+{
+  "baseNote": { "frequency": "new Fraction(440)", "startTime": "new Fraction(0)", "tempo": "new Fraction(100)", "beatsPerMeasure": "new Fraction(4)" },
+  "notes": [
+    { "id": 1, "startTime": "module.baseNote.getVariable('startTime')" },
+    { "id": 2, "startTime": "module.getNoteById(1).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(1)))" },
+    { "id": 3, "startTime": "module.getNoteById(1).getVariable('startTime')", "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(3, 2))", "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))" },
+    { "id": 4, "startTime": "module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))", "duration": "module.findMeasureLength(module.getNoteById(2)).div(new Fraction(4))", "frequency": "module.getNoteById(3).getVariable('frequency').mul(new Fraction(4, 5))" },
+    { "id": 5, "startTime": "module.getNoteById(2).getVariable('startTime')", "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2)))", "frequency": "module.baseNote.getVariable('frequency').mul(module.baseNote.getVariable('beatsPerMeasure')).div(new Fraction(4))" },
+    { "id": 6, "startTime": "module.getNoteById(5).getVariable('startTime').add(module.getNoteById(5).getVariable('duration'))", "duration": "module.findMeasureLength(module.baseNote).div(module.baseNote.getVariable('beatsPerMeasure'))", "frequency": "module.getNoteById(5).getVariable('frequency').mul(new Fraction(9, 8))" }
+  ]
+}

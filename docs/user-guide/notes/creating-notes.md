@@ -8,16 +8,18 @@ description: Add notes and silences from the note widget, drop a library module 
 There are three ways to get notes into a composition: the [note widget](/user-guide/interface/variable-widget), dropping a **library module** onto an existing note, and editing a module's **JSON** by hand. The widget is the one you will use most.
 
 ::: tip Everything is in seconds
-`startTime` and `duration` evaluate to **seconds**, not beats. To think in beats, use `beat(base)` — one beat at the BaseNote's tempo. The default module's tempo is `100`, so `beat(base)` is `0.6` seconds. Writing `"duration": "1"` gives you a one-second note, not a one-beat note. See [Expressions](/user-guide/notes/expressions#units-seconds-and-the-beat-idiom).
+`startTime` and `duration` evaluate to **seconds**, not beats. To think in beats, use `base.d` — the BaseNote's duration, the **time unit**. The default module's time unit is `3/5` s (shown as 100 BPM), so `base.d` is `0.6` seconds. Writing `"duration": "1"` gives you a one-second note, not a one-unit note. See [Expressions](/user-guide/notes/expressions#units-seconds-and-the-time-unit).
 :::
 
 ## From the note widget
 
-Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section — no note creation.)
+Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE / REFERENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section, on the last bar of a chain — no note creation.)
 
-![The note widget open on a note, showing the Evaluated and Raw rows for start time, duration and frequency, and the ADD NOTE / SILENCE section below them](/img/note-widget.png)
+![Creation controls for note 11, with Note and At End selected](/img/create-note-widget.png)
 
-1. **Choose a kind.** `Note` (selected by default) or `Silence`. Choosing `Silence` hides the Frequency field — a silence is exactly a note with no frequency.
+*At End fills Start Time with [11].t + [11].d. The teal section creates a new item from note 11.*
+
+1. **Choose a kind.** `Note` (selected by default), `Silence`, `Reference` or `Key change`. Choosing `Silence` hides the Frequency field — a silence is exactly a note with no frequency. `Reference` keeps only the Frequency field: a pitch outside time (a tonic, a key, a chord root) that notes relate to and that never sounds. `Key change` keeps Frequency and Start Time: the same, from that start on. Started from a reference, a new note's start defaults to the reference's start (a key change) or `base.t`, and its duration to `base.d`, since a reference has no length to borrow.
 2. **Choose a position.** `At Start` or `At End`, with **`At End` selected by default**. This toggle only appears when you clicked a note or a silence; the BaseNote has no position toggle.
 3. **Adjust the pre-filled expressions** if you want to. Each field carries a live **`Evaluated:`** readout that recomputes as you type, so you can see the pitch or time an expression produces before you commit to it. An expression the app cannot parse reads `Invalid`.
 4. **Click the create button.** It reads **`Create Note`** when you started from a note or a silence, and **`Create`** when you started from the BaseNote.
@@ -34,7 +36,7 @@ Starting from **note N**:
 | Duration | note N's own duration expression | note N's own duration expression |
 | Start Time | `[N].t + [N].d` | `[N].t` |
 
-Duration is copied as an **expression**, not as a reference. If note 3's duration is `beat(base) * (3/2)`, the new note's Duration field is pre-filled with `beat(base) * (3/2)` — the two notes end up the same length but neither depends on the other for it. (When the parent has no compiled duration expression, the field falls back to `[N].d`, which *is* a dependency.)
+Duration is copied as an **expression**, not as a reference. If note 3's duration is `base.d * (3/2)`, the new note's Duration field is pre-filled with `base.d * (3/2)` — the two notes end up the same length but neither depends on the other for it. (When the parent has no compiled duration expression, the field falls back to `[N].d`, which *is* a dependency.)
 
 Frequency is `[N].f` only when note N *has* a frequency. Start from a **silence** and the Frequency field falls back to `base.f`, because there is no `[N].f` to point at.
 
@@ -43,7 +45,7 @@ Starting from the **BaseNote**:
 | Field | Value |
 |---|---|
 | Frequency | `base.f` |
-| Duration | `beat(base)` |
+| Duration | `base.d` |
 | Start Time | `base.t` |
 
 The new note **inherits the parent note's colour**. If the parent has none, it gets a random one.
@@ -54,22 +56,23 @@ If any field fails to parse, creation aborts and a browser alert tells you which
 
 ## By dropping a module
 
-A library module is dropped **onto an existing note or onto the BaseNote** — never onto empty canvas. The drop target becomes the anchor that the module's expressions are rewritten against, which is what lets the same module land at a different pitch and time every time you use it.
+A library module is dropped **onto a sounding note, a measure triangle or the BaseNote** — never onto empty canvas. The drop target becomes the anchor that the module's expressions are rewritten against, which is what lets the same module land at a different pitch and time every time you use it.
 
 1. Open the **module bar** and find the module you want.
-2. Set the drop mode with the ⇤ / ⇥ buttons next to Undo/Redo in the module bar's toolbar: ⇤ for **Start** (the default), ⇥ for **End**. With **End**, the module's start times get the target note's duration added, so the module lands *after* the target instead of on top of it.
-3. Drag the module icon onto a note or the BaseNote.
+2. Set the drop mode with the ⇤ / ⇥ buttons next to Undo/Redo in the module bar's toolbar: ⇤ for **Start**, ⇥ for **End** (the fresh-browser default). With **End**, the module's start times get the target note's duration added, so the module lands *after* the target instead of on top of it.
+3. Drag the icon onto the target. A measure supplies the time anchor and the BaseNote supplies its pitch anchor.
 
-Two targets are refused, each with an error toast:
+These surfaces cannot anchor an import:
 
 - **Empty canvas** — `Drop onto a note or the BaseNote circle to import a module.`
 - **A silence** — `Cannot drop onto a silence. Drop on a note or the BaseNote instead.`
+- **A reference line** is not a drop target at all: a drop on it is a drop on empty canvas (it has no start or length for a module to hang from).
 
 See [Loading Modules](/user-guide/modules/loading-modules) for the full workflow and [The Module Bar](/user-guide/interface/module-bar) for the library itself.
 
 ## From a phrase you already built
 
-Select several notes (shift-drag a marquee, or shift-click to add notes one at a time) and the group widget offers **`Copy to Modules`**. That saves the selection into the library's **Custom** section as a reusable module, keeping the dependency tree inside the selection intact. You can then drop it back onto any note.
+Select several notes (shift-drag a marquee, or shift-click to add notes one at a time) and the group widget offers **`Copy to Modules`**. That saves the selection into the library's **Custom** section as a reusable module, keeping the dependency tree inside the selection intact. Selected measure triangles are included too. Drop the copy onto a sounding note, measure triangle or the BaseNote.
 
 This is the fastest way to turn something you improvised into a building block. See [Selection & Group Editing](/user-guide/notes/selection).
 
@@ -84,34 +87,13 @@ Every note property is a string expression. The shipped modules are all written 
       "id": 1,
       "frequency": "base.f * (3/2)",
       "startTime": "base.t",
-      "duration": "beat(base)",
+      "duration": "base.d",
       "color": "rgba(255, 100, 100, 0.7)",
       "instrument": "sine-wave"
     }
   ]
 }
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules use method chains. They still load, and the app converts them to DSL as soon as you display or save an expression.
-
-```json
-{
-  "notes": [
-    {
-      "id": 1,
-      "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-      "startTime": "module.baseNote.getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
-      "color": "rgba(255, 100, 100, 0.7)",
-      "instrument": "sine-wave"
-    }
-  ]
-}
-```
-</details>
 
 See [Module Format](/user-guide/modules/module-format) for the full schema.
 
@@ -122,23 +104,26 @@ See [Module Format](/user-guide/modules/module-format) for the full schema.
 | `id` | Yes | Unique integer. Assigned for you by the widget. |
 | `frequency` | For notes | Pitch in Hz. **Omit it to make the note a silence.** |
 | `startTime` | Yes | When the note begins, in seconds. |
-| `duration` | For notes and silences | How long the note lasts, in seconds. A note with a `startTime` but no `duration` and no `frequency` is a **measure bar**. |
+| `duration` | For notes and silences | How long the note lasts, in seconds; write it in time units, `base.d * 2`. |
 | `color` | No | Any CSS colour. Inherited from the parent when created in the widget. |
-| `instrument` | No | Overrides the inherited instrument. Left unset, the note inherits along its frequency reference; see [Editing Notes](/user-guide/notes/editing-notes#instrument). |
+| `instrument` | No | Sets the note's instrument and starts a new player. Left unset, the note takes the instrument of its player (the line of notes it belongs to); see [Editing Notes](/user-guide/notes/editing-notes#instrument). |
 
-The three shapes a note can take are decided purely by which properties exist:
+The shapes a note can take are decided purely by which properties exist:
 
 | Has `startTime` | Has `duration` | Has `frequency` | Result |
 |---|---|---|---|
 | Yes | Yes | Yes | A **note** |
 | Yes | Yes | No | A **silence** |
-| Yes | No | No | A **measure bar** |
+| No | No | Yes | A **reference** (a tonic, a key, a root): a line across the workspace, never sounds |
+| Yes | No | Yes | A **key change**: the same line from its start on, never sounds |
+
+A silent note flagged `"measure": true` is a **measure bar**, drawn as a bar line and not as a rest. A note with only a `startTime` is a plain marker, not a bar. See [Measure bars](/reference/module-schema#measure-bars).
 
 ## Building a melody
 
 Each note starts when the previous one ends.
 
-1. Select the BaseNote and click **`Create`**. You get a note at `base.t`, one beat long, at the base frequency.
+1. Select the BaseNote and click **`Create`**. You get a note at `base.t`, one time unit long, at the base frequency.
 2. Select that note. Leave the position on **`At End`**.
 3. Set the Frequency field — say `base.f * (9/8)` for a whole tone above the base.
 4. Click **`Create Note`**.

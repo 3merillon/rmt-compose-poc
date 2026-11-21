@@ -5,7 +5,7 @@ description: Nineteen-tone equal temperament in RMT Compose — near-just thirds
 
 # 19-TET
 
-19-TET divides the octave into nineteen equal steps of 63.16 cents. It buys you thirds and sixths that are almost exactly just, and it pays for them with a fifth that is 7 cents flat. It is the cheapest good answer to 12-TET's worst problem.
+19-TET divides the octave into nineteen equal steps of 63.16 cents. It buys you thirds and sixths that are almost exactly just, and it pays for them with a fifth that is 7 cents flat. Compare its six-step major third with the four-step third in 12-TET.
 
 | Property | Value |
 |---|---|
@@ -84,16 +84,6 @@ base.f * 2 ^ (6/19)     # major third
 base.f * 2 ^ (11/19)    # fifth
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(6, 19)))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(11, 19)))
-```
-</details>
-
 ## The shipped module
 
 The library's **Scale Systems** section ships a **19-TET** module (file `scale-systems/TET-19.json`; the tile reads **19-TET**).
@@ -102,17 +92,16 @@ The library's **Scale Systems** section ships a **19-TET** module (file `scale-s
 |---|---|
 | Notes | 20 — nineteen steps plus the note you start on |
 | Base frequency | 440 Hz |
-| Tempo | 100 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/5` s, shown as 100 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (1/2)` |
+| Note duration | `base.d * (1/2)` |
 | Step | `[n].f * 2 ^ (1/19)` |
 
 Note 1 is `base.f`; every later note is the previous one times `2 ^ (1/19)`. It is a chain, so moving note 1 moves the whole scale.
 
 To load it, drag the tile from **Scale Systems** (or search `19` or the `microtonal` tag with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-All nineteen steps after the first show a **≈** prefix and cross-hatching, because `2^(k/19)` is irrational. The fraction beside the ≈ is the note's approximate ratio to the BaseNote.
+All nineteen steps after the first are cross-hatched and labelled with their power, `2^(1/19)` … `2^(18/19)`, because `2^(k/19)` is irrational.
 
 ## Working in 19-TET
 

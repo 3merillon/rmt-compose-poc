@@ -1,35 +1,39 @@
 ---
 title: Expression Syntax
-description: The complete grammar of the RMT Compose expression DSL — tokens, literals, references, built-in functions, operators, precedence, and error behaviour.
+description: The complete grammar of the RMT Compose expression DSL — tokens, literals, references, operators, precedence, the removed beat/tempo/measure forms, and error behaviour.
 ---
 
 # Expression Syntax
 
-Every note property in RMT Compose — `startTime`, `duration`, `frequency`, `tempo`,
-`beatsPerMeasure`, `measureLength` — is stored as a **text expression**. The expression is
-compiled to bytecode and evaluated with exact rational arithmetic.
+A note has six variables, and each is stored as a **text expression**. The expression is compiled to
+bytecode and evaluated with exact rational arithmetic. They fall in two groups:
 
-This page is the complete grammar. The modern format is the **DSL**:
+| Group | Variables | What they are |
+|---|---|---|
+| **The language** | `f` frequency, `t` startTime, `d` duration | The notation. Use references to relate notes to one another or the BaseNote. A literal pitch or time stands independently. |
+| **Interpretation** | `a` amplitude, `attack`, `release` | How the note sounds. Not part of the notation; the only variables that fall back to the BaseNote when unset. |
+
+This page is the complete grammar of the **DSL**:
 
 ```
 base.f * (3/2)          # perfect fifth above the BaseNote
 [1].t + [1].d           # starts when note 1 ends
-beat(base) * (1/2)      # half a beat long
+base.d * (1/2)          # half a time unit long
 2^(7/12)                # the 12-TET fifth ratio
 ```
 
-An older **legacy** method-chain format still loads and still compiles. It is covered in
-[Fraction API](/reference/expressions/fraction-api) and
-[Module API](/reference/expressions/module-api). You never have to write it: the note widget
-displays every expression as DSL, whatever format it was stored in, and pressing **Save** in
-the widget stores that DSL.
+The DSL has **no functions**. Where a length is needed, `base.d` is the idiom: the BaseNote's
+duration is the time unit, one beat if you count in beats.
+
+The method-chain syntax of earlier versions is retired; see
+[The retired method-chain syntax](#the-retired-method-chain-syntax).
 
 ## Where you type an expression
 
 Open the note widget, find the property row, and type into its **`Raw:`** field. A **`Save`**
 button appears as soon as you type. Nothing changes until you press it.
 
-![The note widget with a variable row expanded, showing the Evaluated: readout and the Raw: expression field with its Save button](/img/note-widget.png)
+![The widget for note 11 shows the raw expression [10].t + [10].d and its evaluated start of 0.3 seconds](/img/note-widget.png)
 
 The **`Evaluated:`** line above it is read-only — it shows the value the expression currently
 produces.
@@ -62,9 +66,10 @@ and the comment is gone the next time you open the widget.
 |---|---|
 | Number | `0`–`9`, optionally with a single `.` and more digits (`440`, `1.5`) |
 | Operators | `+` `-` `*` `/` `^` |
+| Approximation mark | `~` (before a number) |
 | Delimiters | `(` `)` `[` `]` `.` |
 | Keyword | `base` |
-| Identifier | letter or `_`, then letters, digits, or `_` — used for property names and function names |
+| Identifier | letter or `_`, then letters, digits, or `_` — used for property names |
 
 Any other character is a lexer error: `Unknown character '&' at column 3`.
 
@@ -76,6 +81,7 @@ Any other character is a lexer error: `Unknown character '&' at column 3`.
 | Fraction literal | `(3/2)`, `(1/12)`, `(-5/4)` | Exact rational. The parentheses are **part of the literal** |
 | Decimal | `0.5`, `1.5`, `3.14159` | Converted to a fraction at compile time |
 | Negation | `-2`, `-base.f` | Prefix minus |
+| Approximate number | `~261.63`, `~-3`, `~(3/2)` | The number, marked as approximate; see [Approximate numbers](#approximate-numbers) |
 
 ### Fraction literals versus grouping
 
@@ -111,6 +117,36 @@ exactly `(333333/1000000)` — close to a third, but not `(1/3)`, and no number 
 get there. Use a fraction literal for any value that is not a terminating decimal.
 :::
 
+## Approximate numbers
+
+A number written with **`~`** in front of it is **approximate**: it stands for a value it is not
+exactly, such as a frequency read from a tuning table, a measurement, or a rounded value.
+
+```
+base.f * ~1.4983       # a fifth measured as 1.4983, not the pure 3/2
+~261.63                # a frequency taken from a table
+[2].d * ~0.5
+```
+
+- `~` marks a **number only**: a decimal, an integer, or a fraction literal, optionally negative
+  (`~261.63`, `~-3`, `~(3/2)`). `~base.f` or `~(1 + 2)` is refused with
+  `'~' marks a number as approximate: write it before a number, e.g. ~261.63, ~-3 or ~(3/2)`.
+- **Approximation spreads.** Anything computed from an approximate number is approximate too:
+  `[3].f * (5/4)` is approximate when `[3].f` is. An approximate value never equals an exact one:
+  `~1.5` is not `3/2`.
+- **It is visible.** The note widget shows an approximate value with ≈, and the note is hatched on
+  the canvas like a tempered note: crosshatched when its own expression holds the `~`,
+  single-hatched when its frequency depends on one.
+- **A plain number stays exact.** `1.5` is exactly 3/2 and `131.5` exactly 263/2; only `~` marks an
+  approximation. See [Decimals are rationalized](#decimals-are-rationalized).
+- **The app writes `~` itself** where it rewrites an expression from an approximate value
+  (Evaluate to BaseNote, copying a selection as a module, moving a note): `base.f * ~(14983/10000)`.
+  The interval arrows keep the `~` as written: `base.f * ~1.5` becomes `2 * base.f * ~1.5`.
+
+Irrational values are not approximations. `2^(7/12)` is exact: the app keeps it as the power it
+is, and twelve steps of `2^(1/12)` give exactly 2. See
+[Exact Values](/developer/core/symbolic-power).
+
 ## Note references
 
 | Form | Meaning |
@@ -119,13 +155,12 @@ get there. Use a fraction literal for any value that is not a terminating decima
 | `base.prop` | Property of the BaseNote |
 | `[0].prop` | The BaseNote. Note id 0 **is** the BaseNote |
 
-`N` must be a literal integer between **0 and 65535** — the range a module's ids can occupy.
+`N` must be a literal integer between **0 and 16777215** — the range a module's ids can occupy.
 Anything outside it is rejected when the expression compiles
-(`Note IDs must be integers between 0 and 65535`). There is no `[prev]`, no arithmetic inside
+(`Note IDs must be integers between 0 and 16777215`). There is no `[prev]`, no arithmetic inside
 the brackets, and no variables.
 
-The `[0]` rewrite happens everywhere a note id is accepted, including inside function
-arguments: `measure([0])` is `measure(base)`, and `beat([0])` is `beat(base)`.
+Saving rewrites `[0]` to `base`: `[0].d` is saved as `base.d`.
 
 Referencing another note's property creates a **dependency**. See
 [Dependencies](/user-guide/notes/dependencies).
@@ -134,87 +169,90 @@ Referencing another note's property creates a **dependency**. See
 
 Every property has a canonical name and one or more accepted spellings.
 
-| Property | Accepted spellings | Saved as |
-|---|---|---|
-| frequency | `f`, `freq`, `frequency` | `f` |
-| startTime | `t`, `s`, `start`, `startTime` | `t` |
-| duration | `d`, `dur`, `duration` | `d` |
-| tempo | `tempo` | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` |
-| measureLength | `ml`, `measureLength` | `ml` |
+| Group | Property | Accepted spellings | Saved as |
+|---|---|---|---|
+| Language | frequency | `f`, `freq`, `frequency` | `f` |
+| Language | startTime | `t`, `s`, `start`, `startTime` | `t` |
+| Language | duration | `d`, `dur`, `duration` | `d` |
+| Interpretation | amplitude | `a`, `amp`, `amplitude` | `a` |
+| Interpretation | attack | `attack`, `atk` | `attack` |
+| Interpretation | release | `release`, `rel` | `release` |
 
 Aliases are normalized when the expression is saved: type `base.freq`, and it comes back as
-`base.f`.
+`base.f`; type `[2].atk`, and it comes back as `[2].attack`.
+
+`attack` and `release` are shares of the note's own duration, between 0 and 1: see
+[attack and release](/reference/properties/attack-release).
 
 Anything else is an error:
 
 ```
 [1].x           # Unknown property 'x'. Valid properties: f (frequency), t (startTime),
-                #   d (duration), tempo, bpm, ml
+                #   d (duration), a (amplitude), attack, release
 [1].pitch       # same
 base.l          # same — there is no `l` alias for duration
 ```
 
 ### What a reference resolves to
 
-`tempo`, `beatsPerMeasure` and `measureLength` **fall back to the BaseNote** when the
-referenced note does not define them. `[5].tempo` on a note with no tempo of its own gives you
-the BaseNote's tempo.
+`amplitude`, `attack` and `release` — the interpretation variables, and only they — **fall back to the
+BaseNote** when the referenced note does not define them. `[5].a` on a note with no amplitude of its
+own gives you the BaseNote's.
 
-`startTime`, `duration` and `frequency` do not inherit. If a reference cannot be resolved at
-all — for example it points at a note that no longer exists — evaluation does not fail. It
-substitutes a fixed default and carries on:
+`startTime`, `duration` and `frequency` do not inherit. If a reference cannot be resolved at all —
+for example it points at a note that no longer exists — evaluation does not fail. It substitutes a
+fixed default and carries on. For the three inheriting variables the BaseNote is still consulted
+first; the default is what is left when the BaseNote does not define the variable either:
 
 | Property | Default when unresolvable |
 |---|---|
 | startTime | 0 |
 | duration | 1 |
 | frequency | 440 |
-| tempo | 60 |
-| beatsPerMeasure | 4 |
-| measureLength | 4 |
+| amplitude | 1 |
+| attack | 0 |
+| release | 0 |
 
-## Built-in functions
+(An unset `attack` or `release` that is not read through a reference plays as the instrument's own
+envelope; the 0 above is only the stand-in value for an unresolvable reference.)
 
-There are exactly three, each takes exactly one argument, and that argument must be a **bare
-note reference** — `[N]` or `base`. It cannot be an expression.
+## There are no functions
 
-| Call | Returns |
+The language has no functions. Every expression is made of numbers, note references, operators and
+parentheses. Four forms that older versions accepted are refused, each with a message naming the
+replacement:
+
+| You type | The message |
 |---|---|
-| `tempo(x)` | The tempo of `x`, in BPM |
-| `measure(x)` | The measure length of `x`, in seconds |
-| `beat(x)` | One beat of `x`, in seconds — that is, `60 / tempo(x)` |
+| `beat(base)` | `'beat()' was removed: the reference note's duration is the time unit, so write base.d for beat(base), or [N].d to relate to note N` |
+| `measure([1])` | `'measure()' was removed: a measure bar is a silent note with a duration, so write [N].d for measure([N])` |
+| `tempo(base)` | `'tempo()' was removed: tempo is no longer stored; durations relate to other durations (base.d is the time unit, 60 / base.d the tempo)` |
+| `base.tempo`, `[1].bpm`, `[1].ml` (also `beatsPerMeasure`, `measureLength`) | `'.tempo' was removed: tempo, beats per measure and measure length are no longer stored. Relate durations instead (base.d is the time unit; a measure bar's length is its .d)` |
+
+Each is followed by `(at column N)`. Any other name followed by `(`, such as `min(1)` or
+`instrument(base)`, fails as `Unexpected 'min', expected expression`.
+
+The translations:
+
+| Old | New |
+|---|---|
+| `beat(base)` or a beat on a note inheriting the BaseNote tempo | `base.d` |
+| `beat([N])` on a note with its own constant tempo | `base.d` scaled by the old base tempo divided by the note’s tempo. At base tempo 100 and note tempo 150, the beat becomes `(2/3) * base.d`. |
+| `beat(base) * (1/2)` | `base.d * (1/2)` |
+| `measure([N])`, on a measure bar | `[N].d` |
+| a tempo T | `base.d = 60/T` (see [the time unit](/reference/properties/duration#the-time-unit)) |
+| beats per measure B | a measure bar of `base.d * B` (see [Measure bars](/reference/module-schema#measure-bars)) |
+
+Modules saved in the old form are converted exactly when they load.
 
 ```
-beat(base)              # one beat at the base tempo
-beat(base) * 2          # two beats
-beat(base) * (1/2)      # half a beat
-measure([5])            # one measure of note 5
+base.d                  # one time unit
+base.d * 2              # two
+base.d * (1/2)          # half of one
+[5].d                   # as long as note 5, or one measure, if note 5 is a bar
 ```
 
-`beat(base) * (n/d)` is what the note-length buttons in the note widget write for you.
-
-::: warning Helper arguments cannot be expressions
-`beat([1].t)` and `tempo(base.f)` are syntax errors. Only `beat([1])`, `beat(base)`,
-`tempo([1])`, `tempo(base)`, `measure([1])` and `measure(base)` parse.
-:::
-
-Any other identifier followed by `(` is a syntax error — there is no `instrument()`, no `min()`,
-no `abs()`.
-
-### tempo() and measure() do not survive a save
-
-`tempo(x)` compiles to exactly the same bytecode as `x.tempo`, and `measure(x)` to the same as
-`x.ml`. They are input sugar. When the expression is written back out you get the property form:
-
-| You type | It is saved as |
-|---|---|
-| `tempo(base)` | `base.tempo` |
-| `measure([2])` | `[2].ml` |
-| `beat(base)` | `beat(base)` |
-
-`beat()` is the only function the decompiler reconstructs, so it is the only one you will see
-in a saved module.
+`base.d * (n/d)` is what the note-length buttons in the note widget write for you.
 
 ## Operators
 
@@ -237,7 +275,7 @@ Listed loosest to tightest. Tighter binds first.
 | 2 | `*` `/` | Left |
 | 3 | `-` (prefix) | Prefix |
 | 4 | `^` | **Right** |
-| 5 | Literals, `[N].p`, `base.p`, `f(x)`, `( … )` | — |
+| 5 | Literals, `[N].p`, `base.p`, `( … )` | — |
 
 Consequences worth knowing:
 
@@ -260,22 +298,18 @@ additive       -> multiplicative (('+' | '-') multiplicative)*
 multiplicative -> unary (('*' | '/') unary)*
 unary          -> '-' unary | power
 power          -> primary ('^' unary)?
-primary        -> fraction | noteRef | helperCall | '(' expression ')' | number
+primary        -> fraction | noteRef | '(' expression ')' | number | approximate
 fraction       -> '(' number '/' number ')'
+approximate    -> '~' ( '-'? number | fraction | '(' '-'? number ')' )
 noteRef        -> '[' number ']' '.' property | 'base' '.' property
-helperCall     -> HELPER '(' noteArg ')'
-noteArg        -> '[' number ']' | 'base'
 ```
 
-`HELPER` is one of `tempo`, `measure`, `beat`.
+There is no call syntax.
 
 ## Expressions the app writes for you
 
 Dragging a note, resizing it, pressing the ▲/▼ frequency arrows, and creating a note all
-rewrite the affected expression. Each of these preserves the format it found: a DSL expression
-is rewritten as DSL, and a legacy expression is rewritten as legacy. The only thing that
-converts a legacy expression to DSL is pressing **Save** in the note widget, whose `Raw:` field
-is already showing you the DSL.
+rewrite the affected expression. The rewritten expression is DSL.
 
 The frequency arrows are worth a note: they **fold the interval into the expression's existing
 coefficient** rather than prepending a new multiplier. Stepping up and then back down returns
@@ -291,8 +325,8 @@ coefficient, so a TET note stays TET.
 ## What happens when you save
 
 Saving runs the expression through a simplifier that puts it in a canonical form. The rewrite
-is applied only if it evaluates to the same value **and** does not change whether the value is
-irrational; otherwise your original text is kept.
+is applied only if it evaluates to the same value **and** does not change whether the note is
+hatched; otherwise your original text is kept.
 
 | You type | It is saved as |
 |---|---|
@@ -313,17 +347,21 @@ unchanged:
 |---|---|
 | Empty expression | `` |
 | Unknown property | `[1].x`, `base.l` |
+| A removed function or property | `beat(base)`, `base.tempo` |
 | Unknown character | `a & b` |
 | Missing property after `.` | `base.` |
 | Incomplete expression | `1 +` |
-| Unclosed bracket | `beat([1].t` |
-| Self-reference | `[5].f * 2` typed on note 5 |
-| Circular dependency | note 1 references note 2, which references note 1 |
+| Unclosed bracket | `([1].d + 1` |
+| Self-reference | `[5].f * 2` as note 5's frequency |
+| Circular dependency | note 1's frequency reads `[2].f` while note 2's frequency reads `[1].f` |
+
+The last two are judged per property. `[5].d * 2` as note 5's start time is accepted, and so are
+two notes that read each other through different properties.
 
 A rejected expression shows its reason **inline in the widget** — in red under the `Save` button,
 with a red border on the field. The note keeps its old value. The message is specific, for
 example `Unknown property 'x'. Valid properties: f (frequency), t (startTime), d (duration),
-tempo, bpm, ml (at column 5)`.
+a (amplitude), attack, release (at column 5)`.
 
 ### What is *not* an error
 
@@ -331,72 +369,52 @@ Two things that look like errors are not.
 
 **Division by zero.** `(5/0)` is accepted. It is not read as a fraction literal — it falls back
 to a grouped division, and at evaluation time a division by zero yields **1** with a console
-warning. The property is additionally **marked corrupted**, so the note crosshatches on the
-canvas the same way an irrational power does.
+warning. The value is additionally **approximate**, so the note crosshatches on the
+canvas the same way a tempered note does.
 
 **An unresolvable reference.** See the defaults table above. Evaluation degrades rather than
 failing.
 
-An expression **neither compiler can parse**, on the other hand, *is* an error: the compiler
+An expression the compiler **cannot parse**, on the other hand, *is* an error: the compiler
 logs a `console.error` and throws, the validators return `valid: false`, and a typo like `[1]f`
 (the dot is missing) is refused with a message instead of silently zeroing the note. On a file
 load the affected property is left unset.
 
-## Format detection
+## The retired method-chain syntax
 
-Each expression string is classified as DSL or legacy on its own, at compile time:
+Earlier versions also accepted a JavaScript-like method-chain syntax, for example
+`module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))`, which is `[3].f * (3/2)`
+in the DSL. That syntax is no longer compiled.
 
-1. It is **DSL** if it contains a note reference (`[N].`), a `base.` reference, starts with a
-   fraction literal, or starts with `tempo(` / `measure(` / `beat(`.
-2. It is **legacy** if it contains `new Fraction(`, `module.getNoteById`, `module.baseNote`,
-   `.getVariable(`, a `.mul(`/`.div(`/`.add(`/`.sub(`/`.pow(`/`.neg(` call, or
-   `module.findTempo` / `module.findMeasureLength`.
-3. Otherwise, if the whole string is reference-free arithmetic — `263`, `2 * 263`,
-   `(1/2) * 263` — it is **DSL**.
-4. Otherwise it is treated as legacy.
+- **Typed now, it is refused.** In the note widget or any other expression field, the message is
+  "The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2)." When the
+  text can be converted, a last sentence gives its DSL form, for example "In the DSL this reads:
+  base.f * (3/2)".
+- **Old modules still open.** Module files, saved modules and autosaved modules written in the old
+  syntax are converted to the DSL once, when the module is loaded, and the module is then saved in
+  the DSL. The conversion is exact: each converted expression has the same exact fraction as
+  before, which a test checks against values recorded with the old compiler.
+- **A few chains are refused instead of guessed.** The old compiler did not read some chains as
+  they were written: a `.mul()` or `.div()` after an `.add()` or `.sub()`, a `.pow()` after a
+  `.mul()` or after another `.pow()`, and any `.neg()`. A module containing one does not load, and
+  the message names the note and the variable so you can rewrite that expression in the DSL.
+- **Converting files on disk.** Run `node scripts/migrate-modules.mjs <file-or-folder>` from the
+  repository root. It converts the files in place, and also applies the earlier conversion of
+  tempo, beats per measure and measure length to relations of `base.d`.
 
-Rule 3 is why a bare number in a module file is DSL, not legacy. Misclassification is not fatal
-in either direction: a string routed to the wrong parser fails there and is retried with the
-other one before the compiler gives up.
+Examples of the conversion:
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-The legacy format is a method chain over `Fraction` objects. It is text, not JavaScript — it is
-never evaluated, only pattern-matched and compiled. Only `.mul()`, `.div()`, `.add()`, `.sub()`
-and `.pow()` are recognized.
-
-```javascript
-// Perfect fifth above the BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Start when note 1 ends
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-
-// One beat
-new Fraction(60).div(module.findTempo(module.baseNote))
-
-// 12-TET semitone
-new Fraction(2).pow(new Fraction(1, 12))
-```
-
-| Task | DSL | Legacy |
-|---|---|---|
-| Perfect fifth | `base.f * (3/2)` | `module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))` |
-| Note 1's end time | `[1].t + [1].d` | `module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))` |
-| One beat | `beat(base)` | `new Fraction(60).div(module.findTempo(module.baseNote))` |
-| 12-TET semitone | `2^(1/12)` | `new Fraction(2).pow(new Fraction(1, 12))` |
-| Measure length | `measure([1])` | `module.findMeasureLength(module.getNoteById(1))` |
-
-See [Fraction API](/reference/expressions/fraction-api) for the full list of what the legacy
-parser does and does not accept.
-</details>
+| Method chain | DSL |
+|---|---|
+| `module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))` | `[3].f * (3/2)` |
+| `module.baseNote.getVariable('duration')` | `base.d` |
+| `new Fraction(2).pow(new Fraction(1, 12)).mul(module.baseNote.getVariable('frequency'))` | `2^(1/12) * base.f` |
+| `new Fraction(0.25)` | `(1/4)` |
 
 ## See also
 
 - [Operators](/reference/expressions/operators) — per-operator semantics and result types
-- [Module API](/reference/expressions/module-api) — references and functions in detail
-- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy surface
+- [Module API](/reference/expressions/module-api) — references and the six properties
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers
 - [Module JSON Schema](/reference/module-schema) — how expressions are stored in a file
 - [Dependencies](/user-guide/notes/dependencies) — what a reference does to the graph

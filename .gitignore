@@ -21,9 +21,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Rust build artifacts (source is committed for Vercel builds)
-rust/target/
-rust/pkg/
 
 # Scratch/probe files
 .tmp-probe/

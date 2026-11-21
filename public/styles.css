@@ -1033,15 +1033,85 @@ input:checked + .toggle-slider:before {
     box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
 }
 
+/* Number fields: the native spin buttons cannot be styled (only filtered, which
+   gave a muddy yellow that turned red on hover). They are hidden, and
+   src/ui/number-stepper.js wraps every number field with two drawn chevrons that
+   look and hover like the library toolbar's buttons. */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
-    filter: sepia(100%) hue-rotate(5deg) saturate(500%);
-    opacity: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
 }
 
-input[type="number"]::-webkit-inner-spin-button:hover,
-input[type="number"]::-webkit-outer-spin-button:hover {
-    filter: sepia(100%) hue-rotate(-50deg) saturate(700%);
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.rmt-stepper {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: stretch;
+    max-width: 100%;
+}
+
+.rmt-stepper > input[type="number"] {
+    padding-right: 20px;
+    box-sizing: border-box;
+}
+
+.rmt-stepper-col {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    bottom: 2px;
+    width: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.rmt-stepper-btn {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin: 0;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--rmt-accent, #ffa800);
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    touch-action: manipulation;
+    transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out;
+}
+
+.rmt-stepper-btn svg {
+    width: 10px;
+    height: 10px;
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.rmt-stepper-btn:hover,
+.rmt-stepper-btn:active {
+    border-color: var(--rmt-accent, #ffa800);
+    background: rgba(var(--rmt-accent-rgb), 0.18);
+}
+
+.rmt-stepper > input[type="number"]:disabled + .rmt-stepper-col {
+    opacity: 0.3;
+    pointer-events: none;
 }
 
 .input-button-group {
@@ -1282,6 +1352,13 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-bottom: 1px dotted rgba(var(--rmt-accent-rgb), 0.3);
     background: rgba(var(--rmt-accent-rgb), 0.05);
     border-radius: 4px;
+}
+
+/* The note widget's ADD NOTE / SILENCE / REFERENCE section: the whole section in
+   the teal of its border and title, so the rows inside it (frequency, duration,
+   start time) read as part of it when its title has scrolled out of view. */
+.variable-row.add-note-section {
+    background: rgba(0, 255, 204, 0.09);
 }
 
 .variable-name {
@@ -1685,6 +1762,61 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     background-color: #00cccc;
 }
 
+/* SELECT in the note widget: the note's relations as a group. White, like the
+   group selection it makes (the multi-selection ring and the group widget). */
+.select-related-row {
+    margin-bottom: 15px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    border-top: 2px solid var(--rmt-text-primary, #ffffff);
+}
+
+.select-related-header {
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--rmt-text-primary, #ffffff);
+    margin-bottom: 8px;
+}
+
+.select-related-line {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+.select-related-line:last-child {
+    margin-bottom: 0;
+}
+
+.select-related-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--rmt-text-secondary, #aaaaaa);
+}
+
+.select-related-btn {
+    flex: 0 0 auto;
+    min-width: 34px;
+    min-height: 32px;
+    padding: 4px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--rmt-text-primary, #ffffff);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.select-related-btn:hover {
+    border-color: var(--rmt-text-primary, #ffffff);
+    background: rgba(255, 255, 255, 0.14);
+}
+
 .scale-controls {
     position: fixed;
     bottom: 11px;
@@ -1696,7 +1828,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     width: 150px;
     height: 170px;
     opacity: 0;
-    transition: opacity 0.3s ease-in-out;
 }
 
 .scale-controls.visible {
@@ -1715,7 +1846,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 1px;
     transform: scaleY(0);
     transform-origin: bottom center;
-    transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    transition: transform 100ms ease-out;
 }
 
 .x-scale-slider-container {
@@ -1730,7 +1861,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 20px;
     transform: scaleX(0);
     transform-origin: left center;
-    transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    transition: transform 100ms ease-out;
 }
 
 .scale-controls.visible .y-scale-slider-container {
@@ -1752,8 +1883,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transform-origin: center;
     border-radius: 2px;
     opacity: 0;
-    transition: opacity 0.3s ease-in-out;
-    transition-delay: 0.3s;
 }
 
 .x-scale-slider-container input[type="range"] {
@@ -1765,8 +1894,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     outline: none;
     border-radius: 2px;
     opacity: 0;
-    transition: opacity 0.3s ease-in-out;
-    transition-delay: 0.3s;
 }
 
 .scale-controls.visible input[type="range"] {
@@ -1825,8 +1952,6 @@ input[type="range"]:active::-moz-range-thumb {
     font-family: 'Roboto Mono', monospace;
     font-size: 14px;
     opacity: 0;
-    transition: opacity 0.3s ease-in-out;
-    transition-delay: 0.4s;
 }
 
 .x-scale-slider-container::before {
@@ -1838,8 +1963,6 @@ input[type="range"]:active::-moz-range-thumb {
     font-family: 'Roboto Mono', monospace;
     font-size: 14px;
     opacity: 0;
-    transition: opacity 0.3s ease-in-out;
-    transition-delay: 0.4s;
 }
 
 .scale-controls.visible .y-scale-slider-container::before,
@@ -1847,7 +1970,16 @@ input[type="range"]:active::-moz-range-thumb {
     opacity: 1;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .x-scale-slider-container, .y-scale-slider-container {
+        transition: none;
+    }
+}
+
 .scale-controls-toggle {
+    padding: 0;
+    border: 0;
+    touch-action: manipulation;
     position: fixed;
     bottom: 20px;  
     left: 20px;    
@@ -1855,7 +1987,7 @@ input[type="range"]:active::-moz-range-thumb {
     height: 12px;
     background-color: var(--rmt-accent, #ffa800);
     border-radius: 50%;
-    z-index: 1150;
+    z-index: 1151;
     cursor: pointer;
     transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
@@ -2183,6 +2315,73 @@ input[type="range"]:active::-moz-range-thumb {
     background: var(--rmt-danger, #ff0000);
     color: #fff;
     box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
+}
+
+/* CHANGE / INSTRUMENT / COLOUR: edits on every selected note, above the actions. */
+.group-widget-section {
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px dotted rgba(255, 255, 255, 0.25);
+}
+
+.group-widget-section-title {
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+    color: var(--rmt-text-secondary, #aaaaaa);
+    margin-bottom: 8px;
+}
+
+.group-widget-field {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 36px;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--rmt-text-primary, #ffffff);
+    font-family: inherit;
+    font-size: 14px;
+    color-scheme: dark;
+}
+
+.group-widget-field:focus {
+    outline: none;
+    border-color: var(--rmt-text-primary, #ffffff);
+}
+
+.group-widget-row {
+    display: flex;
+    gap: 6px;
+}
+
+.group-widget-row > * {
+    width: auto;
+}
+
+.group-widget-row .group-widget-field-inline {
+    flex: 1 1 0;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.group-widget-btn[hidden] {
+    display: none;
+}
+
+.group-widget-btn-small {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 36px;
+    padding: 6px 4px;
+}
+
+.group-widget-row .group-widget-field-inline + .group-widget-btn-small {
+    flex: 0 0 auto;
+    padding: 6px 12px;
 }
 
 /* Consequence of the action above it, in the app's usual muted hint voice. */

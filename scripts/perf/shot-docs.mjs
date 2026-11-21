@@ -36,7 +36,8 @@ const written = [];
 const problems = [];
 const consoleErrors = new Set();
 
-const browser = await chromium.launch({ headless: true });
+// Bundled Chromium when installed, else the system Edge (Playwright's msedge channel)
+const browser = await chromium.launch({ headless: true }).catch(() => chromium.launch({ headless: true, channel: 'msedge' }));
 
 async function newPage({ width = VW, height = VH, hasTouch = false } = {}) {
   const ctx = await browser.newContext({
@@ -81,12 +82,12 @@ const settle = async (page, ms = 600) => {
   await page.waitForTimeout(ms);
 };
 
-async function save(page, name, { selector, clip, pad = 0 } = {}) {
+async function save(page, name, { selector, clip, pad = 0, scale = 'device' } = {}) {
   await settle(page, 350);
   let buf;
   try {
     if (selector) {
-      buf = await page.locator(selector).screenshot();
+      buf = await page.locator(selector).screenshot({ scale });
     } else if (clip) {
       const c = {
         x: Math.max(0, Math.round(clip.x - pad)),
@@ -97,9 +98,9 @@ async function save(page, name, { selector, clip, pad = 0 } = {}) {
       const vp = page.viewportSize();
       c.width = Math.min(c.width, vp.width - c.x);
       c.height = Math.min(c.height, vp.height - c.y);
-      buf = await page.screenshot({ clip: c });
+      buf = await page.screenshot({ clip: c, scale });
     } else {
-      buf = await page.screenshot();
+      buf = await page.screenshot({ scale });
     }
   } catch (e) {
     problems.push(`${name}: ${e.message}`);
@@ -306,28 +307,17 @@ const expandBar = async (page) => {
 // ══════════════════════════════════════════════════ workspace + chrome ═══════
 console.log('\n== workspace, top bar, module bar, note widget');
 {
-  const { ctx, page } = await newPage();
-
-  // --- the hero: default module, a note selected, its dependency lines drawn.
-  const pts = await findNotePoints(page, 6);
-  if (!pts.length) throw new Error('no note reachable on the default camera');
-  const hero = await pickableCandidate(page, await rankedDependents(page));
-  const heroPt = hero?.pt ?? pts[0];
-  console.log(`  hero note ${hero ? `${hero.id} (${hero.colored} coloured properties, refs ${hero.refs.join(',')})` : `fallback ${pts[0].id}`}`);
-  await clickNote(page, heroPt);
-  const selected = await depState(page);
-  const widgetUp = await page.evaluate(() =>
-    document.getElementById('note-widget').classList.contains('visible'));
-  console.log('  selection: ' + JSON.stringify(selected) + ` widget=${widgetUp}`);
-  if (selected.selected == null) problems.push('workspace-overview: no note ended up selected');
-  if (!selected.coloursDrawn) {
-    problems.push(`workspace-overview: the selected note draws no dependency lines (${JSON.stringify(selected)})`);
-  }
+  const { ctx, page } = await newPage({ width: 820, height: 550 });
+  await focusNote(page, 10, { scale: 1.15, sx: 210, sy: 380 });
+  await clickNote(page, await screenOfNote(page, 10));
+  if ((await depState(page)).selected !== 10) throw new Error('Overview must show the first blue bass note');
+  await parkNoteWidget(page, 665, 420);
   await save(page, 'workspace-overview.png');
 
-  // --- top bar, cropped to itself
-  await save(page, 'top-bar.png', { selector: '.top-bar' });
   await closeNoteWidget(page);
+  await page.setViewportSize({ width: 660, height: 600 });
+  await settle(page);
+  await save(page, 'top-bar.png', { clip: { x: 0, y: 0, width: 660, height: 50 } });
 
   // --- module bar: pull it fully open so the sections and the toolbar are all in frame.
   await expandBar(page);
@@ -339,14 +329,21 @@ console.log('\n== workspace, top bar, module bar, note widget');
     undoRedo: !!document.querySelector('.library-undo-btn') && !!document.querySelector('.library-redo-btn'),
     // Exactly one of the drop-mode pair must be lit — it is a radio pair, and the docs
     // describe the active-mode fill.
-    dropModeLit: document.querySelectorAll('.library-drop-btn.active').length === 1,
+    dropModeLit: document.querySelectorAll('.library-drop-btn.active').length === 1 &&
+      document.querySelector('.library-drop-end-btn')?.getAttribute('aria-pressed') === 'true',
     barH: document.querySelector('.second-top-bar').offsetHeight,
   }));
   console.log('  module bar ' + JSON.stringify(barState));
   if (!barState.toolbarInBar || !barState.magnifier || !barState.undoRedo || !barState.dropModeLit) {
     problems.push('module-bar: the magnifier / drop-mode / undo / redo toolbar is not in .second-top-bar');
   }
-  await save(page, 'module-bar.png', { selector: '.second-top-bar' });
+  const intervals = page.locator('.icons-container .library-section:first-child .category-label');
+  await intervals.click();
+  const bar = await page.locator('.second-top-bar').boundingBox();
+  await save(page, 'module-bar.png', { clip: { ...bar, height: Math.min(305, bar.height) } });
+
+  await intervals.click();
+  await settle(page, 200);
 
   // --- close crop of the icons themselves, so the procedural captions are readable.
   const iconBox = await page.evaluate(() => {
@@ -368,72 +365,45 @@ console.log('\n== workspace, top bar, module bar, note widget');
     problems.push('module-library-icons: no visible icons in the first library section');
   } else {
     console.log('  icon crop ' + JSON.stringify(iconBox));
-    await save(page, 'module-library-icons.png', { clip: iconBox, pad: 14 });
+    await save(page, 'module-library-icons.png', { clip: iconBox, pad: 3 });
   }
 
   await ctx.close();
 }
 
 // ════════════════════════════════════════════════════════ note widget ═══════
-// Its own, TALLER context on purpose. Undragged, the widget is a 300px card that
-// scrolls; dragged, it fits its content but is still clamped to the viewport — and on
-// a 900px-tall screen the full content (three expression fields, their evaluated
-// readouts, the octave arrows and the Add Note / Silence section) does not fit, so the
-// Add section stays below the fold. A tall viewport is the only honest way to get the
-// whole widget in one frame rather than photographing a clipped one.
-console.log('\n== note widget (tall viewport so nothing is below the fold)');
+console.log('== note widget and bar 5 in the opening canon');
 {
-  const { ctx, page } = await newPage({ width: 1100, height: 1400 });
+  const { ctx, page } = await newPage();
+  await clickNote(page, await screenOfNote(page, 11));
+  await parkNoteWidget(page, 190, 100);
+  const rows = page.locator('#note-widget .variable-row');
+  const row = key => rows.filter({ has: page.locator('.variable-name', { hasText: new RegExp('^' + key + '$') }) }).first();
+  const card = await page.locator('#note-widget').boundingBox();
+  const freq = await row('frequency').boundingBox();
+  await save(page, 'note-widget.png', { clip: { ...card, height: freq.y + freq.height - card.y }, scale: 'css' });
+  await row('instrument').scrollIntoViewIfNeeded();
+  await save(page, 'instrument-widget.png', { selector: '#note-widget .variable-row:has(.variable-name:text-is("instrument"))', scale: 'css' });
+  await page.locator('.add-note-section').scrollIntoViewIfNeeded();
+  await save(page, 'create-note-widget.png', { selector: '.add-note-section', scale: 'css' });
 
-  const pts = await findNotePoints(page, 6);
-  const cand = await pickableCandidate(page, await rankedDependents(page));
-  const pt = cand?.pt ?? pts[0];
-  if (!pt) throw new Error('no note to open the widget on');
-  await clickNote(page, pt);
-
-  // Drag it by the header: that writes an inline top and switches the widget out of
-  // 300px-card mode into fit-content mode (see shot-settings.mjs).
-  await parkNoteWidget(page, 90, 60);                   // clamps to top = 50 + 19
-
-  // ...and even in fit-content mode the widget is still clamped to the viewport, so on any
-  // ordinary screen the Add Note / Silence section stays below the fold. MEASURE what the
-  // content needs and give the viewport that much, rather than photographing a clipped
-  // widget and calling it a picture of the whole widget.
-  const need = await page.evaluate(() => {
-    const w = document.getElementById('note-widget');
-    const c = w.querySelector('.note-widget-content');
-    const chrome = w.getBoundingClientRect().height - c.getBoundingClientRect().height;
-    return Math.ceil(chrome + c.scrollHeight + 70 /* top bar + clamp */ + 40 /* slack */);
-  });
-  const vp = page.viewportSize();
-  if (need > vp.height) {
-    console.log(`  content needs ${need}px — growing the viewport from ${vp.height}px`);
-    await page.setViewportSize({ width: vp.width, height: Math.min(3000, need) });
-    await page.waitForTimeout(400);
-    await parkNoteWidget(page, 90, 60);                 // re-fit at the new height
-  }
-
-  const fit = await page.evaluate(() => {
-    const w = document.getElementById('note-widget');
-    const c = w.querySelector('.note-widget-content');
-    const add = c.querySelector('.add-note-section');
-    return {
-      title: document.getElementById('note-widget-title').textContent,
-      h: Math.round(w.getBoundingClientRect().height),
-      scrolls: c.scrollHeight > c.clientHeight + 1,
-      hasAddSection: !!add,
-      // is the Add section actually inside the painted box?
-      addVisible: !!add && add.getBoundingClientRect().bottom <= c.getBoundingClientRect().bottom + 1,
-      fields: c.querySelectorAll('input[type=text], .variable-row').length,
-    };
-  });
-  console.log('  ' + JSON.stringify(fit));
-  if (!fit.hasAddSection) problems.push('note-widget: no .add-note-section in the widget');
-  if (fit.scrolls || !fit.addVisible) {
-    problems.push(`note-widget: the Add Note / Silence section is still below the fold (h=${fit.h}, scrolls=${fit.scrolls})`);
-  }
-  await save(page, 'note-widget.png', { selector: '#note-widget' });
-
+  await closeNoteWidget(page);
+  await page.click('#settingsGearBtn');
+  await page.click('.rmt-set-tab[data-tab="scale"]');
+  const timeScale = page.locator('.rmt-set-tabpanel input[type=number]').first();
+  await timeScale.fill('0.55');
+  await timeScale.press('Tab');
+  await closeSettings(page);
+  await focusNote(page, 81, { scale: 2.1, sx: 750, sy: 555 });
+  await clickNote(page, await screenOfNote(page, 81));
+  if ((await depState(page)).selected !== 81) throw new Error('Bar 5 must show selected green note 81');
+  const raw = await row('frequency').locator('.raw-value-input').inputValue();
+  if (!raw.includes('[83].f')) throw new Error('Unexpected note 81 frequency: ' + raw);
+  await parkNoteWidget(page, 150, 750);
+  const boxes = await Promise.all([72, 81, 83].map(id => boxOfNote(page, id)));
+  const x = Math.min(...boxes.map(b => b.left)), y = Math.min(...boxes.map(b => b.top));
+  const right = Math.max(...boxes.map(b => b.right)), bottom = Math.max(...boxes.map(b => b.bottom));
+  await save(page, 'canon-bar-five.png', { clip: { x, y, width: right - x, height: bottom - y }, pad: 22 });
   await ctx.close();
 }
 
@@ -456,7 +426,16 @@ console.log('\n== settings panel, every tab');
     // Un-hover, so the frame shows the tab at rest rather than mid-hover-glow.
     await page.mouse.move(VW - 30, VH - 30);
     await page.waitForTimeout(200);
-    await save(page, `settings-${tab}.png`, { selector: '.rmt-set-panel' });
+    await save(page, `settings-${tab}.png`, { selector: '.rmt-set-panel', scale: 'css' });
+    if (tab === 'audio') {
+      const heading = page.getByText('Room / Reverb', { exact: true });
+      await heading.evaluate(el => el.scrollIntoView({ block: 'start' }));
+      const first = await heading.boundingBox();
+      const last = await page.locator('.rmt-set-row').filter({ hasText: 'Reverb amount' }).boundingBox();
+      await save(page, 'settings-reverb.png', { clip: {
+        ...first, height: last.y + last.height - first.y
+      }, scale: 'css' });
+    }
   }
 
   await ctx.close();
@@ -467,11 +446,12 @@ console.log('\n== settings panel, every tab');
 // a theme shot has to show the workspace the theme repainted, not the panel that set it.
 console.log('\n== themes (via the Appearance preset dropdown)');
 {
-  const { ctx, page } = await newPage();
-
+  const { ctx, page } = await newPage({ width: 770, height: 500 });
+  await focusNote(page, 10, { scale: 1, sx: 170, sy: 360 });
   const pts = await findNotePoints(page, 4);
   const cand = await pickableCandidate(page, await rankedDependents(page));
   if (cand || pts[0]) await clickNote(page, cand?.pt ?? pts[0]);
+  await parkNoteWidget(page, 625, 385);
 
   // The theme change MUST be delivered while the <select> holds focus.
   //
@@ -528,9 +508,7 @@ console.log('\n== marquee / group selection, and the property-coloured dependenc
 {
   const { ctx, page } = await newPage();
 
-  // --- the marquee. Box derived from the renderer's own buffers (a plausible-looking
-  // hardcoded rectangle lands in empty world space); the drag must START on background
-  // or the gesture becomes a note drag.
+  // Frame the actual note bounds and capture the rubber band before release.
   const box = await page.evaluate(() => {
     const R = window.__rmtRenderer, W = window.__rmtWorkspace, m = R.matrix;
     const on = [];
@@ -567,7 +545,9 @@ console.log('\n== marquee / group selection, and the property-coloured dependenc
     const live = await page.evaluate(() => !!window.__rmtRenderer._marqueeRect);
     // Mid-drag: the rubber band is on screen. This IS the gesture, so shoot it here.
     if (!live) problems.push('multi-select-marquee: no live _marqueeRect mid-drag');
-    await save(page, 'multi-select-marquee.png');
+    await save(page, 'multi-select-marquee.png', { clip: {
+      x: box.x0 - 48, y: box.y0 - 52, width: box.x1 - box.x0 + 120, height: box.y1 - box.y0 + 104
+    } });
     await page.mouse.up();
     await page.keyboard.up('Shift');
     await settle(page, 500);
@@ -580,6 +560,31 @@ console.log('\n== marquee / group selection, and the property-coloured dependenc
     if (sel < 2) problems.push(`multi-select-marquee: the marquee only caught ${sel} note(s)`);
   }
 
+  await ctx.close();
+}
+
+{
+  const { ctx, page } = await newPage();
+
+  const triangle = await page.evaluate(() => {
+    const r = window.__rmtRenderer, o = r._measureTriIdToIndex.get(1) * 4, a = r._measureTriCss;
+    return { x: a[o] + a[o+2] / 2 + r.canvasOffset.x, y: a[o+1] + a[o+3] * 0.8 + r.canvasOffset.y };
+  });
+  await page.keyboard.down('Shift');
+  await clickNote(page, triangle);
+  for (const id of [10, 11]) await clickNote(page, await screenOfNote(page, id));
+  await page.keyboard.up('Shift');
+  await page.getByLabel('Variable to change').selectOption('duration');
+  await page.getByLabel('Expression or ratio').fill('2');
+  const panel = await page.locator('#group-widget').boundingBox();
+  const change = await page.locator('#group-widget [data-section="change"]').boundingBox();
+  const selected = await page.evaluate(() => window.__rmtRenderer.getMultiSelection());
+  if (selected.length !== 3 || ![1, 10, 11].every(id => selected.includes(id))) {
+    throw new Error('Mixed group has wrong IDs: ' + selected.join(', '));
+  }
+  await save(page, 'mixed-group-duration.png', { clip: {
+    ...panel, height: change.y + change.height - panel.y
+  }, scale: 'css' });
   await ctx.close();
 }
 
@@ -637,11 +642,12 @@ console.log('\n== marquee / group selection, and the property-coloured dependenc
       const x0 = Math.min(...inside.map((b) => b.left)), x1 = Math.max(...inside.map((b) => b.right));
       const y0 = Math.min(...inside.map((b) => b.top)), y1 = Math.max(...inside.map((b) => b.bottom));
       console.log(`  anchors span x ${Math.round(x0)}..${Math.round(x1)}, y ${Math.round(y0)}..${Math.round(y1)}`);
+      const library = await page.locator('.second-top-bar').boundingBox();
       const clip = {
         x: Math.max(0, x0 - 60),
-        y: Math.max(145, y0 - 130),
+        y: Math.max(library.y + library.height + 5, y0 - 65),
         width: (x1 - x0) + 120,
-        height: Math.max(360, (y1 - y0) + 260),
+        height: Math.max(300, (y1 - y0) + 120),
       };
       // Never let the parked widget creep back into the frame.
       const w = await page.locator('#note-widget').boundingBox();
@@ -696,7 +702,8 @@ console.log('\n== mobile 390x844 (touch)');
   }));
   console.log('  ' + JSON.stringify(fits));
   if (fits.barOverflows) problems.push('mobile-layout: the top bar overflows at 390px');
-  await save(page, 'mobile-layout.png');
+  await focusNote(page, 24, { scale: 0.9, sx: 252, sy: 405 });
+  await save(page, 'mobile-layout.png', { scale: 'css' });
   await ctx.close();
 }
 
@@ -705,6 +712,7 @@ await browser.close();
 // ─────────────────────────────────────────────────────────────── report ──────
 const EXPECTED = [
   'workspace-overview.png', 'top-bar.png', 'module-bar.png', 'note-widget.png',
+  'create-note-widget.png', 'instrument-widget.png', 'canon-bar-five.png', 'mixed-group-duration.png', 'settings-reverb.png',
   'settings-appearance.png', 'settings-arrows.png', 'settings-audio.png',
   'settings-library.png', 'settings-scale.png',
   'theme-classic-orange.png', 'theme-slate-cyan.png', 'theme-mono-light.png',
@@ -714,9 +722,7 @@ const EXPECTED = [
 
 console.log(`\n${written.length}/${EXPECTED.length} shots written to ${OUT}`);
 const missing = EXPECTED.filter((n) => !written.some((w) => w.name === n));
-const thin = written.filter((w) => w.kb < 15);
 if (missing.length) console.log('MISSING:\n  - ' + missing.join('\n  - '));
-if (thin.length) console.log('SUSPICIOUSLY SMALL (<15 KB):\n  - ' + thin.map((t) => `${t.name} (${t.kb} KB)`).join('\n  - '));
 if (consoleErrors.size) console.log('CONSOLE ERRORS:\n  - ' + [...consoleErrors].join('\n  - '));
 if (problems.length) console.log('PROBLEMS:\n  - ' + problems.join('\n  - '));
-process.exit(missing.length ? 1 : 0);
+process.exit(missing.length || problems.length || consoleErrors.size ? 1 : 0);

@@ -26,27 +26,25 @@ Note that fractions are parenthesised and whole numbers are not. `(9/8)` is a fr
 
 ## Step 1: Clear the workspace
 
-The app opens with a 169-note demo composition. Get rid of it.
+Save your current score with **+ → Save Module** before starting the exercise. On a fresh installation you will see the opening canon.
 
 1. Click the **BaseNote** — the orange circle at the far left.
 2. The note widget opens, titled **BaseNote Variables**.
 3. Scroll to the bottom, to the **DELETE ALL NOTES** section.
 4. Click **Clean Slate**, then **Yes, Clean Slate**.
 
-::: warning
-The dialog says "This action cannot be undone." It is wrong — Clean Slate is captured in the undo history and `Ctrl+Z` brings the composition back.
-:::
+Use **Ctrl/Cmd+Z** immediately after clearing to restore the score, or reload the saved file when you finish.
 
-Clean Slate closes the note widget and clears the selection. The BaseNote keeps its defaults: **263 Hz**, **100 BPM**, 4 beats per measure. Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
+Clean Slate closes the note widget and clears the selection. It retains the current BaseNote pitch and duration. In the startup canon these are **263 Hz** and a duration of `3/5` s (**= 100 BPM** in the widget). Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
 
 ## Step 2: Create Do
 
 1. Click the **BaseNote** again to reopen its widget.
-2. Scroll to the **ADD NOTE / SILENCE** section.
+2. Scroll to the **ADD NOTE / SILENCE / REFERENCE** section.
 3. Leave the kind set to **Note**.
 4. The three fields are already filled in for you:
    - **Frequency:** `base.f`
-   - **Duration:** `beat(base)`
+   - **Duration:** `base.d`
    - **Start Time:** `base.t`
 5. Click **Create**.
 
@@ -60,11 +58,11 @@ The new note appears, gets selected, and the widget re-opens on it as **Note [1]
 
 Now you are working from a normal note, and the widget looks different.
 
-1. With Note 1 selected, scroll to **ADD NOTE / SILENCE**.
+1. With Note 1 selected, scroll to **ADD NOTE / SILENCE / REFERENCE**.
 2. Leave the kind on **Note** and the position on **At End** — this is the default, and it is what you want for a scale. Each note starts where the previous one stops.
 3. The fields prefill from Note 1:
    - **Frequency:** `[1].f` ← you will replace this
-   - **Duration:** `beat(base)` ← leave it
+   - **Duration:** `base.d` ← leave it
    - **Start Time:** `[1].t + [1].d` ← leave it; this is what "At End" means
 4. Replace the **Frequency** field with:
 
@@ -93,16 +91,6 @@ Repeat Step 3 six more times. Each time: select the note you just made, keep **A
 
 Every note anchors its *pitch* to the BaseNote and its *timing* to the note before it. That split is deliberate, and Step 11 shows why it matters.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules store expressions as method chains. The widget decompiles them to DSL for display, so you will not need to type this — but you may see it in a hand-edited file.
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
-```
-</details>
-
 ## Step 10: Listen
 
 Press **Play** in the top bar. You should hear eight notes climbing, and the last should sound like the first an octave higher.
@@ -130,13 +118,13 @@ Every note in the scale moves. You wrote the pitches as ratios of `base.f`, so t
 
 Change it back to `263` when you are done.
 
-## The eight-drag alternative
+## Build the scale with interval tiles
 
 Every interval in the table above already ships as a module. You do not have to type them.
 
 1. In the module bar, expand **Intervals** (46 modules).
 2. Set the drop mode to **End** — click the ⇥ button next to Undo/Redo in the module bar's toolbar. This makes each dropped module land at the end of the note you drop it on, which is what chains a scale together.
-3. Drag **Major 2nd** (9/8) onto your Do note. Drag **Just major 3rd** (5/4) onto the note that appears. Keep going: Perfect 4th, Perfect 5th, Just major 6th, Just major 7th, Octave.
+3. Start with just your one-beat Do. Search for each ratio and drop its tile onto the **last note added**, in this order: **9/8, 10/9, 16/15, 9/8, 10/9, 9/8, 16/15**. Each step multiplies the last pitch. After two drops Mi is at `(9/8) * (10/9)`, exactly 5/4 above Do. The seventh drop lands at the octave.
 
 Each interval module is a single note whose frequency is `(N/D) * base.f` — dropping it onto a note re-anchors it to *that* note, so you get the interval above whatever you dropped on.
 
@@ -166,7 +154,7 @@ Change three notes:
 
 ### 2. Slow it down
 
-Select a note, find the **duration** row, and click the **half note** icon. The Raw field fills with `beat(base) * 2` — then click **Save**. The icon buttons write the expression for you; they do not commit it.
+Select a note, find the **duration** row, and click the **half note** icon. The Raw field fills with `base.d * 2` — then click **Save**. The icon buttons write the expression for you; they do not commit it.
 
 ### 3. Hear the difference against 12-TET
 

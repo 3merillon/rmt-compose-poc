@@ -1,6 +1,6 @@
 ---
 title: Fraction API
-description: How numbers work in RMT Compose expressions — exact rationals, literal forms, normalization, irrational results, and the legacy new Fraction() compatibility surface.
+description: How numbers work in RMT Compose expressions — exact rationals, literal forms, normalization, and exact irrational results.
 ---
 
 # Fraction API
@@ -34,16 +34,6 @@ There are three literal forms in the DSL.
 (5/4)                  # a major third
 (-1/4)                 # negative quarter
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(440)      // 440/1
-new Fraction(3, 2)     // 3/2
-new Fraction(-1, 4)    // -1/4
-```
-</details>
 
 ### Fractions are normalized
 
@@ -91,37 +81,41 @@ the text you type, the stored constant, and every arithmetic result.
 
 ## Exactness and irrationals
 
-Addition, subtraction, multiplication and division are closed over the rationals: they can
-never produce a value that is not an exact fraction. Only one operator can.
+Addition, subtraction, multiplication and division of fractions are closed over the rationals.
+`^` with a fractional exponent produces an **irrational** value unless the root happens to be
+exact. An irrational value is not turned into a fraction: it is kept exact, as the power it is.
 
-`^` with a fractional exponent produces an irrational number unless the root happens to be
-exact:
-
-| Expression | Result | Exact? |
+| Expression | Result | Kind |
 |---|---|---|
-| `2^3` | 8 | Yes |
-| `2^(-1)` | 1/2 | Yes |
-| `4^(1/2)` | 2 | Yes — a perfect square root |
-| `8^(1/3)` | 2 | Yes — a perfect cube root |
-| `2^(1/12)` | ≈ 1.059463… | **No** |
-| `3^(1/13)` | ≈ 1.088182… | **No** |
+| `2^3` | 8 | rational |
+| `2^(-1)` | 1/2 | rational |
+| `4^(1/2)` | 2 | rational (a perfect square root) |
+| `8^(1/3)` | 2 | rational (a perfect cube root) |
+| `2^(1/12)` | `2^(1/12)` (1.059463…) | irrational, exact |
+| `3^(1/13)` | `3^(1/13)` (1.088182…) | irrational, exact |
 
-When a property's value comes out irrational it is flagged **corrupted**. The value is stored as
-the closest rational approximation, the note is drawn with a crosshatch, and the note widget
-prefixes the value with **`≈`**. A note that only *depends* on a corrupted note is drawn with a
-single diagonal hatch and also shows `≈`.
+Multiplication by a rational preserves an exact power: `263 * 2^(7/12)` is an exact value, and twelve
+steps of `2^(1/12)` give exactly 2. A note whose own expression holds an irrational power is drawn
+with a crosshatch, and a note that only *depends* on one is drawn with a single diagonal hatch.
+In the note widget an irrational value shows its exact form and its value; the **`≈`**
+prefix is used only for an approximate value.
+
+A value is **approximate** when you write it with `~` (see
+[Approximate numbers](/reference/expressions/syntax#approximate-numbers)), or when an operation
+cannot be kept exact: a division by a sum of irrational terms, a non-integer power of a sum, more
+than 64 terms, or a division by zero. Anything computed from an approximate value is approximate,
+and it never equals an exact value. A plain decimal such as `1.5` stays exact (3/2).
 
 Exact exponentiation is also capped for safety: an integer exponent above **65536**, or a result
-that would exceed roughly a megabit per component, is treated the same way — flagged and
-approximated rather than computed exactly. See [Operators](/reference/expressions/operators#power).
+that would exceed roughly a megabit per component, gives an approximate value rather than an exact
+one. See [Operators](/reference/expressions/operators#power).
 
-This is how every equal-tempered scale in the module library is built. It is a marker, not a
-fault. See [Operators](/reference/expressions/operators) and
-[SymbolicPower](/developer/core/symbolic-power).
+This is how every equal-tempered scale in the module library is built. See
+[Operators](/reference/expressions/operators) and [Exact Values](/developer/core/symbolic-power).
 
 The simplifier will merge like bases when it can: `2^(1/12) * 2^(1/12)` becomes `2^(1/6)`, and
 `4^(1/2)` folds all the way down to the rational `2`. A rewrite is never applied if it would
-change whether the value is corrupted.
+change the value or the hatching.
 
 ## Common patterns
 
@@ -134,16 +128,16 @@ base.f / (4/3)         # a perfect fourth below
 [1].f * (5/4)          # a major third above note 1
 ```
 
-### Beat durations
+### Durations
 
 ```
-beat(base)             # one beat at the base tempo
-beat(base) * 2         # two beats
-beat(base) * (1/2)     # half a beat
-beat(base) * (3/2)     # a dotted beat
+base.d                 # one time unit (one beat, if you count in beats)
+base.d * 2             # two time units
+base.d * (1/2)         # half of one
+base.d * (3/2)         # a dotted unit
 ```
 
-`beat(base) * (n/d)` is exactly what the note-length buttons in the note widget write.
+`base.d * (n/d)` is exactly what the note-length buttons in the note widget write.
 
 ### Sequential timing
 
@@ -153,111 +147,11 @@ beat(base) * (3/2)     # a dotted beat
 
 Note ids must be literal integers — there is no `[prev]`.
 
-## The legacy `new Fraction()` surface
-
-Modules saved before the DSL existed use a JavaScript-shaped method chain. They still load, and
-they still compile to the same bytecode. You do not need to write this format, and the note
-widget will convert it to DSL the moment you look at it — but if you are reading an old file,
-this is what it means.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Perfect fifth above the BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Octave above
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-
-// Perfect fourth below
-module.baseNote.getVariable('frequency').div(new Fraction(4, 3))
-
-// One beat
-new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Two beats
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-
-// Start when note 7 ends
-module.getNoteById(7).getVariable('startTime')
-  .add(module.getNoteById(7).getVariable('duration'))
-
-// 12-TET semitone
-new Fraction(2).pow(new Fraction(1, 12))
-```
-</details>
-
-### Exactly what the legacy parser accepts
-
-| Construct | Accepted |
-|---|---|
-| `new Fraction(n)` | Yes |
-| `new Fraction(n, d)` | Yes |
-| `.mul(…)` `.div(…)` | Yes |
-| `.add(…)` `.sub(…)` | Yes |
-| `.pow(…)` | Yes |
-| `module.baseNote.getVariable('name')` | Yes |
-| `module.getNoteById(N).getVariable('name')` | Yes |
-| `module.findTempo(ref)` | Yes |
-| `module.findMeasureLength(ref)` | Yes |
-
-That is the whole list.
-
-### What it does not accept
-
-::: warning These are rejected with an error
-The following are real Fraction.js methods, so they look like they should work. **They do not.**
-The legacy parser does not recognize them, and after the DSL retry fails too the compiler throws
-— the note widget shows the message under the Save button, and on a file load the property is
-left unset with a `console.error`.
-
-| Not accepted |
-|---|
-| `.neg()` |
-| `.abs()` |
-| `.inverse()` |
-| `.mod()` |
-| `.equals()`, `.compare()` |
-| `.valueOf()`, `.toString()`, `.toFraction()` |
-| `.n`, `.d`, `.s` (property access) |
-| String arguments, e.g. `new Fraction("355", "113")` |
-
-Write `-5` (DSL) or `new Fraction(-5)` (legacy) instead of a negation call. Everything else on
-that list has no expression-language equivalent — comparisons, string conversion and modulo are
-not part of the language in either format.
-:::
-
-### Migration table
-
-| Legacy | DSL |
-|---|---|
-| `new Fraction(440)` | `440` |
-| `new Fraction(3, 2)` | `(3/2)` |
-| `a.add(b)` | `a + b` |
-| `a.sub(b)` | `a - b` |
-| `a.mul(b)` | `a * b` |
-| `a.div(b)` | `a / b` |
-| `a.pow(b)` | `a ^ b` |
-| `new Fraction(5).neg()` | `-5` |
-| `module.baseNote.getVariable('frequency')` | `base.f` |
-| `module.getNoteById(1).getVariable('startTime')` | `[1].t` |
-| `module.findTempo(module.baseNote)` | `tempo(base)` |
-| `module.findMeasureLength(module.baseNote)` | `measure(base)` |
-| `new Fraction(60).div(module.findTempo(module.baseNote))` | `beat(base)` |
-
-One thing, and one thing only, rewrites a legacy expression as DSL: pressing **Save** in the
-note widget. The `Raw:` field is already showing you the DSL, so saving it stores the DSL.
-
-Everything else preserves the format it found. A drag, a resize, or a frequency arrow rewrites
-the expression *in its existing format* — touch a legacy note in the workspace and what gets
-written back is legacy. Exporting a module writes each expression exactly as it is currently
-stored, so a legacy expression you never save through the widget stays legacy in the file. It
-still loads, and it still works.
+The method-chain syntax of earlier versions (`new Fraction(3, 2)`, `.mul()` and the other method names) is retired. See [The retired method-chain syntax](/reference/expressions/syntax#the-retired-method-chain-syntax).
 
 ## See also
 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
 - [Operators](/reference/expressions/operators) — what each operator produces
-- [Module API](/reference/expressions/module-api) — references and built-in functions
-- [SymbolicPower](/developer/core/symbolic-power) — how irrational values are handled
+- [Module API](/reference/expressions/module-api) — note references and the six properties
+- [Exact Values](/developer/core/symbolic-power) — how irrational values are handled

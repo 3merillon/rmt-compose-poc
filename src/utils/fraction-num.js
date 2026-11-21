@@ -55,6 +55,9 @@ export function bigDigits(v) {
 // Number.MAX_VALUE has 309 decimal digits; below this both fields convert to
 // finite doubles and plain valueOf() division is correctly rounded.
 const SAFE_DIGITS = 300;
+// The smallest magnitude with more than SAFE_DIGITS digits: |v| < SAFE_LIMIT is
+// bigDigits(v) <= SAFE_DIGITS, decided without writing v out in decimal
+const SAFE_LIMIT = 10n ** BigInt(SAFE_DIGITS);
 
 /**
  * THE lossy Fraction → Number boundary.
@@ -81,6 +84,12 @@ export function toNumber(frac, fallback = 0) {
   const d = frac.d;
   if (typeof n === 'bigint' && typeof d === 'bigint') {
     const s = frac.s != null && frac.s < 0n ? -1 : 1;
+    // Both within SAFE_DIGITS digits (every value the editor meets): the plain
+    // division below. Comparing magnitudes costs nothing; counting digits wrote
+    // both out in decimal, for every note on every renderer sync.
+    if ((n < 0n ? -n : n) < SAFE_LIMIT && (d < 0n ? -d : d) < SAFE_LIMIT) {
+      return s * (Number(n) / Number(d));
+    }
     const nDigits = bigDigits(n);
     const dDigits = bigDigits(d);
     if (nDigits > SAFE_DIGITS || dDigits > SAFE_DIGITS) {

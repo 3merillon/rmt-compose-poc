@@ -2,15 +2,13 @@
 /**
  * Headless perf baseline runner.
  *
- * Measures the JS evaluation path (Node has no WASM artifact wiring by
- * default and no renderer, so this benchmarks module evaluation only —
- * use the in-browser harness (?perf=1) for WASM + renderer.sync numbers).
+ * Measures module evaluation in Node (no renderer; use the in-browser
+ * harness, ?perf=1, for renderer.sync and end-to-end commits).
  *
  * Usage:
- *   node scripts/perf/bench-node.mjs                    # all stress modules (JS path)
+ *   node scripts/perf/bench-node.mjs                    # all stress modules
  *   node scripts/perf/bench-node.mjs chain-1000         # one module
- *   node scripts/perf/bench-node.mjs --wasm             # WASM evaluator path
- *   node scripts/perf/bench-node.mjs chain-1000 --wasm
+ *   node scripts/perf/bench-node.mjs chain-1000 --runs 5   # five times the samples
  */
 
 import { readFileSync } from 'node:fs';
@@ -22,29 +20,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const perfDir = join(here, '..', '..', 'public', 'modules', 'perf');
 
 const args = process.argv.slice(2);
-const useWasm = args.includes('--wasm');
-const targetArg = args.find((a) => !a.startsWith('--'));
+const asJson = args.includes('--json'); // one JSON line per module, for bench-pairs.mjs
+const runsAt = args.indexOf('--runs');
+const RUNS = runsAt >= 0 ? Math.max(1, Number(args[runsAt + 1]) || 1) : 1;
+const targetArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--runs');
 
 const { Module } = await import('../../src/module.js');
-
-if (useWasm) {
-  // Node's fetch can't load file:// URLs (wasm-bindgen init uses one) — shim it.
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, ...rest) => {
-    const u = String(url);
-    if (u.startsWith('file://') && u.endsWith('.wasm')) {
-      const buf = readFileSync(fileURLToPath(u));
-      return new Response(buf, { headers: { 'content-type': 'application/wasm' } });
-    }
-    return realFetch(url, ...rest);
-  };
-  const { initWasm } = await import('../../src/wasm/index.js');
-  const ok = await initWasm();
-  if (!ok) {
-    console.error('WASM failed to initialize; aborting --wasm bench');
-    process.exit(1);
-  }
-}
 
 function percentile(sorted, p) {
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
@@ -86,7 +67,7 @@ async function bench(name) {
   // 1) Full re-evaluation (everything dirty).
   {
     const samples = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 8 * RUNS; i++) {
       mod._incrementalEvaluator.invalidateAll();
       mod._dirtyNotes.add(0);
       samples.push(timed(() => mod.evaluateModule()));
@@ -97,9 +78,9 @@ async function bench(name) {
   // 2) Mid-chain commit: change one note's startTime, re-evaluate.
   {
     const original = midNote.variables.startTimeString;
-    const alt = `(${original}) + beat(base) / 8`;
+    const alt = `(${original}) + base.d / 8`;
     const samples = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 20 * RUNS; i++) {
       const expr = i % 2 === 0 ? alt : original;
       samples.push(timed(() => {
         midNote.setVariable('startTimeString', expr);
@@ -114,7 +95,7 @@ async function bench(name) {
   // 3) Base-note frequency edit (dirties every dependent).
   {
     const samples = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 10 * RUNS; i++) {
       const freq = i % 2 === 0 ? '441' : '440';
       samples.push(timed(() => {
         mod.baseNote.setVariable('frequencyString', freq);
@@ -126,12 +107,16 @@ async function bench(name) {
     results['base-note edit'] = stats(samples);
   }
 
+  if (asJson) {
+    console.log(JSON.stringify({ name, notes: noteIds.length, evaluator: mod._binaryEvaluator?.constructor?.name, results }));
+    return;
+  }
   console.log(`\n=== ${name} (${noteIds.length} notes) — evaluator: ${mod._binaryEvaluator?.constructor?.name} ===`);
   console.table(results);
 }
 
-const targets = process.argv[2]
-  ? [process.argv[2]]
+const targets = targetArg
+  ? [targetArg]
   : ['chain-1000', 'fan-1000', 'lattice-1000', 'chords-dense', 'comma-chain-400'];
 
 for (const t of targets) {

@@ -11,65 +11,8 @@ import { parse, DSLParser } from './parser.js';
 import { compile, DSLCompiler } from './compiler.js';
 import { decompile, DSLDecompiler } from './decompiler.js';
 import { DSLError, DSLLexerError, DSLParseError, DSLCompileError, ErrorMessages } from './errors.js';
-import { TokenType, PropertyMap, PropertyShortNames, HelperFunctions, getCanonicalPropertyName, getShortPropertyName } from './constants.js';
-import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, createHelperCall, collectDependencies, referencesBase, printAST } from './ast.js';
-
-/**
- * Check if a string uses DSL syntax (vs legacy JavaScript syntax)
- *
- * @param {string} expr - Expression string to check
- * @returns {boolean} True if DSL syntax, false if legacy
- */
-export function isDSLSyntax(expr) {
-  if (!expr || typeof expr !== 'string') {
-    return false;
-  }
-
-  const trimmed = expr.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  // DSL indicators (check these first)
-  // Note references: [123].f, [0].t
-  if (/^\[[\d]+\]\./.test(trimmed)) return true;
-  // Base reference: base.f
-  if (/^base\./.test(trimmed)) return true;
-  // Fraction literal: (3/2) at start or after operator
-  if (/^\(\s*-?\d+\s*\/\s*-?\d+\s*\)/.test(trimmed)) return true;
-  // Helper functions: tempo(...), measure(...), beat(...)
-  if (/^(tempo|measure|beat)\s*\(/.test(trimmed)) return true;
-  // Contains DSL-style references anywhere
-  if (/\[[\d]+\]\./.test(trimmed)) return true;
-  if (/\bbase\.[a-z]/.test(trimmed)) return true;
-
-  // Legacy indicators
-  // new Fraction(...)
-  if (/new\s+Fraction\s*\(/.test(trimmed)) return false;
-  // module.getNoteById(...)
-  if (/module\.getNoteById/.test(trimmed)) return false;
-  // module.baseNote
-  if (/module\.baseNote/.test(trimmed)) return false;
-  // .getVariable(...)
-  if (/\.getVariable\s*\(/.test(trimmed)) return false;
-  // .mul(...), .div(...), .add(...), .sub(...), .pow(...)
-  if (/\.(mul|div|add|sub|pow|neg)\s*\(/.test(trimmed)) return false;
-  // module.findTempo(...), module.findMeasureLength(...)
-  if (/module\.find(Tempo|MeasureLength)/.test(trimmed)) return false;
-
-  // Reference-free arithmetic: a bare number ("263"), or numbers combined with
-  // infix operators ("2 * 263", "(1/2) * 263" — what the octave arrows write on
-  // the base note, whose frequency references nothing). Legacy cannot spell
-  // these without `new Fraction(` or a `.mul()`-style chain, and every legacy
-  // marker was ruled out above, so what remains is DSL. Routing these to the
-  // legacy parser makes it fail, and its failure path emits the constant 0
-  // (see ExpressionCompiler.compile), silently zeroing the note.
-  if (/^[-+*\/^().\d\s]+$/.test(trimmed)) return true;
-
-  // If no clear indicator, default to legacy for safety
-  // This ensures existing expressions work unchanged
-  return false;
-}
+import { TokenType, PropertyMap, PropertyShortNames, getCanonicalPropertyName, getShortPropertyName } from './constants.js';
+import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, collectDependencies, referencesBase, printAST } from './ast.js';
 
 /**
  * Compile a DSL expression string to BinaryExpression bytecode
@@ -118,22 +61,6 @@ export function decompileToDSL(binary) {
 }
 
 /**
- * Compile an expression string, auto-detecting DSL vs legacy syntax
- *
- * @param {string} source - Expression string (DSL or legacy)
- * @param {Function} legacyCompiler - Fallback legacy compiler function
- * @param {string} [varName] - Variable name for context
- * @returns {BinaryExpression} Compiled binary expression
- */
-export function compileAuto(source, legacyCompiler, varName = null) {
-  if (isDSLSyntax(source)) {
-    return compileDSL(source);
-  }
-  // Fall back to legacy compiler
-  return legacyCompiler(source, varName);
-}
-
-/**
  * Validate a DSL expression without fully compiling
  *
  * @param {string} source - DSL expression string
@@ -169,10 +96,13 @@ Note References:
   [id].f     - frequency of note id
   [id].t     - startTime of note id
   [id].d     - duration of note id
-  [id].tempo - tempo of note id
-  [id].bpm   - beatsPerMeasure of note id
-  [id].ml    - measureLength of note id
-  base.f     - baseNote frequency (same as [0].f)
+  base.f     - reference note frequency (same as [0].f)
+  base.d     - reference note duration: the time unit (one beat)
+
+Interpretation (how a note sounds; not relations of the notation):
+  [id].a       - amplitude (relative gain)
+  [id].attack  - attack, as a share of the note's own duration
+  [id].release - release, as a share of the note's own duration
 
 Literals:
   440        - integer
@@ -187,16 +117,12 @@ Operators:
   a ^ b      - power (e.g., 2^(1/12) for semitone)
   -a         - negation
 
-Helpers:
-  tempo([id])   - get tempo for note
-  measure([id]) - get measure length for note
-  beat([id])    - get beat duration (60/tempo)
-
 Examples:
   base.f * (3/2)           - perfect fifth
   [1].t + [1].d            - end time of note 1
   base.f * 2^(7/12)        - 12-TET perfect fifth
-  beat(base) * (1/4)       - quarter beat
+  base.d * (1/4)           - a quarter of the time unit
+  [4].d * 3                - three times as long as note 4
 `;
 }
 
@@ -225,7 +151,6 @@ export {
   TokenType,
   PropertyMap,
   PropertyShortNames,
-  HelperFunctions,
   getCanonicalPropertyName,
   getShortPropertyName,
 
@@ -236,7 +161,6 @@ export {
   createNoteReference,
   createBinaryOp,
   createUnaryOp,
-  createHelperCall,
   collectDependencies,
   referencesBase,
   printAST,

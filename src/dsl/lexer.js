@@ -147,6 +147,8 @@ export class DSLLexer {
         return createToken(TokenType.SLASH, '/', start, this.pos, startLine, startColumn);
       case '^':
         return createToken(TokenType.CARET, '^', start, this.pos, startLine, startColumn);
+      case '~':
+        return createToken(TokenType.TILDE, '~', start, this.pos, startLine, startColumn);
       case '(':
         return createToken(TokenType.LPAREN, '(', start, this.pos, startLine, startColumn);
       case ')':

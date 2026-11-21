@@ -20,26 +20,11 @@ To divide interval `I` into `N` equal steps, one step is `I ^ (1/N)`:
 
 `k` steps is `I ^ (k/N)`.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## Any positive rational base
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 17))
-new Fraction(3).pow(new Fraction(1, 8))
-```
-</details>
+The interval of equivalence can be any positive rational, not only an integer. Bases are factored into primes, so the power stays exact: `(1618/1000)^(1/7)` for a scale based on the rational approximation 1.618 to the golden ratio is kept as the exact product `(1/10) * 2^(5/7) * 5^(4/7) * 809^(1/7)` (1618/1000 is 809/500), and every step is exact. Steps chain without error, and the scale closes exactly at the top.
 
-## Use integer bases
-
-::: danger Non-integer bases are not kept symbolic
-`MusicValue.pow` only builds a symbolic power for **positive integer bases**. Give it anything else — `(1618/1000)` for a golden-ratio scale, say — and it falls straight through to `Math.pow()` on floats.
-
-Every step of such a scale is then raw floating-point, every downstream multiplication compounds the error, and the scale will not close exactly at the top. Simplification cannot merge the terms either, because there is no symbolic term to merge.
-
-`2^(1/17)`, `3^(1/8)` and `5^(1/5)` are fine. `(1618/1000)^(1/7)` is not — it will play, but none of the exactness guarantees apply to it.
-:::
-
-If you want a non-integer interval of equivalence, the honest options are to accept the float behaviour knowingly, or to pick an integer-based approximation of the interval you actually want.
+`2^(1/17)`, `3^(1/8)`, `5^(1/5)` and `(1618/1000)^(1/7)` are all exact. A plain decimal such as `1.618` is exactly 1618/1000. Only a base written with `~` (for example `~1.618`) is approximate, and so is anything computed from it; see [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
 ## Building the scale
 
@@ -63,14 +48,14 @@ Set start times the same way, so each note follows the last:
 [1].t + [1].d
 ```
 
-And give every note a duration in beats rather than seconds, so the scale follows the tempo:
+And give every note a duration in time units rather than seconds, so the scale follows the BaseNote's duration:
 
 ```
-beat(base) * (1/2)
+base.d * (1/2)
 ```
 
-::: warning `"duration": "1"` is one second, not one beat
-A bare number is seconds. It will not track the tempo. Every shipped scale module uses `beat(base) * (1/2)` or similar. Use `beat(base)`.
+::: warning `"duration": "1"` is one second, not one time unit
+A bare number is seconds. It will not follow the BaseNote's duration. Every shipped scale module uses `base.d * (1/2)` or similar. Use `base.d`.
 :::
 
 ## Divisions worth trying
@@ -138,23 +123,21 @@ If you are hand-writing the file, this is the shape the shipped TET modules use:
   "baseNote": {
     "startTime": "0",
     "frequency": "440",
-    "tempo": "100",
-    "beatsPerMeasure": "4",
-    "measureLength": "beat(base) * base.bpm",
+    "duration": "3/5",
     "instrument": "sine-wave"
   },
   "notes": [
     {
       "id": 1,
       "startTime": "base.t",
-      "duration": "beat(base) * (1/2)",
+      "duration": "base.d * (1/2)",
       "frequency": "base.f",
       "color": "rgba(100,149,237,0.7)"
     },
     {
       "id": 2,
       "startTime": "[1].t + [1].d",
-      "duration": "beat(base) * (1/2)",
+      "duration": "base.d * (1/2)",
       "frequency": "[1].f * 2 ^ (1/17)",
       "color": "rgba(100,149,237,0.7)"
     }
@@ -164,16 +147,16 @@ If you are hand-writing the file, this is the shape the shipped TET modules use:
 
 Four things to copy from it:
 
-- **`"measureLength": "beat(base) * base.bpm"`** on the BaseNote. Without it the measure grid will not match your tempo.
+- **`"duration"`** on the BaseNote: the time unit. Every note's duration is written against it, so changing it changes the pace of the whole scale.
 - **`instrument`** set once on the BaseNote. Notes inherit it; you do not need it on every note.
-- **`duration` in beats**, not seconds.
+- **`duration` in time units** (`base.d * k`), not seconds.
 - **`color`** on every note. Notes without one fall back to default colouring.
 
-Expressions may reference `base` or any note **inside the same module** — a module must be self-contained, or it cannot be dropped onto an arbitrary note. Every module the app ships is written in DSL. The legacy method-chain format still loads, but nothing ships in it any more.
+Expressions may reference `base` or any note **inside the same module** — a module must be self-contained, or it cannot be dropped onto an arbitrary note. Every module the app ships is written in DSL.
 
 ## What to expect once it loads
 
-**Every note will show ≈ and cross-hatching.** `2^(k/17)` is irrational, so the frequency is flagged. The fraction drawn beside the ≈ is the note's approximate ratio to the BaseNote (maximum denominator 8192), not its stored value.
+**Every note will be cross-hatched, and its label will show its power.** `2^(k/17)` is irrational, so the frequency is flagged as tempered, and the label reads `2^(k/17)`. Only an approximate note, or an exact fraction too long for the label, shows `≈` and a rounded fraction.
 
 **The arrows will not step by your scale.** ▲/▼ apply a rational interval configured in **Settings → Arrows** — positive integers, ratio within `[1/16, 16]`. A TET step is not expressible that way. Use the arrows to move octaves (or fifths, or commas); edit the exponent to move by degrees.
 

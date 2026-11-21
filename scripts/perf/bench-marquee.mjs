@@ -10,20 +10,14 @@ const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const URL_BASE = flag('--url', 'http://localhost:3000');
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ channel: process.env.PW_CHANNEL || 'msedge', headless: true });
 const rows = [];
 
-for (const mod of ['voices-5000', 'voices-20000']) {
+for (const mod of flag('--modules', 'voices-5000,voices-20000').split(',')) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 820 } });
   const page = await ctx.newPage();
-  // player.js boots from `Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json')`,
-  // and savedSnapshot is this localStorage key — that is the only hook for loading a
-  // specific module at boot. (There is no ?module= query param; assuming one silently
-  // benchmarks the 161-note default instead, which is how you get suspiciously good numbers.)
-  const json = await (await fetch(`${URL_BASE}/modules/perf/${mod}.json`)).text();
-  await page.addInitScript((snap) => {
-    try { localStorage.clear(); localStorage.setItem('rmt:moduleSnapshot:v1', snap); } catch {}
-  }, json);
+  await page.route('**/modules/defaultModule.json', r =>
+    r.fulfill({ status: 302, headers: { location: `/modules/perf/${mod}.json` } }));
   await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
   await page.waitForFunction(() => !!(window.__rmtRenderer?.instanceCount > 0), null, { timeout: 240_000 });
   await page.waitForTimeout(2500);

@@ -19,7 +19,7 @@ Use the ▲/▼ arrows on a note — which default to the octave but apply any i
 
 ### [Working with Measures](/tutorials/intermediate/measures)
 
-Build measure chains from the note widget, set a per-measure time signature, and place notes by measure and beat instead of by absolute time.
+Build bar chains from the note widget, change the meter on one bar, and attach notes to bars instead of absolute time.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ Build measure chains from the note widget, set a per-measure time signature, and
 
 ## Recommended order
 
-Dependencies first. Octaves and Measures both lean on it, and neither leans on the other.
+Start with Dependencies. Continue with Octaves to change a chord’s pitch or Measures to rearrange a phrase in time. For a worked example in the opening score, [follow the three voices in bar 5](/tutorials/workflows/canon-and-cadences).
 
 ## What you will be able to do
 
