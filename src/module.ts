@@ -617,14 +617,33 @@ export class Module {
     return this._dependencyGraph.getChildrenTreeByAllProperties(noteId);
   }
 
+  /** Reserve distinct representable IDs before inserting a note or remapping a phrase.
+   * A valid sparse score may already contain MAX_NOTE_ID. Continue at 1 in that
+   * case, skipping occupied slots and never using the BaseNote's zero ID.
+   */
+  reserveNoteIds(count: number, firstId = this.nextId): number[] {
+    if (!Number.isSafeInteger(count) || count < 0 || count > MAX_NOTE_ID) {
+      throw new RangeError('Requested note IDs exceed the representable range');
+    }
+    const ids: number[] = [];
+    let candidate = Number.isInteger(firstId) && firstId >= 1 && firstId <= MAX_NOTE_ID ? firstId : 1;
+    for (let checked = 0; ids.length < count; checked++) {
+      if (checked === MAX_NOTE_ID) throw new RangeError('No unused note IDs remain');
+      if (!(candidate in this.notes)) ids.push(candidate);
+      candidate = candidate === MAX_NOTE_ID ? 1 : candidate + 1;
+    }
+    this.nextId = count ? ids[ids.length - 1] + 1 : firstId;
+    return ids;
+  }
+
   /**
    * Add a new note
    */
   addNote(variables: InputFields = {}) {
+    const [id] = this.reserveNoteIds(1);
     this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
-    const id = this.nextId++;
     const note = new Note(id, variables);
     note.module = this;
     this.notes[id] = note;

@@ -1541,15 +1541,9 @@ if (canvasEl) {
             
             let maxId = 0;
             for (const id in myModule.notes) maxId = Math.max(maxId, Number(id));
-            myModule.nextId = maxId + 1;
-
-            let newId = myModule.nextId;
-            for (const id in importedModule.notes) {
-                if (Number(id) === 0) continue;
-                mapping[Number(id)] = newId;
-                newId++;
-            }
-            myModule.nextId = newId;
+            const allIds = Object.keys(importedModule.notes).filter(id => Number(id) !== 0);
+            const reserved = myModule.reserveNoteIds(allIds.length, maxId + 1);
+            allIds.forEach((id, index) => { mapping[Number(id)] = reserved[index]; });
 
             // Per-import cache to avoid repeating the same string remapping across many notes
             const exprRemapCache = new Map<string, string | null>();
@@ -1581,7 +1575,6 @@ if (canvasEl) {
             }
 
             // Non-chunked import: map and insert all notes in a single pass
-            const allIds = Object.keys(importedModule.notes).filter(k => Number(k) !== 0);
             for (const id of allIds) {
                 const impNote = importedModule.notes[id];
                 const oldId = impNote.id;

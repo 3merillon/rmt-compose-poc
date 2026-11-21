@@ -47,6 +47,27 @@ console.log('\nNote ids: the bytecode');
   check(byProperty.get(70000)?.has(2) && byProperty.get(MAX_NOTE_ID)?.has(1), 'property dependencies name the wide references');
 }
 
+console.log('\nNote ids: append and reserve after the largest stored id');
+{
+  const m = await Module.loadFromJSON({
+    baseNote: { frequency: '220', duration: '1' },
+    notes: [{ id: 1, frequency: 'base.f' }, { id: MAX_NOTE_ID, frequency: 'base.f' }]
+  });
+  const added = m.addNote({ frequency: 'base.f * 2' });
+  check(added.id === 2, 'append wraps past the 24-bit ceiling to the first unused positive id');
+  const reopened = await Module.loadFromJSON(m.createModuleJSON());
+  check(reopened.getNoteById(2)?.getVariable('frequency')?.toFraction() === '440', 'new note survives a save and load at full id width');
+  const batch = m.reserveNoteIds(3, MAX_NOTE_ID - 1);
+  check(batch.join(',') === [MAX_NOTE_ID - 1, 3, 4].join(','), 'a single phrase can reserve ids on both sides of the boundary');
+
+  // Simulate a completely occupied 24-bit namespace without creating millions
+  // of Note instances. Failed reservation must leave the cursor unchanged.
+  const full = new Module();
+  full.notes = new Proxy(full.notes, { has: () => true });
+  let exhausted = false;
+  try { full.reserveNoteIds(1); } catch (e) { exhausted = e instanceof RangeError; }
+  check(exhausted && full.nextId === 1, 'a full namespace rejects the batch without advancing the cursor');
+}
 console.log('\nNote ids: what is refused');
 {
   for (const bad of [`[${MAX_NOTE_ID + 1}].f`, '[-1].f']) {
