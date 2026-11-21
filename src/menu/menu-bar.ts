@@ -48,6 +48,39 @@ interface SectionState {
     modules: ReturnType<typeof normalizeModule>[];
 }
 
+// Canonical score JSON from release 2.0.0 (03b1d49), before these nine
+// library tiles lost their silent entries. Older UI exports can embed a
+// shipped tile or a user's edits under the very same file path and name.
+const releasedTileFingerprints = new Map([
+    ['progressions/V7-I.json', '1119:a1b5da86faba65f2e1752ae49bc5133f'],
+    ['progressions/ii-V-I.json', '1556:4a8527430960c0a2729415a8ed4022d0'],
+    ['progressions/I-IV-V-I.json', '1842:48d6edfa2d40f10a40d645fe7a3eaaaf'],
+    ['progressions/I-vi-IV-V.json', '1735:2390e22fe105138b7032622d9f6711a6'],
+    ['progressions/authentic-cadence.json', '1011:f0f607b07519a9b620a53419c8434d91'],
+    ['progressions/plagal-cadence.json', '1011:725b58ab665949cd4c4ed33c7b10b42f'],
+    ['progressions/deceptive-cadence.json', '913:c04382828b0e268b6f7990016471b902'],
+    ['progressions/half-cadence.json', '895:ba4655b50845aeb3cdfe07a31b8ef8ff'],
+    ['custom/canon.json', '19583:3e970100eb714ab482b5d2a2844ff860'],
+]);
+
+function scoreText(score: ModuleData) {
+    // The tile adds filename for drag-and-drop. Every other score field,
+    // including IDs, colors, expressions and array order, belongs to the user.
+    const { filename, ...content } = score;
+    return JSON.stringify(content, (_key, value: unknown) => isRecord(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+        : value);
+}
+
+// FNV-1a 128 over UTF-8 also works on the plain-HTTP Wi-Fi dev server.
+function matchesReleasedTile(json: string, fingerprint: string) {
+    const bytes = new TextEncoder().encode(json);
+    if (!fingerprint.startsWith(bytes.length + ':')) return false;
+    let hash = 0x6c62272e07bb014262b821756295c58dn;
+    for (const byte of bytes) hash = BigInt.asUintN(128, (hash ^ BigInt(byte)) * 0x1000000000000000000013bn);
+    return bytes.length + ':' + hash.toString(16) === fingerprint;
+}
+
 function isStoredModule(value: unknown): value is StoredModule {
     if (!isRecord(value) || typeof value.name !== 'string') return false;
     const meta = value.meta;
@@ -144,10 +177,11 @@ const menuAPI = (function() {
     // Fetch a module file by its manifest-relative path (e.g. "intervals/5th.json"),
     // with a spaces->underscores fallback (mirrors the legacy per-file fetch).
     async function fetchModuleFile(file: string) {
-        let res = await fetch('modules/' + encodeModulePath(file));
+        const options: RequestInit | undefined = releasedTileFingerprints.has(file) ? { cache: 'no-cache' } : undefined;
+        let res = await fetch('modules/' + encodeModulePath(file), options);
         if (!res.ok) {
             const alt = 'modules/' + file.split('/').map(s => s.replace(/\s+/g, '_')).join('/');
-            res = await fetch(alt);
+            res = await fetch(alt, options);
         }
         if (!res.ok) throw new Error('Network response not ok for ' + file);
         return res.json();
@@ -730,6 +764,54 @@ const menuAPI = (function() {
         return { byFile, byName };
     }
 
+    function findManifestItem(m: StoredModule, index: ReturnType<typeof manifestIndex>) {
+        const file = m.file || m.meta?.file;
+        const byFile = file && index.byFile.get(file);
+        if (byFile) return byFile;
+        for (const name of [m.name, (m.filename || '').replace(/\.json$/i, '')]) {
+            const item = index.byName.get(name.trim().toLowerCase());
+            if (item) return item;
+        }
+        return null;
+    }
+
+    async function restoreEmbeddedTile(m: StoredModule, index: ReturnType<typeof manifestIndex>,
+        currentScores: Map<string, Promise<ModuleData | null>>) {
+        if (m.isUploaded) return;
+        const score = m.moduleData || m.data;
+        if (!isInputScore(score)) return;
+        const item = findManifestItem(m, index);
+        const file = m.file || m.meta?.file;
+        if (!item || (file && file !== item.file)) { m.isUploaded = true; return; }
+        const name = m.name.trim().replace(/\.json$/i, '').toLowerCase();
+        const stem = item.file.split('/').pop()!.replace(/\.json$/i, '').toLowerCase();
+        if (name && name !== item.name.toLowerCase() && name !== stem) {
+            m.isUploaded = true;
+            return;
+        }
+        let request = currentScores.get(item.file);
+        if (!request) {
+            request = fetchModuleFile(item.file).then((data: unknown) => isInputScore(data) ? data : null).catch(() => null);
+            currentScores.set(item.file, request);
+        }
+        const current = await request;
+        const embedded = scoreText(score);
+        const prior = releasedTileFingerprints.get(item.file);
+        if ((current && scoreText(current) === embedded) || (prior && matchesReleasedTile(embedded, prior))) {
+            m.file = item.file;
+            m.meta = item;
+            // Retry through the normal file loader if the old factory score was
+            // recognized but its replacement could not be fetched.
+            m.moduleData = current;
+            m.data = null;
+            m.loadFailed = false;
+        } else {
+            // Preserve a custom score even when an old writer omitted its
+            // upload marker or gave it the path of a similarly named tile.
+            m.isUploaded = true;
+        }
+    }
+
     // Give a stored module its manifest metadata back — the file path, and the family /
     // ratio / cents / tags the icon is drawn from. Matches on the file path first, then
     // on the name, which is all a state written by the old exporter kept. Without this,
@@ -741,13 +823,7 @@ const menuAPI = (function() {
     function healModuleMeta(m: ReturnType<typeof normalizeModule>, index: ReturnType<typeof manifestIndex>) {
         if (m.isUploaded) return false;
         if (m.meta && m.meta.family) return true;
-        let item = (m.file && index.byFile.get(m.file)) || null;
-        if (!item) {
-            for (const key of [m.name, String(m.filename || '').replace(/\.json$/i, '')]) {
-                const k = String(key || '').trim().toLowerCase();
-                if (k && index.byName.has(k)) { item = index.byName.get(k) ?? null; break; }
-            }
-        }
+        const item = findManifestItem(m, index);
         if (!item) return false;
         m.meta = item;
         m.file = item.file;
@@ -794,7 +870,7 @@ const menuAPI = (function() {
             let icon;
             if (m.isUploaded && m.moduleData) {
                 if (!m.moduleData.filename) m.moduleData.filename = m.name;
-                icon = createModuleIcon(state.id, m.name, m.moduleData, m.meta || null);
+                icon = createModuleIcon(state.id, m.name, m.moduleData, m.meta ? { ...m.meta, name: m.name } : null);
                 icon.setAttribute('data-uploaded', 'true');
             } else if (m.loadFailed) {
                 icon = createModuleIcon(state.id, m.filename, null, m.meta || null);
@@ -894,12 +970,13 @@ const menuAPI = (function() {
         const outStates = states.map((st) => {
             const modules = [];
             for (const m of st.modules) {
+                if (m.isUploaded) { modules.push(m); continue; }
                 healModuleMeta(m, index); // no-op once the module already has its metadata
                 if (m.file && fileToItem.has(m.file)) {
                     m.meta = fileToItem.get(m.file)!; // refresh metadata from the manifest
                     presentFiles.add(m.file);
                     modules.push(m);
-                } else if (m.isUploaded || (!m.file && m.moduleData)) {
+                } else if (!m.file && m.moduleData) {
                     modules.push(m); // user upload / fileless embedded module
                 }
                 // else: built-in whose file was removed/renamed → drop (no 404)
@@ -944,9 +1021,15 @@ const menuAPI = (function() {
         moduleDropMode = (uiState.dropMode === 'start' || uiState.dropMode === 'end') ? uiState.dropMode : defaultModuleDropMode;
         const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
 
-        return loadLibraryManifest().then(manifest => {
+        return loadLibraryManifest().then(async manifest => {
             // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
             if (needsMigration && !manifest) return false;
+            if (manifest) {
+                const index = manifestIndex(manifest);
+                const currentScores = new Map<string, Promise<ModuleData | null>>();
+                await Promise.all(uiState.categories.flatMap(cat =>
+                    (cat.modules || []).map(m => restoreEmbeddedTile(m, index, currentScores))));
+            }
 
             let sectionStates = needsMigration && manifest
                 ? buildMigratedSectionStates(uiState, manifest)

@@ -10,6 +10,7 @@
  *
  *   node scripts/perf/shot-library-interactions.mjs --url http://localhost:3000
  */
+import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Locator } from 'playwright';
@@ -154,6 +155,75 @@ const packed = await page.evaluate(() => {
 });
 console.log('\ncollapsed chips after reload:', JSON.stringify(packed), '(2 chips on 1 row = packed)');
 console.log('shape ok:', after.sectionsSeparated && after.dividerAboveActions && after.placeholderIsLast);
+
+// An exported v2 layout could carry the score itself, even for a shipped tile.
+// Use the released Half cadence with its two silent roots to exercise a real upgrade.
+const restored = await page.evaluate(async () => {
+  const { menuBar, isLibraryLayout } = await import('/src/menu/menu-bar.ts');
+  const { isInputScore } = await import('/src/model-types.ts');
+  const oldScore = {
+    baseNote: { frequency: '263', startTime: '0', duration: '1/2' },
+    notes: [
+      ['base.t', '', 'base.f', '150,150,150,0.5'],
+      ['[1].t', 'base.d * 2', '[1].f', '128,128,128,0.7'],
+      ['[2].t', '[2].d', '(5/4) * [1].f', '0,200,80,0.7'],
+      ['[2].t', '[2].d', '(3/4) * [1].f', '220,60,60,0.7'],
+      ['[2].t + [2].d', '', '(3/2) * [1].f', '150,150,150,0.5'],
+      ['[5].t', 'base.d * 2', '(1/2) * [5].f', '128,128,128,0.7'],
+      ['[6].t', '[6].d', '(5/8) * [5].f', '0,200,80,0.7'],
+      ['[6].t', '[6].d', '(3/4) * [5].f', '220,60,60,0.7'],
+    ].map(([startTime, duration, frequency, color], i) => ({
+      id: i + 1, startTime, frequency, color: 'rgba(' + color + ')', ...(duration && { duration })
+    })),
+  };
+  const half = 'progressions/half-cadence.json', major = 'chords/major.json';
+  const freshHalf: unknown = await (await fetch('modules/' + half)).json();
+  const freshMajor: unknown = await (await fetch('modules/' + major)).json();
+  if (!isInputScore(freshHalf) || !isInputScore(freshMajor)) throw Error('Missing library comparison scores');
+  const edit = { baseNote: oldScore.baseNote, notes: [{ id: 1, startTime: 'base.t', duration: 'base.d', frequency: '777' }] };
+  const entries = [
+    { name: 'Half (I–V)', file: half, data: oldScore },
+    { name: 'My copied cadence', isUploaded: true, moduleData: oldScore },
+    { name: 'My edited cadence', file: half, moduleData: edit },
+    { name: 'Major', moduleData: edit },
+    { name: 'Major', moduleData: freshMajor },
+  ];
+  localStorage.setItem('ui-state', JSON.stringify({libraryVersion: 2, categories: [
+    { name: 'test-layout', label: 'My tiles', collapsed: true, modules: entries }
+  ]}));
+  const payloads = [];
+  for (let pass = 0; pass < 2; pass++) {
+    if (!await menuBar.loadUIStateFromLocalStorage()) throw Error('Saved library failed to reopen');
+    const section = document.querySelector('.category-label[data-category="test-layout"]')!.parentElement!;
+    const tiles = Array.from(section.querySelectorAll<HTMLElement>('.icon[data-name]'));
+    // An ordinary file-backed tile loads its score asynchronously after a reload.
+    const deadline = performance.now() + 10000;
+    while (tiles.some(tile => !('moduleData' in tile)) && performance.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    payloads.push(tiles.map(tile => {
+      const dt = new DataTransfer();
+      tile.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+      tile.dispatchEvent(new DragEvent('dragend', { dataTransfer: dt, bubbles: true }));
+      const score: unknown = JSON.parse(dt.getData('application/json'));
+      if (!isInputScore(score)) throw Error('Tile did not transfer its score');
+      return score.notes;
+    }));
+    menuBar.saveUIStateToLocalStorage();
+  }
+  const ui: unknown = JSON.parse(localStorage.getItem('ui-state') || 'null');
+  if (!isLibraryLayout(ui)) throw Error('Invalid saved library');
+  const layout = ui.categories.find(cat => cat.name === 'test-layout')!;
+  return { payloads, expected: [freshHalf.notes, oldScore.notes, edit.notes, edit.notes, freshMajor.notes],
+    names: layout.modules?.map(m => m.name), flags: layout.modules?.map(m => [m.isUploaded, !!m.moduleData]),
+    label: layout.label, collapsed: layout.collapsed };
+});
+for (const payload of restored.payloads) assert.deepEqual(payload, restored.expected);
+assert.deepEqual(restored.flags, [[false, false], [true, true], [true, true], [true, true], [false, false]]);
+assert.deepEqual(restored.names, ['Half (I–V)', 'My copied cadence', 'My edited cadence', 'Major', 'Major']);
+assert.equal(restored.label, 'My tiles');
+assert.equal(restored.collapsed, true);
+console.log('Revised stock, same-name legacy edits and explicit copies survived drag and two UI restores.');
 
 await browser.close();
 console.log('\nwrote', OUT);
