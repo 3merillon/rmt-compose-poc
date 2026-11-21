@@ -83,15 +83,17 @@ const SAFE_LIMIT = 10n ** BigInt(SAFE_DIGITS);
  * @param {number} [fallback=0] value when frac is null/undefined/invalid
  * @returns {number} always finite unless the true value overflows a double
  */
-export function toNumber(frac: NumericInput, fallback = 0): number {
-  if (frac == null) return fallback;
+export function toNumber(frac: NumericInput, fallback?: number): number;
+export function toNumber(frac: NumericInput, fallback: number | null): number | null;
+export function toNumber(frac: NumericInput, fallback: number | null = 0): number | null {
+  if (frac == null || typeof frac === 'string') return fallback;
   if (typeof frac === 'number') return frac;
   if (typeof frac === 'bigint') return Number(frac);
 
-  const n = typeof frac === 'string' ? undefined : frac.n;
-  const d = typeof frac === 'string' ? undefined : frac.d;
+  const n = frac.n;
+  const d = frac.d;
   if (typeof n === 'bigint' && typeof d === 'bigint') {
-    const s = typeof frac !== 'string' && frac.s != null && frac.s < 0n ? -1 : 1;
+    const s = frac.s != null && frac.s < 0n ? -1 : 1;
     // Both within SAFE_DIGITS digits (every value the editor meets): the plain
     // division below. Comparing magnitudes costs nothing; counting digits wrote
     // both out in decimal, for every note on every renderer sync.
@@ -107,7 +109,7 @@ export function toNumber(frac: NumericInput, fallback = 0): number {
       const p = 10n ** shift;
       const nv = Number(n / p);
       const dv = Number(d / p);
-      if (dv === 0) return s * (nv === 0 ? fallback : Infinity);
+      if (dv === 0) return s * (nv === 0 ? Number(fallback) : Infinity);
       return s * (nv / dv);
     }
     return s * (Number(n) / Number(d));
