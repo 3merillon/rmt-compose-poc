@@ -25,8 +25,8 @@ import type { ExactValue } from '../src/value/exact.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 const dir = join(here, '..', 'public', 'modules');
 const dry = process.argv.includes('--dry-run');
-const { Module } = await import('../src/module.js');
-const X = await import('../src/value/exact.js');
+const { Module } = await import('../src/module.ts');
+const X = await import('../src/value/exact.ts');
 
 const ROOT_COLOR = 'rgba(150,150,150,0.5)';
 function tidy(s: string): string;

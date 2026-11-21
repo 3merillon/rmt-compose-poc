@@ -25,7 +25,7 @@ const runsAt = args.indexOf('--runs');
 const RUNS = runsAt >= 0 ? Math.max(1, Number(args[runsAt + 1]) || 1) : 1;
 const targetArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--runs');
 
-const { Module } = await import('../../src/module.js');
+const { Module } = await import('../../src/module.ts');
 
 function percentile(sorted: number[], p: number) {
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));

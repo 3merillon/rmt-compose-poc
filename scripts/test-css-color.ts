@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
-const { parseCssColor, hslaToRgba } = await import('../src/utils/css-color.js');
+const { parseCssColor, hslaToRgba } = await import('../src/utils/css-color.ts');
 
 let failures = 0;
 const ok = (m: string) => console.log(`  ✓ ${m}`);

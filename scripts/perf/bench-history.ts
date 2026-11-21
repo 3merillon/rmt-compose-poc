@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { Module } from '../../src/module.js';
-import { history, moduleSnapshot } from '../../src/store/history.js';
-import { eventBus, type HistoryRestore } from '../../src/utils/event-bus.js';
+import { Module } from '../../src/module.ts';
+import { history, moduleSnapshot } from '../../src/store/history.ts';
+import { eventBus, type HistoryRestore } from '../../src/utils/event-bus.ts';
 
 assert(global.gc, 'Run with --expose-gc to measure retained heap.');
 const path = process.argv[2] || new URL('../../public/modules/perf/voices-500000.json', import.meta.url);

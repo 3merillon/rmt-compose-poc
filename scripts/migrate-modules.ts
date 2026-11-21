@@ -15,8 +15,8 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { isInputScore } from '../src/model-types.ts';
-import { migrateTimeModel } from '../src/migrate/relational-time.js';
-import { migrateSyntax } from '../src/migrate/legacy-syntax.js';
+import { migrateTimeModel } from '../src/migrate/relational-time.ts';
+import { migrateSyntax } from '../src/migrate/legacy-syntax.ts';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');

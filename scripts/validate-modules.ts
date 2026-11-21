@@ -28,8 +28,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const modulesDir = join(root, 'public', 'modules');
 
-const { Module } = await import('../src/module.js');
-const { validateExpressionSyntax } = await import('../src/utils/safe-expression-validator.js');
+const { Module } = await import('../src/module.ts');
+const { validateExpressionSyntax } = await import('../src/utils/safe-expression-validator.ts');
 
 const EXPR_KEYS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
 
