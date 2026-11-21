@@ -63,6 +63,12 @@ const canon = JSON.parse(readFileSync(join(here, '..', 'public', 'modules', 'def
   check(eq(DT.moduleRepeatRatio(m), F(9, 8)), 'C1 9/8: exactly 9/8');
   const fifth = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '3/2' } });
   check(eq(DT.moduleRepeatRatio(fifth), F(3, 2)), 'C1b 3/2: a fifth up each repeat (not 3/2 Hz)');
+  const relative = await Module.loadFromJSON({
+    baseNote: { frequency: '330', repeat: '[ 21 ].f / base.f' },
+    notes: [{ id: 21, frequency: '495', duration: '1', startTime: '0' }],
+  });
+  const reopened = await Module.loadFromJSON(JSON.parse(await relative.exportOrderedModule()));
+  check(eq(DT.moduleRepeatRatio(reopened), F(3, 2)), 'A note-based repeat follows the new ID in an ordered save');
   const n24 = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '[24].f / base.f' } });
   const want24 = X.div(n24.getNoteById(24).getExactVariable('frequency'), n24.baseNote.getExactVariable('frequency'));
   check(eq(DT.moduleRepeatRatio(n24), want24), `C2 [24].f / base.f: note 24's ratio to the BaseNote (${X.toText ? X.toText(want24) : want24})`);

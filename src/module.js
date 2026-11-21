@@ -1,6 +1,7 @@
 import { snapshotPages, changedRows } from './store/snapshot-pages.js';
 import Fraction from 'fraction.js';
 import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js';
+import { remapNoteIds } from './dsl/remap-note-ids.js';
 import { migrateTimeModel } from './migrate/relational-time.js';
 import { migrateSyntax } from './migrate/legacy-syntax.js';
 import { toNumber } from './utils/fraction-num.js';
@@ -1218,19 +1219,24 @@ export class Module {
       }
     }
 
-    // Update expression references: [N] -> [new id]
-    const updateReferences = (exprText) => {
-      const updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
-        const oldRefId = parseInt(p1, 10);
-        const newRefId = newMapping[oldRefId];
-        if (typeof newRefId !== 'number') {
-          console.warn('No new mapping found for old id ' + oldRefId);
-          return match;
-        }
-        return '[' + newRefId + ']';
-      });
-      return updated;
-    };
+    const updateReferences = source => remapNoteIds(source, id => newMapping[id] ?? id);
+
+    // The BaseNote keeps its identity across reindexing. Its frequency and
+    // other fields may read ordinary notes whose IDs are about to change.
+    for (const key of EXPRESSION_VARS) {
+      const source = baseNote.getExpressionSource(key);
+      if (!source) continue;
+      const updated = updateReferences(source);
+      if (updated !== source) baseNote._setExpressionSilent(key, updated);
+    }
+
+    if (baseNote.properties.repeat) {
+      // Repeat is free-form until playback validates it. Preserve unrecognised
+      // text through Save Module just as we did before renumbering.
+      try {
+        baseNote.properties.repeat = updateReferences(baseNote.properties.repeat);
+      } catch { /* Keep the stored repeat. */ }
+    }
 
     // Rebuild notes with new IDs
     const newNotes = { 0: baseNote };
