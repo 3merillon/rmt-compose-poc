@@ -1,33 +1,109 @@
-import { eventBus } from '../utils/event-bus.js';
-import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
-import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
-import { renderModuleIcon } from './icon-factory.js';
-import { settingsStore } from '../settings/settings-store.js';
-import { pointerOf } from '../utils/draggable-widget.js';
-import { viewportHeight } from '../utils/viewport.js';
-import { history } from '../store/history.js';
-import { EXPRESSION_VARS } from '../note.js';
-import { MAX_NOTE_ID } from '../binary-note.js';
-import { MAX_MODULE_NOTES } from '../limits.js';
+import { eventBus } from '../utils/event-bus.ts';
+import { escapeHtml, validateColorInput } from '../utils/html-escape.ts';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.ts';
+import { renderModuleIcon } from './icon-factory.ts';
+import { settingsStore } from '../settings/settings-store.ts';
+import { pointerOf } from '../utils/draggable-widget.ts';
+import { viewportHeight } from '../utils/viewport.ts';
+import { history } from '../store/history.ts';
+import { EXPRESSION_VARS } from '../note.ts';
+import { MAX_NOTE_ID } from '../binary-note.ts';
+import { MAX_MODULE_NOTES } from '../limits.ts';
+import { isLibraryManifest, type LibraryManifest, type LibraryItem, type LibrarySection } from '../library/manifest.ts';
+import { isInputScore, isRecord, type InputScore } from '../model-types.ts';
+import type { AppEvents } from '../utils/event-bus.ts';
+
+type DropMode = 'start' | 'end';
+type ModuleData = InputScore & { filename?: string };
+type ModuleMeta = Partial<LibraryItem>;
+interface LibraryTile extends HTMLDivElement {
+    moduleMeta?: ModuleMeta;
+    moduleData?: ModuleData;
+    _suppressClickUntil?: number;
+}
+interface StoredModule {
+    name: string;
+    filename?: string;
+    file?: string | null;
+    meta?: ModuleMeta | null;
+    moduleData?: unknown;
+    data?: unknown;
+    isUploaded?: boolean;
+    loadFailed?: boolean;
+    hasData?: boolean;
+    originalCategory?: string | null;
+    currentCategory?: string;
+}
+interface StoredCategory { name: string; label?: string; collapsed?: boolean; modules?: StoredModule[] }
+interface LibraryLayout {
+    categories: StoredCategory[];
+    libraryVersion?: number;
+    dropMode?: DropMode;
+    timestamp?: number;
+    exportedAt?: string;
+    version?: string;
+}
+interface SectionState {
+    id: string; label: string; collapsed: boolean;
+    modules: ReturnType<typeof normalizeModule>[];
+}
+
+function isStoredModule(value: unknown): value is StoredModule {
+    if (!isRecord(value) || typeof value.name !== 'string') return false;
+    const meta = value.meta;
+    if (meta != null && (!isRecord(meta)
+        || !['name', 'file', 'ratio', 'family'].every(key => meta[key] === undefined || typeof meta[key] === 'string')
+        || !(meta.cents === undefined || typeof meta.cents === 'number')
+        || !(meta.tags === undefined || (Array.isArray(meta.tags) && meta.tags.every(tag => typeof tag === 'string'))))) return false;
+    return ['filename', 'file', 'originalCategory', 'currentCategory'].every(key => value[key] == null || typeof value[key] === 'string')
+        && ['isUploaded', 'hasData', 'loadFailed'].every(key => value[key] === undefined || typeof value[key] === 'boolean');
+}
+
+function isLibraryLayout(value: unknown): value is LibraryLayout {
+    return isRecord(value) && Array.isArray(value.categories)
+        && value.categories.every((cat: unknown) => isRecord(cat) && typeof cat.name === 'string'
+            && (cat.label === undefined || typeof cat.label === 'string')
+            && (cat.collapsed === undefined || typeof cat.collapsed === 'boolean')
+            && (cat.modules === undefined || (Array.isArray(cat.modules) && cat.modules.every(isStoredModule))));
+}
+
+function normalizeModule(m: StoredModule) {
+    const embedded = m.moduleData || m.data;
+    const moduleData: ModuleData | null = isInputScore(embedded) ? embedded : null;
+    return {
+        name: m.name,
+        filename: m.filename || ((m.name || 'module') + '.json'),
+        file: m.file || null,
+        meta: m.meta || null,
+        moduleData,
+        isUploaded: !!m.isUploaded,
+        loadFailed: !!m.loadFailed,
+        originalCategory: m.originalCategory || null
+    };
+}
+
 
 // JSON keys of the old time model (tempo, beats per measure, measure length)
 const RETIRED_TIME_KEYS = ['tempo', 'beatsPerMeasure', 'measureLength'];
 
 const menuAPI = (function() {
     const domCache = {
-        secondTopBar: document.querySelector('.second-top-bar'),
-        iconsWrapper: document.querySelector('.icons-wrapper'),
-        iconsContainer: document.querySelector('.icons-container'),
-        pullTab: document.querySelector('.pull-tab'),
-        topBar: document.querySelector('.top-bar')
+        secondTopBar: document.querySelector<HTMLElement>('.second-top-bar')!,
+        iconsWrapper: document.querySelector<HTMLElement>('.icons-wrapper')!,
+        iconsContainer: document.querySelector<HTMLElement>('.icons-container')!,
+        pullTab: document.querySelector<HTMLElement>('.pull-tab')!,
+        topBar: document.querySelector<HTMLElement>('.top-bar')!
     };
 
     const PULL_TAB_HEIGHT = 16, TOP_BAR_HEIGHT = 50, SAFETY_MARGIN = 10;
-    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedDefaultHeight = false, targetFitHeight = null;
+    let isDragging = false, startY: number, startHeight: number;
+    let categoryContainers: HTMLElement[] = [];
+    let draggedElement: HTMLElement | null = null, draggedElementType: 'module' | 'category' | null = null, draggedElementCategory: string | null = null;
+    let maxMenuBarHeight = 0, hasAppliedDefaultHeight = false, targetFitHeight: number | null = null;
 
     // Module drop mode: 'start' = drop at target note's start, 'end' = drop at target note's end
     const defaultModuleDropMode = 'end';
-    let moduleDropMode = defaultModuleDropMode;
+    let moduleDropMode: DropMode = defaultModuleDropMode;
 
     // === Manifest v2 support (Phase 6.1) ===
     // The library is described by a single top-level manifest,
@@ -39,7 +115,7 @@ const menuAPI = (function() {
     // Built-in section ids the app ships. Used by the ui-state migration to
     // decide what to rebuild (built-ins) vs. preserve (user 'custom' + uploads).
     const BUILTIN_SECTION_IDS = ['intervals', 'chords', 'progressions', 'melodies', 'scale-systems', 'custom'];
-    let libraryManifest = null; // cached parsed library.json (v2), or null if legacy/absent
+    let libraryManifest: LibraryManifest | null = null; // cached parsed library.json (v2), or null if legacy/absent
 
     // Fetch + validate the top-level v2 manifest.
     // Returns the manifest object, or null when absent/legacy so callers fall back.
@@ -51,8 +127,8 @@ const menuAPI = (function() {
             // layout that references deleted module files (404s).
             const res = await fetch('modules/library.json', { cache: 'no-store' });
             if (!res.ok) return null;
-            const json = await res.json();
-            if (json && json.version === 2 && Array.isArray(json.sections)) {
+            const json: unknown = await res.json();
+            if (isLibraryManifest(json)) {
                 libraryManifest = json;
                 return json;
             }
@@ -61,13 +137,13 @@ const menuAPI = (function() {
     }
 
     // Encode each path segment of a manifest-relative module path (handles spaces).
-    function encodeModulePath(path) {
+    function encodeModulePath(path: string) {
         return String(path).split('/').map(encodeURIComponent).join('/');
     }
 
     // Fetch a module file by its manifest-relative path (e.g. "intervals/5th.json"),
     // with a spaces->underscores fallback (mirrors the legacy per-file fetch).
-    async function fetchModuleFile(file) {
+    async function fetchModuleFile(file: string) {
         let res = await fetch('modules/' + encodeModulePath(file));
         if (!res.ok) {
             const alt = 'modules/' + file.split('/').map(s => s.replace(/\s+/g, '_')).join('/');
@@ -90,7 +166,7 @@ const menuAPI = (function() {
     // from each edge), so a larger icon — which has a larger radius — pushes it inward
     // rather than letting the rounded corner clip it. Box and glyph scale with the icon;
     // everything else about the button lives in CSS.
-    function styleDeleteButton(btn, size = getIconSizePx()) {
+    function styleDeleteButton(btn: HTMLElement | null, size = getIconSizePx()) {
         if (!btn) return;
         const radius = Math.round(size * 0.14);
         const box = Math.max(14, Math.min(20, Math.round(size * 0.25)));
@@ -104,7 +180,7 @@ const menuAPI = (function() {
     // Size a section label so it matches the module icons around it: same height,
     // same corner-radius treatment, with the type and padding scaled to follow.
     // Called on creation and again from applyIconSizeToAll() when the setting changes.
-    function styleLabelIcon(labelIcon, size = getIconSizePx()) {
+    function styleLabelIcon(labelIcon: HTMLElement, size = getIconSizePx()) {
         const fontSize = Math.max(11, Math.min(18, Math.round(size * 0.28)));
         Object.assign(labelIcon.style, {
             height: size + 'px',
@@ -112,7 +188,7 @@ const menuAPI = (function() {
             padding: '0 ' + Math.max(6, Math.round(size * 0.16)) + 'px',
             fontSize: fontSize + 'px'
         });
-        const chevron = labelIcon.querySelector('.category-collapse-chevron');
+        const chevron = labelIcon.querySelector<HTMLElement>('.category-collapse-chevron');
         if (chevron) {
             const chevSize = Math.max(8, Math.round(fontSize * 0.68));
             Object.assign(chevron.style, {
@@ -121,7 +197,7 @@ const menuAPI = (function() {
                 marginRight: Math.max(4, Math.round(fontSize * 0.35)) + 'px'
             });
         }
-        styleDeleteButton(labelIcon.querySelector('.category-delete-btn'), size);
+        styleDeleteButton(labelIcon.querySelector<HTMLButtonElement>('.category-delete-btn'), size);
     }
 
     // Live-apply icon size + cents visibility to every rendered icon/placeholder/label.
@@ -129,20 +205,20 @@ const menuAPI = (function() {
         const size = getIconSizePx();
         const showCents = getShowCents();
         const radius = Math.round(size * 0.14);
-        document.querySelectorAll('.icons-container .icon').forEach(icon => {
+        document.querySelectorAll<LibraryTile>('.icons-container .icon').forEach(icon => {
             icon.style.width = size + 'px';
             icon.style.height = size + 'px';
             if (icon.classList.contains('empty-placeholder')) return;
             icon.style.borderRadius = radius + 'px';
-            styleDeleteButton(icon.querySelector(':scope > .module-delete-btn'), size);
-            const tc = icon.querySelector(':scope > div');
+            styleDeleteButton(icon.querySelector<HTMLButtonElement>(':scope > .module-delete-btn'), size);
+            const tc = icon.querySelector<HTMLElement>(':scope > div');
             if (tc && icon.moduleMeta) {
-                renderModuleIcon(tc, icon.moduleMeta, size, { showCents, name: icon.getAttribute('data-name') });
+                renderModuleIcon(tc, icon.moduleMeta, size, { showCents, name: icon.getAttribute('data-name') ?? undefined });
             }
         });
         // Labels are not .icon elements (icon-only selectors deliberately exclude
         // them), so they need their own pass to track the setting.
-        document.querySelectorAll('.icons-container .category-label').forEach(label => styleLabelIcon(label, size));
+        document.querySelectorAll<HTMLElement>('.icons-container .category-label').forEach(label => styleLabelIcon(label, size));
         try { updateMaxHeight(); } catch (e) {}
     }
 
@@ -153,9 +229,9 @@ const menuAPI = (function() {
     function refreshSectionCounts() {
         categoryContainers.forEach(section => {
             if (!section) return;
-            const label = section.querySelector(':scope > .category-label');
+            const label = section.querySelector<HTMLElement>(':scope > .category-label');
             if (!label) return;
-            const count = String(section.querySelectorAll(':scope > .icon:not(.empty-placeholder)').length);
+            const count = String(section.querySelectorAll<LibraryTile>(':scope > .icon:not(.empty-placeholder)').length);
             if (label.getAttribute('data-count') !== count) label.setAttribute('data-count', count);
         });
     }
@@ -167,11 +243,11 @@ const menuAPI = (function() {
     // the row-break between consecutive chips so they pack onto shared rows.
     // Height re-fits through the same path as wrap/unwrap so the pull-tab stays
     // consistent on desktop and mobile.
-    function setSectionCollapsed(container, collapsed) {
+    function setSectionCollapsed(container: HTMLElement, collapsed: boolean) {
         if (!container) return;
         container.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
         container.classList.toggle('section-collapsed', !!collapsed);
-        const chevron = container.querySelector('.category-label .category-collapse-chevron');
+        const chevron = container.querySelector<HTMLElement>('.category-label .category-collapse-chevron');
         if (chevron) chevron.textContent = collapsed ? '▸' : '▾';
         refreshSectionCounts();
         updateSectionFlow();
@@ -191,14 +267,14 @@ const menuAPI = (function() {
     function updateSectionFlow() {
         const container = domCache.iconsContainer;
         if (!container) return;
-        const has = (el, cls) => !!el.classList && el.classList.contains(cls);
+        const has = (el: Element, cls: string) => !!el.classList && el.classList.contains(cls);
 
-        let owner = null;   // last visible section seen
-        let run = [];       // separators since that section
+        let owner: Element | null = null;   // last visible section seen
+        let run: Element[] = [];       // separators since that section
 
         // Keep the last divider of the run, unless the run sits between two chips
         // (they share a row) or has no visible section above it.
-        const flush = (next) => {
+        const flush = (next: Element | null) => {
             const packed = owner && next && has(owner, 'section-collapsed') && has(next, 'section-collapsed');
             const keep = (owner && !packed) ? run[run.length - 1] : null;
             for (const el of run) el.classList.toggle('library-hidden', el !== keep);
@@ -219,9 +295,9 @@ const menuAPI = (function() {
 
     // === Library search (Phase 6.5) ===
     let currentSearchQuery = '';
-    let heightBeforeSearch = null;
+    let heightBeforeSearch: number | null = null;
 
-    function moduleMatchesQuery(icon, q) {
+    function moduleMatchesQuery(icon: LibraryTile, q: string) {
         const parts = [];
         const dn = icon.getAttribute('data-name');
         if (dn) parts.push(dn);
@@ -246,7 +322,7 @@ const menuAPI = (function() {
     // Visibility is toggled with the .library-hidden class only — never with inline
     // style.display, which would wipe the .library-section display and drop each
     // section back to `display: block` (one icon per row).
-    function applyModuleSearch(query) {
+    function applyModuleSearch(query: string) {
         const wasSearching = currentSearchQuery.trim().length > 0;
         currentSearchQuery = query || '';
         const q = currentSearchQuery.trim().toLowerCase();
@@ -256,12 +332,12 @@ const menuAPI = (function() {
         // stranded at the results' height once the search is cleared. Remember the
         // height the search started from and hand it back when it ends.
         if (searching && !wasSearching) {
-            heightBeforeSearch = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10) || null;
+            heightBeforeSearch = parseInt(window.getComputedStyle(domCache.secondTopBar).height, 10) || null;
         }
         categoryContainers.forEach(section => {
             if (!section) return;
-            const icons = Array.from(section.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
-            const placeholder = section.querySelector(':scope > .empty-placeholder');
+            const icons = Array.from(section.querySelectorAll<LibraryTile>(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
+            const placeholder = section.querySelector<HTMLElement>(':scope > .empty-placeholder');
             let anyMatch = false;
             icons.forEach(icon => {
                 const show = !searching || moduleMatchesQuery(icon, q);
@@ -291,7 +367,7 @@ const menuAPI = (function() {
     // === Toolbar (search + history) ===
     // 24x24, stroke-only, currentColor — the idiom the gear and docs icons in index.html
     // already use, so a button colours its glyph just by setting `color`.
-    function toolIconSVG(paths) {
+    function toolIconSVG(paths: string) {
         return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
     }
@@ -304,7 +380,7 @@ const menuAPI = (function() {
     const ICON_DROP_END = '<path d="M19 4v16"/><path d="M5 12h10"/><path d="m11 8 4 4-4 4"/>';
     const ICON_COMMIT = '<path d="M5 12.5 10 17.5 19 7"/>';
 
-    function createToolButton(cls, label, iconPaths) {
+    function createToolButton(cls: string, label: string, iconPaths: string) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'library-tool-btn ' + cls;
@@ -315,7 +391,7 @@ const menuAPI = (function() {
     }
 
     function getToolbar() {
-        return domCache.secondTopBar ? domCache.secondTopBar.querySelector('.library-toolbar') : null;
+        return domCache.secondTopBar ? domCache.secondTopBar.querySelector<HTMLElement>('.library-toolbar') : null;
     }
 
     let searchOpen = false;
@@ -324,11 +400,11 @@ const menuAPI = (function() {
     // behind a folded-away field is a library that is silently missing modules, with
     // nothing on screen to say why. Clearing is also what hands the bar back the height
     // the search shrank it to (applyModuleSearch's heightBeforeSearch).
-    function setSearchOpen(open, { focus = true } = {}) {
+    function setSearchOpen(open: boolean, { focus = true } = {}) {
         const row = getToolbar();
         if (!row) return;
-        const input = row.querySelector('.library-search-input');
-        const toggle = row.querySelector('.library-search-toggle');
+        const input = row.querySelector<HTMLInputElement>('.library-search-input');
+        const toggle = row.querySelector<HTMLButtonElement>('.library-search-toggle');
         searchOpen = !!open;
         row.classList.toggle('search-open', searchOpen);
         if (toggle) toggle.setAttribute('aria-expanded', searchOpen ? 'true' : 'false');
@@ -478,7 +554,7 @@ const menuAPI = (function() {
 
     // The single writer of moduleDropMode from the UI side. Persists immediately, like
     // the old bottom-of-library toggle did — the mode is part of the saved UI state.
-    function setModuleDropMode(value) {
+    function setModuleDropMode(value: string) {
         if ((value !== 'start' && value !== 'end') || moduleDropMode === value) return;
         moduleDropMode = value;
         syncDropModeButtons();
@@ -505,7 +581,7 @@ const menuAPI = (function() {
     // during boot — possibly before the module's first snapshot is seeded — so the initial
     // state is read from the store rather than waited for. `state` is the payload when this
     // runs as a history:stackChanged subscriber (see init).
-    function syncHistoryButtons(state) {
+    function syncHistoryButtons(state?: AppEvents['history:stackChanged'][0]) {
         const row = getToolbar();
         if (!row) return;
         let canUndo = false, canRedo = false;
@@ -513,8 +589,8 @@ const menuAPI = (function() {
             canUndo = state ? !!state.canUndo : history.canUndo();
             canRedo = state ? !!state.canRedo : history.canRedo();
         } catch (e) {}
-        const undo = row.querySelector('.library-undo-btn');
-        const redo = row.querySelector('.library-redo-btn');
+        const undo = row.querySelector<HTMLButtonElement>('.library-undo-btn');
+        const redo = row.querySelector<HTMLButtonElement>('.library-redo-btn');
         if (undo) undo.disabled = !canUndo;
         if (redo) redo.disabled = !canRedo;
     }
@@ -526,7 +602,7 @@ const menuAPI = (function() {
     function ensureLibraryBody() {
         const bar = domCache.secondTopBar, wrapper = domCache.iconsWrapper;
         if (!bar || !wrapper) return null;
-        let body = bar.querySelector(':scope > .library-body');
+        let body = bar.querySelector<HTMLElement>(':scope > .library-body');
         if (!body) {
             body = document.createElement('div');
             body.className = 'library-body';
@@ -543,9 +619,9 @@ const menuAPI = (function() {
         const body = ensureLibraryBody();
         if (!body) return;
         // Drop a stale row from the pre-move layout, if one is still in the container.
-        const orphan = domCache.iconsContainer && domCache.iconsContainer.querySelector(':scope > .library-toolbar');
+        const orphan = domCache.iconsContainer && domCache.iconsContainer.querySelector<HTMLElement>(':scope > .library-toolbar');
         if (orphan) orphan.remove();
-        if (!body.querySelector(':scope > .library-toolbar')) {
+        if (!body.querySelector<HTMLElement>(':scope > .library-toolbar')) {
             body.insertBefore(createToolbar(), body.firstChild);
             // The live-tempo control in it is filled in by player.js.
             try { eventBus.emit('toolbar:built'); } catch (e) {}
@@ -574,17 +650,17 @@ const menuAPI = (function() {
     // carry `meta`: without a family/ratio an icon has no identity to draw, and
     // rehydrates as the flat accent tile instead of its procedural one.
     function captureUIState() {
-        const uiState = { categories: [], version: "1.0", libraryVersion: LIBRARY_VERSION, timestamp: Date.now(), dropMode: moduleDropMode };
+        const uiState: LibraryLayout = { categories: [], version: "1.0", libraryVersion: LIBRARY_VERSION, timestamp: Date.now(), dropMode: moduleDropMode };
         categoryContainers.forEach(container => {
             if (!container) return;
-            const categoryLabel = container.querySelector('.category-label');
+            const categoryLabel = container.querySelector<HTMLElement>('.category-label');
             if (!categoryLabel) return;
             const category = categoryLabel.getAttribute('data-category');
             if (!category) return;
-            const labelTextEl = categoryLabel.querySelector('.category-label-text');
+            const labelTextEl = categoryLabel.querySelector<HTMLElement>('.category-label-text');
             const labelText = labelTextEl ? labelTextEl.textContent.trim() : (categoryLabel.textContent || '').trim() || category;
-            const moduleIcons = Array.from(container.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
-            const categoryObj = { name: category, label: labelText, collapsed: container.getAttribute('data-collapsed') === 'true', modules: [] };
+            const moduleIcons = Array.from(container.querySelectorAll<LibraryTile>(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
+            const categoryObj: StoredCategory & { modules: StoredModule[] } = { name: category, label: labelText, collapsed: container.getAttribute('data-collapsed') === 'true', modules: [] };
             moduleIcons.forEach(icon => {
                 // data-name, never the tile's text: the tile holds an SVG now, so its
                 // textContent reads back as the glyphs of a fraction ("3 2 702¢").
@@ -595,7 +671,7 @@ const menuAPI = (function() {
                 const dataFilename = icon.getAttribute('data-filename') || moduleName;
                 const file = icon.getAttribute('data-file') || (icon.moduleMeta && icon.moduleMeta.file) || null;
                 const isUploaded = icon.getAttribute('data-uploaded') === 'true';
-                const moduleEntry = {
+                const moduleEntry: StoredModule = {
                     name: moduleName,
                     filename: dataFilename,
                     file: file,
@@ -632,30 +708,19 @@ const menuAPI = (function() {
 
     // Normalize a stored ui-state module entry into a common section-state module shape.
     // `data` is the legacy v1 export's key for the embedded module JSON.
-    function normalizeStoredModule(m) {
-        return {
-            name: m.name,
-            filename: m.filename || ((m.name || 'module') + '.json'),
-            file: m.file || null,
-            meta: m.meta || null,
-            moduleData: m.moduleData || m.data || null,
-            isUploaded: !!m.isUploaded,
-            loadFailed: !!m.loadFailed,
-            originalCategory: m.originalCategory || null
-        };
-    }
+
 
     // Index the manifest by file path and by name, so a stored module that lost its
     // metadata can be matched back to its manifest item.
-    function manifestIndex(manifest) {
-        const byFile = new Map(), byName = new Map();
+    function manifestIndex(manifest: LibraryManifest | null) {
+        const byFile = new Map<string, LibraryItem>(), byName = new Map<string, LibraryItem>();
         if (!manifest) return { byFile, byName };
         for (const section of manifest.sections) {
             for (const item of (section.items || [])) {
                 byFile.set(item.file, item);
                 // First item wins: two manifest entries can share a display name
                 // (e.g. "Harmonic 7th"), and a name-only match cannot tell them apart.
-                const stem = item.file.split('/').pop().replace(/\.json$/i, '');
+                const stem = item.file.split('/').pop()!.replace(/\.json$/i, '');
                 for (const key of [item.name, stem]) {
                     const k = String(key || '').trim().toLowerCase();
                     if (k && !byName.has(k)) byName.set(k, item);
@@ -673,14 +738,14 @@ const menuAPI = (function() {
     // Uploads are never healed: a user's module that happens to be called "Major" is
     // not the built-in Major, and adopting its file would re-fetch over their data.
     // Returns true if the module now carries real metadata.
-    function healModuleMeta(m, index) {
+    function healModuleMeta(m: ReturnType<typeof normalizeModule>, index: ReturnType<typeof manifestIndex>) {
         if (m.isUploaded) return false;
         if (m.meta && m.meta.family) return true;
         let item = (m.file && index.byFile.get(m.file)) || null;
         if (!item) {
             for (const key of [m.name, String(m.filename || '').replace(/\.json$/i, '')]) {
                 const k = String(key || '').trim().toLowerCase();
-                if (k && index.byName.has(k)) { item = index.byName.get(k); break; }
+                if (k && index.byName.has(k)) { item = index.byName.get(k) ?? null; break; }
             }
         }
         if (!item) return false;
@@ -691,14 +756,14 @@ const menuAPI = (function() {
     }
 
     // Convert a v2 manifest section into a render-ready section-state.
-    function manifestSectionToState(section) {
+    function manifestSectionToState(section: LibrarySection): SectionState {
         return {
             id: section.id,
             label: section.label || section.id,
             collapsed: false,
             modules: (section.items || []).map(item => ({
-                name: item.name || item.file.split('/').pop().replace(/\.json$/i, ''),
-                filename: item.file.split('/').pop(),
+                name: item.name || item.file.split('/').pop()!.replace(/\.json$/i, ''),
+                filename: item.file.split('/').pop()!,
                 file: item.file,
                 meta: item,
                 moduleData: null,
@@ -712,7 +777,7 @@ const menuAPI = (function() {
     // Build a section container (label + icons + trailing placeholder) from a
     // section-state and append it (plus breaker/separator) to the icons container.
     // Icons fetch their data lazily (same as the cold-load path).
-    function renderSectionState(state, index, count) {
+    function renderSectionState(state: SectionState, index: number, count: number) {
         const iconsContainer = domCache.iconsContainer;
         const sectionContainer = createSectionContainer();
         categoryContainers.push(sectionContainer);
@@ -721,7 +786,7 @@ const menuAPI = (function() {
         if (state.collapsed) {
             sectionContainer.setAttribute('data-collapsed', 'true');
             sectionContainer.classList.add('section-collapsed');
-            const chev = labelIcon.querySelector('.category-collapse-chevron');
+            const chev = labelIcon.querySelector<HTMLElement>('.category-collapse-chevron');
             if (chev) chev.textContent = '▸';
         }
 
@@ -740,7 +805,7 @@ const menuAPI = (function() {
                 Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5' });
                 warningIcon.title = 'Module data failed to load';
                 icon.appendChild(warningIcon);
-                const tc = icon.querySelector('div:first-child');
+                const tc = icon.querySelector<HTMLElement>('div:first-child');
                 if (tc) tc.style.opacity = '0.7';
             } else {
                 // Built-in / re-fetchable: embedded data if present, else fetch via meta.file.
@@ -761,7 +826,7 @@ const menuAPI = (function() {
     // Migrate a pre-v2 ui-state to v2 section-states: rebuild built-in sections from
     // the manifest, preserve the user's 'custom' section wholesale + any user-created
     // sections, and rescue uploads dragged into built-in sections (into custom).
-    function buildMigratedSectionStates(oldState, manifest) {
+    function buildMigratedSectionStates(oldState: LibraryLayout, manifest: LibraryManifest) {
         const index = manifestIndex(manifest);
         const rescuedUploads = [];
         const oldCustom = [];
@@ -769,17 +834,17 @@ const menuAPI = (function() {
         for (const cat of oldState.categories) {
             const isBuiltin = BUILTIN_SECTION_IDS.includes(cat.name);
             if (cat.name === 'custom') {
-                for (const m of (cat.modules || [])) oldCustom.push(normalizeStoredModule(m));
+                for (const m of (cat.modules || [])) oldCustom.push(normalizeModule(m));
             } else if (!isBuiltin) {
                 userSections.push({ id: cat.name, label: cat.label || cat.name, collapsed: !!cat.collapsed,
-                                    modules: (cat.modules || []).map(normalizeStoredModule) });
+                                    modules: (cat.modules || []).map(normalizeModule) });
             } else {
                 // The built-in sections are rebuilt from the manifest below, so only user
                 // content in them needs rescuing. A pre-v2 state — and the old exporter —
                 // didn't record `isUploaded`, so treat anything the manifest doesn't
                 // recognise but that carries its own data as the user's, and keep it.
                 for (const raw of (cat.modules || [])) {
-                    const m = normalizeStoredModule(raw);
+                    const m = normalizeModule(raw);
                     if (!m.moduleData) continue;
                     if (m.isUploaded || !healModuleMeta(m, index)) {
                         m.isUploaded = true;
@@ -796,9 +861,9 @@ const menuAPI = (function() {
         for (const m of oldCustom.concat(...userSections.map(s => s.modules))) {
             if (healModuleMeta(m, index) && m.file) claimed.add(m.file);
         }
-        const unclaimed = (state) => ({ ...state, modules: state.modules.filter(m => !claimed.has(m.file)) });
+        const unclaimed = (state: SectionState) => ({ ...state, modules: state.modules.filter(m => !claimed.has(m.file)) });
 
-        const states = [];
+        const states: SectionState[] = [];
         for (const section of manifest.sections) {
             if (section.id === 'custom') continue;
             states.push(unclaimed(manifestSectionToState(section)));
@@ -821,7 +886,7 @@ const menuAPI = (function() {
     //   - keep uploads + fileless embedded modules; refresh kept built-ins' meta;
     //   - append manifest items not present in the stored state to their section
     //     (creating the section if it is new).
-    function reconcileWithManifest(states, manifest) {
+    function reconcileWithManifest(states: SectionState[], manifest: LibraryManifest | null) {
         if (!manifest) return states;
         const index = manifestIndex(manifest);
         const fileToItem = index.byFile;
@@ -831,7 +896,7 @@ const menuAPI = (function() {
             for (const m of st.modules) {
                 healModuleMeta(m, index); // no-op once the module already has its metadata
                 if (m.file && fileToItem.has(m.file)) {
-                    m.meta = fileToItem.get(m.file); // refresh metadata from the manifest
+                    m.meta = fileToItem.get(m.file)!; // refresh metadata from the manifest
                     presentFiles.add(m.file);
                     modules.push(m);
                 } else if (m.isUploaded || (!m.file && m.moduleData)) {
@@ -852,8 +917,8 @@ const menuAPI = (function() {
                     outStates.push(target);
                 }
                 target.modules.push({
-                    name: item.name || item.file.split('/').pop().replace(/\.json$/i, ''),
-                    filename: item.file.split('/').pop(),
+                    name: item.name || item.file.split('/').pop()!.replace(/\.json$/i, ''),
+                    filename: item.file.split('/').pop()!,
                     file: item.file,
                     meta: item,
                     moduleData: null,
@@ -872,24 +937,24 @@ const menuAPI = (function() {
     // treatment a stored one does: pre-v2 migration, reconciliation against the current
     // manifest, metadata healing, and the full post-build layout pass.
     // Resolves false when the state is unusable, so the caller can cold-load instead.
-    function applyUIState(uiState, { persist = false } = {}) {
-        if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
+    function applyUIState(uiState: unknown, { persist = false } = {}) {
+        if (!isLibraryLayout(uiState) || uiState.categories.length === 0) {
             return Promise.resolve(false);
         }
-        moduleDropMode = ['start', 'end'].includes(uiState.dropMode) ? uiState.dropMode : defaultModuleDropMode;
+        moduleDropMode = (uiState.dropMode === 'start' || uiState.dropMode === 'end') ? uiState.dropMode : defaultModuleDropMode;
         const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
 
         return loadLibraryManifest().then(manifest => {
             // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
             if (needsMigration && !manifest) return false;
 
-            let sectionStates = needsMigration
+            let sectionStates = needsMigration && manifest
                 ? buildMigratedSectionStates(uiState, manifest)
                 : uiState.categories.map(cat => ({
                       id: cat.name,
                       label: cat.label || cat.name,
                       collapsed: !!cat.collapsed,
-                      modules: (cat.modules || []).map(normalizeStoredModule)
+                      modules: (cat.modules || []).map(normalizeModule)
                   }));
             // Heal the layout against the current manifest: new/removed content, and the
             // metadata a lossy writer dropped. Safe after a migration too — it only fills
@@ -919,7 +984,7 @@ const menuAPI = (function() {
     }
 
     function loadUIStateFromLocalStorage() {
-        let uiState;
+        let uiState: unknown;
         try {
             const storedState = localStorage.getItem('ui-state');
             if (!storedState) return false;
@@ -1001,11 +1066,11 @@ const menuAPI = (function() {
         }
     }
     
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
+    function debounce(func: () => void, wait: number) {
+        let timeout: ReturnType<typeof setTimeout>;
+        return function() {
             clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
+            timeout = setTimeout(() => func(), wait);
         };
     }
 
@@ -1016,7 +1081,7 @@ const menuAPI = (function() {
         if (hasAppliedDefaultHeight) return;
         try {
             const container = domCache.iconsContainer;
-            if (!container || !container.querySelector('.library-section')) return; // not built yet
+            if (!container || !container.querySelector<HTMLElement>('.library-section')) return; // not built yet
             const cs = window.getComputedStyle(container);
             const padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
             const firstRow = getIconSizePx(); // label and icons are both one icon-size tall
@@ -1042,7 +1107,7 @@ const menuAPI = (function() {
         // Auto-shrink to fit current content if window got wider and content unwrapped
         adjustHeightToContent();
         // Run again after reflow to ensure measurements reflect the new wrap state
-        if (window.requestAnimationFrame) {
+        if (typeof window.requestAnimationFrame === 'function') {
             requestAnimationFrame(() => adjustHeightToContent());
         } else {
             setTimeout(() => adjustHeightToContent(), 0);
@@ -1058,21 +1123,21 @@ const menuAPI = (function() {
         document.addEventListener('touchend', stopResize);
     }
 
-    function initResize(e) {
+    function initResize(e: MouseEvent | TouchEvent) {
         const y = pointerOf(e).y;
-        if (!Number.isFinite(y)) return;
+        if (y === undefined || !Number.isFinite(y)) return;
         isDragging = true;
         startY = y;
-        startHeight = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10);
+        startHeight = parseInt(window.getComputedStyle(domCache.secondTopBar).height, 10);
         // Lock the target fit height at drag start so we don't chase layout while dragging
         targetFitHeight = Math.min(maxMenuBarHeight, getContentFitHeight());
         e.preventDefault();
     }
 
-    function resize(e) {
+    function resize(e: MouseEvent | TouchEvent) {
         if (!isDragging) return;
         const clientY = pointerOf(e).y;
-        if (!Number.isFinite(clientY)) return;
+        if (clientY === undefined || !Number.isFinite(clientY)) return;
         const deltaY = clientY - startY;
 
         // Clamp to the precomputed fit height so growth stops exactly when all content is visible (with 1px underflow).
@@ -1104,7 +1169,7 @@ const menuAPI = (function() {
     // updateSectionFlow() may have hidden (offsetHeight 0) — measuring the wrong
     // element as 0 would understate the pull-tab fit height.
     function getSeparatorHeight() {
-        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector(':scope > .separator') : null;
+        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector<HTMLElement>(':scope > .separator') : null;
         if (!sep) return 0;
         const h = sep.offsetHeight || 0;
         const cs = window.getComputedStyle(sep);
@@ -1132,7 +1197,7 @@ const menuAPI = (function() {
             const MIN_OPEN = 50; // px minimum visible height on initial load
             const fit = Math.min(maxMenuBarHeight, getContentFitHeight());
             const clampedFit = Math.max(MIN_OPEN, fit);
-            const current = parseInt(document.defaultView.getComputedStyle(second).height, 10) || 0;
+            const current = parseInt(window.getComputedStyle(second).height, 10) || 0;
             if (current > clampedFit) {
                 second.style.height = clampedFit + 'px';
             }
@@ -1142,8 +1207,8 @@ const menuAPI = (function() {
     }
 
     // Touch edge auto-scroll for menu wrapper: delayed scroll when pointer hovers near edges (mobile)
-    function createEdgeScroller(container, { zone = 28, delay = 250, speed = 16 } = {}) {
-        let raf = null, active = false, dir = 0, timer = null, pendingDir = 0;
+    function createEdgeScroller(container: HTMLElement, { zone = 28, delay = 250, speed = 16 } = {}) {
+        let raf: number | null = null, active = false, dir = 0, timer: ReturnType<typeof setTimeout> | null = null, pendingDir = 0;
 
         function step() {
             if (!active || dir === 0) { raf = null; return; }
@@ -1153,7 +1218,7 @@ const menuAPI = (function() {
             container.scrollTop += dir * speed;
             raf = requestAnimationFrame(step);
         }
-        function start(d) {
+        function start(d: number) {
             if (active && dir === d) return;
             active = true; dir = d;
             if (!raf) raf = requestAnimationFrame(step);
@@ -1164,7 +1229,7 @@ const menuAPI = (function() {
             if (timer) { clearTimeout(timer); timer = null; }
             pendingDir = 0;
         }
-        function update(clientX, clientY) {
+        function update(clientX: number, clientY: number) {
             if (!container) return;
             const rect = container.getBoundingClientRect();
             if (clientX < rect.left || clientX > rect.right || clientY < rect.top - zone || clientY > rect.bottom + zone) {
@@ -1188,7 +1253,7 @@ const menuAPI = (function() {
             const container = domCache.iconsWrapper;
             if (!container) return;
             const scroller = createEdgeScroller(container, { zone: 28, delay: 250, speed: 16 });
-            const onMove = (e) => {
+            const onMove = (e: PointerEvent) => {
                 if (e.pointerType !== 'touch') return;
                 if (draggedElementType === 'module' || draggedElementType === 'category') {
                     scroller.update(e.clientX, e.clientY);
@@ -1203,8 +1268,8 @@ const menuAPI = (function() {
         } catch (e) {}
     }
 
-    function createLabelIcon(text, category) {
-        const labelIcon = document.createElement('div');
+    function createLabelIcon(text: string, category: string) {
+        const labelIcon: LibraryTile = document.createElement('div');
         labelIcon.classList.add('category-label');
         labelIcon.setAttribute('data-category', category);
         Object.assign(labelIcon.style, {
@@ -1233,8 +1298,8 @@ const menuAPI = (function() {
         // Click / tap toggles collapse. Guarded against the synthetic click that can
         // follow a touch reorder-drag (see the pointerup handler below).
         labelIcon.addEventListener('click', function(e) {
-            if (this._suppressClickUntil && Date.now() < this._suppressClickUntil) return;
-            const container = this.parentNode;
+            if (labelIcon._suppressClickUntil && Date.now() < labelIcon._suppressClickUntil) return;
+            const container = this.parentElement;
             if (!container) return;
             const collapsed = container.getAttribute('data-collapsed') === 'true';
             setSectionCollapsed(container, !collapsed);
@@ -1242,6 +1307,7 @@ const menuAPI = (function() {
         });
 
         labelIcon.addEventListener('dragstart', function(event) {
+            if (!event.dataTransfer) return;
             draggedElement = this;
             draggedElementType = 'category';
             this.classList.add('dragging');
@@ -1270,14 +1336,15 @@ const menuAPI = (function() {
             Object.assign(this.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
             if (draggedElementType === 'category' && draggedElement !== this) {
                 const draggedIndex = Array.from(categoryContainers).findIndex(container => 
-                    container.querySelector('.category-label') === draggedElement);
+                    container.querySelector<HTMLElement>('.category-label') === draggedElement);
                 const targetIndex = Array.from(categoryContainers).findIndex(container => 
-                    container.querySelector('.category-label') === this);
+                    container.querySelector<HTMLElement>('.category-label') === this);
                 if (draggedIndex !== -1 && targetIndex !== -1) {
                     const draggedContainer = categoryContainers[draggedIndex];
                     const targetContainer = categoryContainers[targetIndex];
                     const draggedParent = draggedContainer.parentNode;
                     const targetParent = targetContainer.parentNode;
+                    if (!draggedParent || !targetParent) return;
                     const draggedNext = draggedContainer.nextElementSibling;
                     const targetNext = targetContainer.nextElementSibling;
                     if (draggedNext === targetContainer) {
@@ -1301,7 +1368,7 @@ const menuAPI = (function() {
             this.style.opacity = '1';
             draggedElement = null;
             draggedElementType = null;
-            document.querySelectorAll('.category-label').forEach(label => {
+            document.querySelectorAll<HTMLElement>('.category-label').forEach(label => {
                 Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
             });
         });
@@ -1309,12 +1376,12 @@ const menuAPI = (function() {
         labelIcon.addEventListener('pointerdown', function(e) {
             if (e.pointerType !== 'touch') return;
             const startX = e.clientX, startY = e.clientY;
-            let dragStarted = false, ghost = null, scrollPrevented = false;
+            let dragStarted = false, ghost: HTMLElement | null = null, scrollPrevented = false;
             const thisLabel = this, category = thisLabel.getAttribute('data-category');
             labelIcon.setPointerCapture(e.pointerId);
             const scrollContainer = domCache.iconsWrapper;
             
-            function onPointerMove(ev) {
+            function onPointerMove(ev: PointerEvent) {
                 const deltaX = Math.abs(ev.clientX - startX), deltaY = Math.abs(ev.clientY - startY);
                 if (!dragStarted && (deltaX > 10 || deltaY > 10)) {
                     ev.preventDefault();
@@ -1352,8 +1419,8 @@ const menuAPI = (function() {
                     ghost.style.display = 'none';
                     const elemBelow = document.elementFromPoint(ev.clientX, ev.clientY);
                     ghost.style.display = 'flex';
-                    const targetLabel = elemBelow ? elemBelow.closest('.category-label') : null;
-                    document.querySelectorAll('.category-label').forEach(label => {
+                    const targetLabel = elemBelow ? elemBelow.closest<HTMLElement>('.category-label') : null;
+                    document.querySelectorAll<HTMLElement>('.category-label').forEach(label => {
                         label.classList.remove('drag-over');
                         Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
                     });
@@ -1366,28 +1433,29 @@ const menuAPI = (function() {
                 }
             }
             
-            function onPointerUp(ev) {
+            function onPointerUp(ev: PointerEvent) {
                 try { labelIcon.releasePointerCapture(e.pointerId); } catch (err) {}
                 // Restore to stylesheet-controlled overflow so we consistently keep the vertical scrollbar.
                 if (scrollContainer) scrollContainer.style.overflow = '';
                 if (ghost && ghost.parentNode) { ghost.parentNode.removeChild(ghost); ghost = null; }
                 const indicator = document.getElementById('drag-indicator');
-                if (indicator) indicator.parentNode.removeChild(indicator);
+                if (indicator) indicator.remove();
                 if (dragStarted) {
                     if (ghost) ghost.style.display = 'none';
                     const elemBelow = document.elementFromPoint(ev.clientX, ev.clientY);
                     if (ghost) ghost.style.display = 'flex';
-                    const targetLabel = elemBelow ? elemBelow.closest('.category-label') : null;
+                    const targetLabel = elemBelow ? elemBelow.closest<HTMLElement>('.category-label') : null;
                     if (targetLabel && targetLabel !== thisLabel) {
                         const draggedIndex = Array.from(categoryContainers).findIndex(container => 
-                            container.querySelector('.category-label') === thisLabel);
+                            container.querySelector<HTMLElement>('.category-label') === thisLabel);
                         const targetIndex = Array.from(categoryContainers).findIndex(container => 
-                            container.querySelector('.category-label') === targetLabel);
+                            container.querySelector<HTMLElement>('.category-label') === targetLabel);
                         if (draggedIndex !== -1 && targetIndex !== -1) {
                             const draggedContainer = categoryContainers[draggedIndex];
                             const targetContainer = categoryContainers[targetIndex];
                             const draggedParent = draggedContainer.parentNode;
                             const targetParent = targetContainer.parentNode;
+                            if (!draggedParent || !targetParent) return;
                             const draggedNext = draggedContainer.nextElementSibling;
                             const targetNext = targetContainer.nextElementSibling;
                             if (draggedNext === targetContainer) {
@@ -1406,7 +1474,7 @@ const menuAPI = (function() {
                         }
                     }
                 }
-                document.querySelectorAll('.category-label').forEach(label => {
+                document.querySelectorAll<HTMLElement>('.category-label').forEach(label => {
                     label.classList.remove('drag-over');
                     Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
                 });
@@ -1414,7 +1482,7 @@ const menuAPI = (function() {
                 thisLabel.style.opacity = '1';
                 // Suppress the synthetic click that follows a touch drag so a reorder
                 // doesn't also toggle the section collapse.
-                if (dragStarted) thisLabel._suppressClickUntil = Date.now() + 400;
+                if (dragStarted) labelIcon._suppressClickUntil = Date.now() + 400;
                 draggedElement = null;
                 draggedElementType = null;
                 document.removeEventListener('pointermove', onPointerMove);
@@ -1435,9 +1503,10 @@ const menuAPI = (function() {
             e.stopPropagation();
             e.preventDefault();
             try {
-                const sectionContainer = labelIcon.parentNode;
+                const sectionContainer = labelIcon.parentElement;
+                if (!sectionContainer) return;
                 const categoryName = labelIcon.getAttribute('data-category');
-                if (typeof showRemoveCategoryConfirmation === 'function') {
+                if (categoryName && typeof showRemoveCategoryConfirmation === 'function') {
                     showRemoveCategoryConfirmation(sectionContainer, categoryName);
                 }
             } catch {}
@@ -1451,7 +1520,7 @@ const menuAPI = (function() {
         return labelIcon;
         }
 
-    function createEmptyPlaceholder(category) {
+    function createEmptyPlaceholder(category: string) {
         const placeholder = document.createElement('div');
         placeholder.classList.add('icon', 'empty-placeholder');
         placeholder.setAttribute('data-category', category);
@@ -1470,12 +1539,13 @@ const menuAPI = (function() {
         placeholder.appendChild(plusSign);
         
         placeholder.addEventListener('click', function() {
-            const targetParent = this.parentNode;
+            const targetParent = this.parentElement;
+            if (!targetParent) return;
             handleFileUpload(category, targetParent);
         });
         
         placeholder.addEventListener('dragover', function(event) {
-            if (draggedElementType === 'module' && draggedElement !== this) {
+            if (draggedElement && draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
                 Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
@@ -1491,12 +1561,13 @@ const menuAPI = (function() {
             event.preventDefault();
             this.classList.remove('drag-over');
             Object.assign(this.style, { border: '2px dashed #ffffff', backgroundColor: 'transparent' });
-            if (draggedElementType === 'module' && draggedElement !== this) {
-                const targetParent = this.parentNode;
+            if (draggedElement && draggedElementType === 'module' && draggedElement !== this) {
+                const targetParent = this.parentElement;
+                if (!targetParent) return;
                 const draggedParent = draggedElement.parentNode;
                 targetParent.appendChild(draggedElement);
                 const targetCategory = this.getAttribute('data-category');
-                draggedElement.setAttribute('data-category', targetCategory);
+                if (targetCategory) draggedElement.setAttribute('data-category', targetCategory);
                 ensurePlaceholdersAtEnd();
                 saveUIStateToLocalStorage();
             }
@@ -1508,17 +1579,17 @@ const menuAPI = (function() {
      * Validate a module JSON object for structure and expression safety.
      * Returns { valid, errors } where errors is an array of strings.
      */
-    function validateModuleData(data) {
-        const errors = [];
+    function validateModuleData(data: unknown) {
+        const errors: string[] = [];
         // The note's expression variables, plus the keys of the old time model:
         // a module saved before relational time is still accepted (it is converted
         // exactly when it loads), so its old expressions are checked here too.
         const expressionVars = [...EXPRESSION_VARS, ...RETIRED_TIME_KEYS];
 
-        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        if (!isRecord(data)) {
             return { valid: false, errors: ['Module must be a JSON object'] };
         }
-        if (!data.baseNote || typeof data.baseNote !== 'object') {
+        if (!isRecord(data.baseNote)) {
             return { valid: false, errors: ['Module must have a baseNote object'] };
         }
         if (!Array.isArray(data.notes)) {
@@ -1550,11 +1621,11 @@ const menuAPI = (function() {
         const seenIds = new Set();
         for (let i = 0; i < data.notes.length; i++) {
             const note = data.notes[i];
-            if (!note || typeof note !== 'object') {
+            if (!isRecord(note)) {
                 errors.push(`notes[${i}]: must be an object`);
                 continue;
             }
-            const noteId = parseInt(note.id, 10);
+            const noteId = parseInt(String(note.id), 10);
             // MAX_NOTE_ID (src/binary-note.js): the same cap the JSON loader
             // and both expression parsers enforce.
             if (isNaN(noteId) || noteId < 0 || noteId > MAX_NOTE_ID) {
@@ -1592,7 +1663,7 @@ const menuAPI = (function() {
     // icon carrying moduleData, mark it uploaded, persist to ui-state — because that is
     // what makes it survive a reload and be draggable back into the workspace.
     // Returns the final (uniquified) name, or null if it could not be added.
-    function addCustomModule(baseName, moduleData) {
+    function addCustomModule(baseName: string, moduleData: ModuleData) {
         try {
             if (!moduleData) return null;
 
@@ -1604,7 +1675,7 @@ const menuAPI = (function() {
             }
 
             const sectionContainer = categoryContainers.find(
-                (c) => c && c.querySelector('.category-label[data-category="custom"]')
+                (c) => c && c.querySelector<HTMLElement>('.category-label[data-category="custom"]')
             );
             if (!sectionContainer) {
                 showNotification('Custom section not found', 'error');
@@ -1613,7 +1684,7 @@ const menuAPI = (function() {
 
             // Don't collide with an existing name — the library keys icons by name.
             const taken = new Set(
-                [...sectionContainer.querySelectorAll('.icon')].map((i) => i.getAttribute('data-name'))
+                [...sectionContainer.querySelectorAll<LibraryTile>('.icon')].map((i) => i.getAttribute('data-name'))
             );
             let name = String(baseName || 'Selection').trim() || 'Selection';
             if (taken.has(name)) {
@@ -1626,7 +1697,7 @@ const menuAPI = (function() {
             const icon = createModuleIcon('custom', name, data);
             icon.setAttribute('data-uploaded', 'true');
 
-            const placeholder = sectionContainer.querySelector('.empty-placeholder');
+            const placeholder = sectionContainer.querySelector<HTMLElement>('.empty-placeholder');
             if (placeholder) sectionContainer.removeChild(placeholder);
             sectionContainer.appendChild(icon);
             ensurePlaceholdersAtEnd();
@@ -1635,7 +1706,7 @@ const menuAPI = (function() {
             // copy that did not happen.
             try {
                 if (sectionContainer.getAttribute('data-collapsed') === 'true') {
-                    const label = sectionContainer.querySelector('.category-label[data-category="custom"]');
+                    const label = sectionContainer.querySelector<HTMLElement>('.category-label[data-category="custom"]');
                     if (label) label.click();
                 }
             } catch {}
@@ -1648,18 +1719,18 @@ const menuAPI = (function() {
         }
     }
 
-    function handleFileUpload(category, sectionContainer) {
+    function handleFileUpload(category: string, sectionContainer: HTMLElement) {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.json';
         input.style.display = 'none';
         input.addEventListener('change', function(event) {
-            const file = event.target.files[0];
+            const file = input.files?.[0];
             if (file) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     try {
-                        const moduleData = JSON.parse(e.target.result);
+                        const moduleData: unknown = JSON.parse(String(reader.result));
 
                         // Validate module structure and expression safety
                         const validation = validateModuleData(moduleData);
@@ -1673,11 +1744,13 @@ const menuAPI = (function() {
                         }
 
                         const originalFilename = file.name.replace(/\.json$/i, '');
-                        moduleData.filename = originalFilename;
-                        const icon = createModuleIcon(category, originalFilename, moduleData);
+                        if (!isInputScore(moduleData)) return;
+                        const uploaded: ModuleData = moduleData;
+                        uploaded.filename = originalFilename;
+                        const icon = createModuleIcon(category, originalFilename, uploaded);
                         icon.setAttribute('data-uploaded', 'true');
                         icon.setAttribute('data-original-filename', file.name);
-                        const placeholder = sectionContainer.querySelector('.empty-placeholder');
+                        const placeholder = sectionContainer.querySelector<HTMLElement>('.empty-placeholder');
                         if (placeholder) sectionContainer.removeChild(placeholder);
                         sectionContainer.appendChild(icon);
                         ensurePlaceholdersAtEnd();
@@ -1685,7 +1758,7 @@ const menuAPI = (function() {
                         showNotification(`Module "${escapeHtml(originalFilename)}" uploaded successfully`, 'success');
                     } catch (error) {
                         console.error("Error parsing JSON:", error);
-                        showNotification(`Invalid JSON file: ${error.message}`, 'error');
+                        showNotification(`Invalid JSON file: ${(error instanceof Error ? error.message : String(error))}`, 'error');
                     }
                 };
                 reader.readAsText(file);
@@ -1696,8 +1769,8 @@ const menuAPI = (function() {
         document.body.removeChild(input);
     }
 
-    function createModuleIcon(category, filename, moduleData = null, meta = null) {
-        const moduleIcon = document.createElement('div');
+    function createModuleIcon(category: string, filename: string, moduleData: ModuleData | null = null, meta: ModuleMeta | null = null) {
+        const moduleIcon: LibraryTile = document.createElement('div');
         moduleIcon.classList.add('icon');
         moduleIcon.setAttribute('data-category', category);
         if (!moduleIcon.hasAttribute('data-original-category')) {
@@ -1802,9 +1875,11 @@ const menuAPI = (function() {
                         return response.json();
                     });
             fetchPromise
-                .then(data => {
-                    data.filename = displayName;
-                    moduleIcon.moduleData = data;
+                .then((data: unknown) => {
+                    if (!isInputScore(data)) throw new Error('Invalid module file');
+                    const score: ModuleData = data;
+                    score.filename = displayName;
+                    moduleIcon.moduleData = score;
                 })
                 .catch(err => {
                     console.error("Error loading moduleData for", filename, err);
@@ -1813,6 +1888,7 @@ const menuAPI = (function() {
         }
 
         moduleIcon.addEventListener('dragstart', function(event) {
+            if (!event.dataTransfer) return;
             draggedElement = this;
             draggedElementType = 'module';
             draggedElementCategory = category;
@@ -1832,7 +1908,7 @@ const menuAPI = (function() {
         });
         
         moduleIcon.addEventListener('dragover', function(event) {
-            if (draggedElementType === 'module' && draggedElement !== this) {
+            if (draggedElement && draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
                 Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
@@ -1857,6 +1933,7 @@ const menuAPI = (function() {
             ) {
                 const sourceParent = sourceIcon.parentNode;
                 const targetParent = targetIcon.parentNode;
+                if (!sourceParent || !targetParent) return;
                 const sourceNext = sourceIcon.nextSibling;
                 const targetNext = targetIcon.nextSibling;
                 targetParent.insertBefore(sourceIcon, targetNext);
@@ -1879,11 +1956,12 @@ const menuAPI = (function() {
                 return;
             }
 
-            if (this.classList.contains('empty-placeholder') && draggedElementType === 'module' && draggedElement !== this) {
-                const targetParent = this.parentNode;
+            if (this.classList.contains('empty-placeholder') && draggedElement && draggedElementType === 'module' && draggedElement !== this) {
+                const targetParent = this.parentElement;
+                if (!targetParent) return;
                 const targetCategory = this.getAttribute('data-category');
                 targetParent.appendChild(draggedElement);
-                draggedElement.setAttribute('data-category', targetCategory);
+                if (targetCategory) draggedElement.setAttribute('data-category', targetCategory);
                 if (typeof ensurePlaceholdersAtEnd === 'function') ensurePlaceholdersAtEnd();
                 saveUIStateToLocalStorage();
                 return;
@@ -1896,7 +1974,7 @@ const menuAPI = (function() {
             draggedElement = null;
             draggedElementType = null;
             draggedElementCategory = null;
-            document.querySelectorAll('.icon').forEach(icon => {
+            document.querySelectorAll<LibraryTile>('.icon').forEach(icon => {
                 if (icon.classList.contains('empty-placeholder')) {
                     icon.style.border = '2px dashed #ffffff';
                 } else if (!icon.classList.contains('category-label')) {
@@ -1909,10 +1987,10 @@ const menuAPI = (function() {
             if (e.pointerType !== 'touch') return;
             e.preventDefault();
             const startX = e.clientX, startY = e.clientY;
-            let dragStarted = false, ghost = null;
+            let dragStarted = false, ghost: HTMLElement | null = null;
             moduleIcon.setPointerCapture(e.pointerId);
         
-            function onPointerMove(ev) {
+            function onPointerMove(ev: PointerEvent) {
                 const deltaX = Math.abs(ev.clientX - startX), deltaY = Math.abs(ev.clientY - startY);
                 if (!dragStarted && (deltaX > 5 || deltaY > 5)) {
                     dragStarted = true;
@@ -1943,7 +2021,7 @@ const menuAPI = (function() {
                     ghost.style.left = (ev.clientX - gh) + 'px';
                     ghost.style.top = (ev.clientY - gh) + 'px';
                     const elemBelow = document.elementFromPoint(ev.clientX, ev.clientY);
-                    document.querySelectorAll('.drag-over').forEach(el => {
+                    document.querySelectorAll<HTMLElement>('.drag-over').forEach(el => {
                         el.classList.remove('drag-over');
                         if (el.classList.contains('icon') && !el.classList.contains('category-label')) {
                             if (el.classList.contains('empty-placeholder')) {
@@ -1954,23 +2032,23 @@ const menuAPI = (function() {
                         }
                     });
                     if (elemBelow) {
-                        const targetIcon = elemBelow.closest('.icon');
+                        const targetIcon = elemBelow.closest<LibraryTile>('.icon');
                         if (targetIcon && targetIcon !== moduleIcon) {
                             targetIcon.classList.add('drag-over');
                             if (!targetIcon.classList.contains('category-label')) {
                                 Object.assign(targetIcon.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
                             }
                         }
-                        const noteTarget = elemBelow.closest('[data-note-id]');
+                        const noteTarget = elemBelow.closest<HTMLElement>('[data-note-id]');
                         if (noteTarget) noteTarget.classList.add('drag-over');
                     }
                 }
             }
         
-            function onPointerUp(ev) {
+            function onPointerUp(ev: PointerEvent) {
                 try { moduleIcon.releasePointerCapture(e.pointerId); } catch (err) {}
                 if (ghost && ghost.parentNode) { ghost.parentNode.removeChild(ghost); ghost = null; }
-                document.querySelectorAll('.drag-over').forEach(el => {
+                document.querySelectorAll<HTMLElement>('.drag-over').forEach(el => {
                     el.classList.remove('drag-over');
                     if (el.classList.contains('icon') && !el.classList.contains('category-label')) {
                         if (el.classList.contains('empty-placeholder')) {
@@ -1983,11 +2061,12 @@ const menuAPI = (function() {
                 if (dragStarted) {
                     const elemBelow = document.elementFromPoint(ev.clientX, ev.clientY);
                     if (elemBelow) {
-                        const targetIcon = elemBelow.closest('.icon');
+                        const targetIcon = elemBelow.closest<LibraryTile>('.icon');
                         if (targetIcon && targetIcon !== moduleIcon) {
                             if (targetIcon.classList.contains('empty-placeholder')) {
                                 const targetParent = targetIcon.parentNode;
                                 const targetCategory = targetIcon.getAttribute('data-category');
+                                if (!targetParent || !targetCategory) return;
                                 const draggedParent = moduleIcon.parentNode;
                                 targetParent.appendChild(moduleIcon);
                                 moduleIcon.setAttribute('data-category', targetCategory);
@@ -1996,6 +2075,7 @@ const menuAPI = (function() {
                             } else {
                                 const draggedParent = moduleIcon.parentNode;
                                 const targetParent = targetIcon.parentNode;
+                                if (!draggedParent || !targetParent) return;
                                 const draggedNext = moduleIcon.nextElementSibling;
                                 const targetNext = targetIcon.nextElementSibling;
                                 if (draggedNext === targetIcon) {
@@ -2008,7 +2088,7 @@ const menuAPI = (function() {
                                 }
                                 const targetCategory = targetIcon.getAttribute('data-category');
                                 const draggedCategory = moduleIcon.getAttribute('data-category');
-                                if (draggedCategory !== targetCategory) {
+                                if (draggedCategory && targetCategory && draggedCategory !== targetCategory) {
                                     moduleIcon.setAttribute('data-category', targetCategory);
                                     targetIcon.setAttribute('data-category', draggedCategory);
                                 }
@@ -2019,7 +2099,7 @@ const menuAPI = (function() {
     if (moduleIcon.moduleData) {
         let noteId = null;
         try {
-            const noteTarget = elemBelow && elemBelow.closest ? elemBelow.closest('[data-note-id]') : null;
+            const noteTarget = elemBelow && elemBelow.closest ? elemBelow.closest<HTMLElement>('[data-note-id]') : null;
             if (noteTarget) {
                 const raw = noteTarget.getAttribute('data-note-id');
                 if (raw != null) noteId = Number(raw);
@@ -2080,7 +2160,7 @@ const menuAPI = (function() {
         document.body.appendChild(overlay);
     }
 
-    function showRemoveModuleConfirmation(moduleIcon, moduleName) {
+    function showRemoveModuleConfirmation(moduleIcon: HTMLElement, moduleName: string) {
         const overlay = document.createElement('div');
         overlay.className = 'delete-confirm-overlay';
         const modal = document.createElement('div');
@@ -2100,12 +2180,13 @@ const menuAPI = (function() {
             if (moduleIcon && moduleIcon.parentNode) {
                 moduleIcon.parentNode.removeChild(moduleIcon);
                 const category = moduleIcon.getAttribute('data-category');
+                if (!category) return;
                 const categoryContainer = categoryContainers.find(container => 
-                    container.querySelector('.category-label').getAttribute('data-category') === category);
+                    container.querySelector<HTMLElement>('.category-label')?.getAttribute('data-category') === category);
                 if (categoryContainer) {
-                    const moduleIcons = categoryContainer.querySelectorAll('.icon:not(.empty-placeholder)');
+                    const moduleIcons = categoryContainer.querySelectorAll<LibraryTile>('.icon:not(.empty-placeholder)');
                     if (moduleIcons.length === 0) {
-                        if (categoryContainer.querySelectorAll('.empty-placeholder').length === 0) {
+                        if (categoryContainer.querySelectorAll<HTMLElement>('.empty-placeholder').length === 0) {
                             const emptyPlaceholder = createEmptyPlaceholder(category);
                             categoryContainer.appendChild(emptyPlaceholder);
                         }
@@ -2124,7 +2205,7 @@ const menuAPI = (function() {
         document.body.appendChild(overlay);
     }
 
-    function showRemoveCategoryConfirmation(sectionContainer, categoryName) {
+    function showRemoveCategoryConfirmation(sectionContainer: HTMLElement, categoryName: string) {
         const overlay = document.createElement('div');
         overlay.className = 'delete-confirm-overlay';
         const modal = document.createElement('div');
@@ -2150,7 +2231,7 @@ const menuAPI = (function() {
                     // above the section instead — never leave two stacked or none.
                     const next = sectionContainer.nextElementSibling;
                     const prev = sectionContainer.previousElementSibling;
-                    const isSep = (el) => !!(el && el.classList && el.classList.contains('separator'));
+                    const isSep = (el: Element | null) => !!(el && el.classList && el.classList.contains('separator'));
                     const nextSection = next && next.nextElementSibling;
                     const divider = (isSep(next) && nextSection && nextSection.classList.contains('library-section'))
                         ? next
@@ -2195,11 +2276,11 @@ const menuAPI = (function() {
     function ensurePlaceholdersAtEnd() {
         categoryContainers.forEach(container => {
             if (!container) return;
-            const categoryLabel = container.querySelector('.category-label');
+            const categoryLabel = container.querySelector<HTMLElement>('.category-label');
             if (!categoryLabel) return;
             const category = categoryLabel.getAttribute('data-category');
             if (!category) return;
-            const placeholders = container.querySelectorAll('.empty-placeholder');
+            const placeholders = container.querySelectorAll<HTMLElement>('.empty-placeholder');
             if (placeholders.length > 1) {
                 for (let i = 0; i < placeholders.length - 1; i++) {
                     container.removeChild(placeholders[i]);
@@ -2210,9 +2291,9 @@ const menuAPI = (function() {
                 const emptyPlaceholder = createEmptyPlaceholder(category);
                 container.appendChild(emptyPlaceholder);
             }
-            const moduleIcons = container.querySelectorAll('.icon:not(.empty-placeholder):not(.category-label)');
+            const moduleIcons = container.querySelectorAll<LibraryTile>('.icon:not(.empty-placeholder):not(.category-label)');
             if (moduleIcons.length === 0) {
-                if (container.querySelectorAll('.empty-placeholder').length === 0) {
+                if (container.querySelectorAll<HTMLElement>('.empty-placeholder').length === 0) {
                     const emptyPlaceholder = createEmptyPlaceholder(category);
                     container.appendChild(emptyPlaceholder);
                 }
@@ -2274,7 +2355,7 @@ const menuAPI = (function() {
         const buttonsContainer = document.createElement('div');
         Object.assign(buttonsContainer.style, { display: 'flex', justifyContent: 'space-between', padding: '10px 4px', marginTop: '10px', gap: '10px' });
         
-        const createButton = (text, color, action) => {
+        const createButton = (text: string, color: string, action: () => void) => {
             const button = document.createElement('div');
             button.textContent = text;
             Object.assign(button.style, {
@@ -2378,7 +2459,7 @@ const menuAPI = (function() {
     function ensureLibraryViewport() {
         const metaTag = document.querySelector('meta[name="viewport"]');
         if (metaTag) {
-            const content = metaTag.getAttribute('content');
+            const content = metaTag.getAttribute('content') ?? '';
             if (!content.includes('touch-action=none')) {
                 metaTag.setAttribute('content', content + ', touch-action=none');
             }
@@ -2392,7 +2473,7 @@ const menuAPI = (function() {
 
     // Append a section container (label + module icons + trailing placeholder) plus
     // its breaker and separator to the icons container. Shared by both build paths.
-    function appendSection(iconsContainer, { id, label, buildItems }, index, count) {
+    function appendSection(iconsContainer: HTMLElement, { id, label, buildItems }: {id: string; label: string; buildItems: (container: HTMLElement) => void}, index: number, count: number) {
         const sectionContainer = createSectionContainer();
         categoryContainers.push(sectionContainer);
         const labelIcon = createLabelIcon(label || id, id);
@@ -2406,7 +2487,7 @@ const menuAPI = (function() {
     }
 
     // v2 path: build sections directly from the manifest (all metadata is inline).
-    function buildSectionsFromManifest(sections) {
+    function buildSectionsFromManifest(sections: LibrarySection[]) {
         const iconsContainer = domCache.iconsContainer;
         sections.forEach((section, index) => {
             appendSection(iconsContainer, {
@@ -2414,7 +2495,7 @@ const menuAPI = (function() {
                 label: section.label,
                 buildItems: (container) => {
                     (section.items || []).forEach(item => {
-                        const filename = item.file.split('/').pop();
+                        const filename = item.file.split('/').pop()!;
                         const icon = createModuleIcon(section.id, filename, null, item);
                         container.appendChild(icon);
                     });
@@ -2439,10 +2520,11 @@ const menuAPI = (function() {
                     if (!response.ok) throw new Error('Network response not ok for category ' + category);
                     return response.json();
                 })
-                .then(fileList => {
-                    const existingPlaceholders = sectionContainer.querySelectorAll('.empty-placeholder');
+                .then((fileList: unknown) => {
+                    if (!Array.isArray(fileList) || !fileList.every(item => typeof item === 'string')) throw new Error('Invalid category index');
+                    const existingPlaceholders = sectionContainer.querySelectorAll<HTMLElement>('.empty-placeholder');
                     existingPlaceholders.forEach(placeholder => sectionContainer.removeChild(placeholder));
-                    fileList.forEach(filename => {
+                    fileList.forEach((filename: string) => {
                         const icon = createModuleIcon(category, filename);
                         sectionContainer.appendChild(icon);
                     });
@@ -2452,7 +2534,7 @@ const menuAPI = (function() {
                 })
                 .catch(err => {
                     console.error("Error fetching category index for", category, err);
-                    const existingPlaceholders = sectionContainer.querySelectorAll('.empty-placeholder');
+                    const existingPlaceholders = sectionContainer.querySelectorAll<HTMLElement>('.empty-placeholder');
                     if (existingPlaceholders.length === 0) {
                         const emptyPlaceholder = createEmptyPlaceholder(category);
                         sectionContainer.appendChild(emptyPlaceholder);
@@ -2667,14 +2749,14 @@ const menuAPI = (function() {
             showNotification('UI state saved successfully!', 'success');
         } catch (error) {
             console.error('Error saving UI state:', error);
-            showNotification('Error saving UI state: ' + error.message, 'error');
+            showNotification('Error saving UI state: ' + (error instanceof Error ? error.message : String(error)), 'error');
         }
     }
 
     // An imported file is untrusted: every module JSON it embeds gets the same check an
     // uploaded .json does, and a module that fails it is stripped of its data rather
     // than being allowed to reach the workspace. Returns how many were rejected.
-    function sanitizeImportedState(uiState) {
+    function sanitizeImportedState(uiState: LibraryLayout) {
         let rejected = 0;
         for (const cat of uiState.categories) {
             for (const m of (cat.modules || [])) {
@@ -2698,19 +2780,19 @@ const menuAPI = (function() {
             fileInput.accept = '.json';
             fileInput.style.display = 'none';
             fileInput.addEventListener('change', function(event) {
-                const file = event.target.files[0];
+                const file = fileInput.files?.[0];
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    let uiState;
+                    let uiState: unknown;
                     try {
-                        uiState = JSON.parse(e.target.result);
-                        if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
+                        uiState = JSON.parse(String(reader.result));
+                        if (!isLibraryLayout(uiState) || uiState.categories.length === 0) {
                             throw new Error('Invalid UI state format');
                         }
                     } catch (error) {
                         console.error('Error parsing UI state:', error);
-                        showNotification('Error loading UI state: ' + error.message, 'error');
+                        showNotification('Error loading UI state: ' + (error instanceof Error ? error.message : String(error)), 'error');
                         return;
                     }
                     const rejected = sanitizeImportedState(uiState);
@@ -2732,7 +2814,7 @@ const menuAPI = (function() {
                         })
                         .catch(error => {
                             console.error('Error applying UI state:', error);
-                            showNotification('Error loading UI state: ' + error.message, 'error');
+                            showNotification('Error loading UI state: ' + (error instanceof Error ? error.message : String(error)), 'error');
                         });
                 };
                 reader.readAsText(file);
@@ -2742,11 +2824,11 @@ const menuAPI = (function() {
             document.body.removeChild(fileInput);
         } catch (error) {
             console.error('Error loading UI state:', error);
-            showNotification('Error loading UI state: ' + error.message, 'error');
+            showNotification('Error loading UI state: ' + (error instanceof Error ? error.message : String(error)), 'error');
         }
     }
 
-    function showNotification(message, type = 'info') {
+    function showNotification(message: string, type = 'info') {
         const notification = document.createElement('div');
         notification.textContent = message;
         Object.assign(notification.style, {
