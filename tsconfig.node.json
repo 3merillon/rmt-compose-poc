@@ -16,11 +16,14 @@
       "/src/*": [
         "./src/*"
       ]
-    }
+    },
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "vite.config.ts",
     "scripts/**/*.ts",
+    "scripts/**/*.mjs",
     "src/**/*.d.ts"
   ]
 }

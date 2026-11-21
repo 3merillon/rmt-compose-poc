@@ -20,10 +20,10 @@ export default defineConfig({
           if (s.includes('/node_modules/')) return 'vendor';
           if (!s.includes('/src/')) return;
           // Renderer: ~490KB clean leaf (imports only renderer-config.js).
-          if (s.includes('/renderer/webgl2/renderer.js') || s.includes('/renderer/webgl2/renderer-config.js')) return 'renderer';
+          if (s.includes('/renderer/webgl2/renderer.ts') || s.includes('/renderer/webgl2/renderer-config.ts')) return 'renderer';
           // DSL grammar/compiler + the bytecode foundation it shares with core. Bundling
           // binary-note/binary-utils here breaks the core<->dsl cross-chunk cycle.
-          if (s.includes('/src/dsl/') || s.endsWith('/src/binary-note.js') || s.endsWith('/src/binary-utils.js')) return 'dsl';
+          if (s.includes('/src/dsl/') || s.endsWith('/src/binary-note.ts') || s.endsWith('/src/binary-utils.ts')) return 'dsl';
           // Instruments: singleton-free leaf (synth + sample + multisample).
           if (s.includes('/src/instruments/')) return 'instruments';
           // Everything else (player.js, module.js, workspace, menu-bar, modals, engine,
