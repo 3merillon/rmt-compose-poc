@@ -357,7 +357,7 @@ try {
       atFirstSchedule: q.firstStats, atOnset: q.statsAtOnset, before: q.before, after: q.stats(),
       seeks: q.seeks, ctxState: q.ctx.state, master: q.measuredOutput.constructor.name,
       gpu: ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL), ui: document.querySelector('.pp')?.className,
-      appEntry: document.querySelector<HTMLScriptElement>('script[type="module"][src]')?.src
+      appEntry: Array.from(document.scripts).find(script => script.type === 'module' && script.src && new URL(script.src).pathname !== '/@vite/client')?.src
     };
   });
   const {calls, bins, frameGaps, statSamples, longFrames, longAnimations, transition, ...runtime} = result;
