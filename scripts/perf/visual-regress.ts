@@ -13,7 +13,7 @@
  *   node scripts/perf/visual-regress.mjs --compare --out dir # where diffs land
  *   ... --url http://localhost:3000  --module chords-dense
  *
- * Exits non-zero if any scene differs beyond --tolerance (default 0 pixels).
+ * Exits non-zero if any scene differs beyond --tolerance (default 300 pixels).
  */
 
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
@@ -256,7 +256,7 @@ for (const m of MODULES) {
       continue;
     }
     const basePath = join(baseDir, `${m}__${s.scene}.png`);
-    if (!existsSync(basePath)) { console.log(`  ${s.scene}: NO BASELINE`); continue; }
+    if (!existsSync(basePath)) { console.log(`  ${s.scene}: NO BASELINE`); failures++; continue; }
     const d = diff(readFileSync(basePath), s.buf);
     if (d.changed === -1) {
       console.log(`  ${s.scene}: SIZE MISMATCH (${d.note})`);
@@ -269,20 +269,25 @@ for (const m of MODULES) {
       writeFileSync(dp, PNG.sync.write(d.png!));
       console.log(`  ${s.scene}: DIFF ${d.changed} px (${pct}%) maxDelta=${d.maxDelta}  -> ${dp}`);
       failures++;
+    } else if (d.changed) {
+      console.log(`  ${s.scene}: within tolerance (${d.changed} px, maxDelta=${d.maxDelta})`);
     } else {
       console.log(`  ${s.scene}: identical`);
     }
   }
-  if (r.errors.length) console.log(`  !! page errors: ${r.errors.slice(0, 3).join(' | ')}`);
+  if (r.errors.length) {
+    console.log(`  !! page errors: ${r.errors.slice(0, 3).join(' | ')}`);
+    failures++;
+  }
 }
 
 await browser.close();
 
-if (CAPTURE) {
+if (failures) {
+  console.log(`\n${failures} visual checks failed.`);
+  process.exitCode = 1;
+} else if (CAPTURE) {
   console.log(`\nbaseline written to ${baseDir}`);
-} else if (failures) {
-  console.log(`\n${failures} scene(s) differ from baseline.`);
-  process.exit(1);
 } else {
-  console.log('\nall scenes pixel-identical to baseline.');
+  console.log('\nAll scenes match within the pixel tolerance.');
 }
