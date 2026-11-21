@@ -20,19 +20,23 @@ function runtimeModule(root: string, stem: string) {
   return import(pathToFileURL(path + (existsSync(path + '.ts') ? '.ts' : '.js')).href);
 }
 
-async function snapshot(root: string) {
-  // Both revisions expose the same public musical API. Static type imports describe
-  // that API while file URLs load each revision's implementation and dependencies.
+function trackedScorePaths(root: string) {
+  return execFileSync('git', ['-C', root, 'ls-files', '-z', '--', 'public/modules',
+    'scripts/fixtures/old-time', 'scripts/fixtures/legacy-syntax'], { encoding: 'utf8' })
+    .split('\0').filter(path => path.endsWith('.json'))
+    .filter(path => !path.startsWith('public/modules/') || !['index.json', 'library.json'].includes(basename(path)))
+    .sort();
+}
+
+async function loadRuntime(root: string) {
+  // Static types describe the shared musical API. Each worktree supplies its
+  // implementation and dependencies.
   const model: typeof import('../../src/module.ts') = await runtimeModule(root, 'module');
   const noteApi: typeof import('../../src/note.ts') = await runtimeModule(root, 'note');
   const exact: typeof import('../../src/value/exact.ts') = await runtimeModule(root, 'value/exact');
-  const paths = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', 'public/modules',
-    'scripts/fixtures/old-time', 'scripts/fixtures/legacy-syntax'], { encoding: 'utf8' })
-    .split('\0').filter(path => path.endsWith('.json')).sort();
-  const scores = new Map<string, { notes: number; save: string; evaluation: string }>();
-  for (const path of paths) {
-    if (path.startsWith('public/modules/') && ['index.json', 'library.json'].includes(basename(path))) continue;
-    const input: unknown = JSON.parse(await readFile(resolve(root, path), 'utf8'));
+  return async function snapshot(text: string, path: string) {
+    // Parse a fresh copy for each engine, including for in-place legacy migrations.
+    const input: unknown = JSON.parse(text);
     assert(isInputScore(input), 'Invalid tracked score: ' + path);
     const score = await model.Module.loadFromJSON(input);
     const records = score.evaluateModule();
@@ -47,14 +51,36 @@ async function snapshot(root: string) {
         return [key, exact.kindOf(v), exact.toText(v), note.getExpression(key)?.getVariableRefs()];
       }),
     }));
-    scores.set(path, { notes: notes.length, save: hash(score.createModuleJSONString()), evaluation: hash(JSON.stringify(notes)) });
-  }
-  assert(scores.has('public/modules/defaultModule.json'), 'Expected the released startup canon');
-  return scores;
+    return { notes: notes.length, save: hash(score.createModuleJSONString()), evaluation: hash(JSON.stringify(notes)) };
+  };
 }
 
-const before = await snapshot(resolve(reference));
-const after = await snapshot(candidate);
-assert.deepEqual([...after.keys()], [...before.keys()], 'Tracked score paths changed');
-for (const [path, digest] of before) assert.deepEqual(after.get(path), digest, path);
-console.log(`${before.size} scores matched in canonical JSON, note kinds, exact values and dependencies. SHA-256 ${hash(JSON.stringify([...before]))}`);
+const paths = trackedScorePaths(reference);
+assert.deepEqual(trackedScorePaths(candidate), paths, 'Tracked score paths changed');
+assert(paths.includes('public/modules/defaultModule.json'), 'Expected the released startup canon');
+
+const baselineSnapshot = await loadRuntime(reference);
+const candidateSnapshot = await loadRuntime(candidate);
+
+async function compareInput(text: string, path: string, source: 'reference' | 'candidate') {
+  const before = await baselineSnapshot(text, path);
+  const after = await candidateSnapshot(text, path);
+  assert.deepEqual(after, before, source + ' input: ' + path);
+  return before;
+}
+
+const releaseScores = new Map<string, Awaited<ReturnType<typeof compareInput>>>();
+const changedScores = new Map<string, Awaited<ReturnType<typeof compareInput>>>();
+for (const path of paths) {
+  const [releaseInput, candidateInput] = await Promise.all([
+    readFile(resolve(reference, path), 'utf8'), readFile(resolve(candidate, path), 'utf8'),
+  ]);
+  releaseScores.set(path, await compareInput(releaseInput, path, 'reference'));
+  if (candidateInput !== releaseInput) {
+    changedScores.set(path, await compareInput(candidateInput, path, 'candidate'));
+  }
+}
+
+console.log('Reference inputs matched across both engines in canonical JSON, note kinds, exact values and dependencies.');
+console.log(releaseScores.size + ' reference scores. SHA-256 ' + hash(JSON.stringify([...releaseScores])));
+console.log(changedScores.size + ' changed candidate inputs also matched across both engines. SHA-256 ' + hash(JSON.stringify([...changedScores])));

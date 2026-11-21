@@ -1,6 +1,6 @@
 # RMT Compose 2.0.0 TypeScript port verification
 
-The comparison starts at `03b1d49c541ec296d9341ec64cb532591e8da19a`. After fetching origin, the prepared worktree and `origin/main` both pointed at that commit. The port is on `codex/v2-typescript-port` in `C:\GitHub Projects\rmt-compose-typescript-port`. Both packages retain version 2.0.0. The release checkout is detached. The verification commit at the tip of this branch records the results.
+The comparison starts at `03b1d49c541ec296d9341ec64cb532591e8da19a`. After fetching origin, the prepared worktree and `origin/main` both pointed at that commit. The port was developed on `codex/v2-typescript-port` in `C:\GitHub Projects\rmt-compose-typescript-port`. Both packages retain version 2.0.0. Commit `c60377a` records the port comparison before the library revision below.
 
 ## Reproduce
 
@@ -80,6 +80,18 @@ The Node evaluator benchmark ran in release/port/port/release order on Node 24.2
 
 ## Corrections identified against the release
 
+### Built-in module drops
+
+The eight progressions now use their sounding chord roots for pitch and timing. This removes 21 silent key changes while preserving the 70 sounding tones’ exact pitches, starts, durations and player relationships. The full canon tile omits eight measure markers and keeps all 153 sounding notes with their original library IDs. The startup score still carries the markers. Authored scores, uploads and copied selections retain their written contents.
+
+The library test checks all 81 tiles and their 718 sounding notes. Independent browser drops of **I–IV–V–I** onto a 360 Hz note produced 13 sounding notes and zero reference lines in both Start and End modes. Every pitch, onset and duration matched the recorded values after applying the drop offset, including after reload.
+
+Both engines produced the same saves and exact evaluations on all 96 original inputs and on the nine revised inputs. Edge also restored the nine revised factory tiles from a saved release layout over plain HTTP. A copied tile and a hand-edited tile kept their own score contents across two restores.
+
+The nine revised tiles were rendered against the released JavaScript scores in Edge 158 at 48 kHz stereo. The 45 comparisons covered the written sine, violin and piano, including sped-up violin and piano. Scheduled attacks, slurs, envelopes and releases matched. Across 24,643,200 samples the largest absolute difference was `6.56e-7` of full scale, the same maximum observed when rendering the JavaScript release twice.
+
+### Port corrections
+
 | Reproduction | Corrected behavior | Commit |
 |---|---|---|
 | Bytecode `DUP` on a symbolic or approximate operand | Duplicates its value kind and contents | `0bd241e` |
@@ -97,6 +109,6 @@ The tool corrections cover vibraphone source counting, failing incomplete visual
 
 At a 390 px viewport, the module-library search field has 166 px available for a placeholder needing 188 px including padding. The touch module-bar suite records 13/14 on both revisions. The captures match byte for byte, SHA-256 `aab124cfaea4af3628fb763200fe6aa7a6669991e4ffbc55da6b091a28a8531f`. The release layout is preserved.
 
-Full captures, fixture hashes, phase timings and logs were kept outside release assets in `%TEMP%\rmt-ts-port-evidence-03b1d49`. The generated 5K, 20K and 100K fixture links were removed after the probes. Both production roots were built independently of those files. The release and port have identical tracked files under `public/` and `docs/public/`. Desktop and touch replay on the Node 20 dev server also reproduced the download and history hashes above.
+Full captures, fixture hashes, phase timings and logs were kept outside release assets in `%TEMP%\rmt-ts-port-evidence-03b1d49`. The generated 5K, 20K and 100K fixture links were removed after the probes. Both production roots were built independently of those files. The tracked files under `public/` and `docs/public/` matched the release at `c60377a`. The subsequent library revision changes nine score files under `public/modules/`. Desktop and touch replay on the Node 20 dev server also reproduced the download and history hashes above.
 
 All task-owned loopback servers were stopped. The recorded port/PID pairs were 49457/14796 (release app), 59549/30620 (port app), 59553/21820 and 50566/28132 (stable probe servers), 51625/32756 (production app preview), 50197/31680 (release docs) and 56322/30048 and 56322/31664 (port docs, restarted after rebuilding the output), and 62340/22872 (Node 20 dev).
