@@ -6,10 +6,19 @@ import { amplitudeToGain } from './amplitude.ts';
 import { TimeMap, clampRate } from './time-map.ts';
 import { passTransposition } from './display-transpose.ts';
 
-import type { Module } from '../module.ts';
-import type { Note } from '../note.ts';
+import type Fraction from 'fraction.js';
+import type { EvaluationRecord } from '../model-types.ts';
 import type { ExactValue } from '../value/exact.ts';
 import type { InstrumentClasses, Voice } from '../instruments/instrument-manager.ts';
+
+interface PlaybackSource<N extends { id: number }> {
+  notes: Record<number, N>;
+  baseNote: { id: number; getVariable?(key: 'frequency'): Fraction | null };
+  getModuleEndTime(): number;
+  getEvaluationCache(): ReadonlyMap<number, Partial<EvaluationRecord>>;
+  findInstrument(note: N, memo: Map<number, string>): string;
+  findPlayer?(note: N, memo: Map<number, string>): { head: number; prev: number | null } | null;
+}
 
 export interface PlaybackNote {
   id?: number;
@@ -283,7 +292,7 @@ export class AudioEngine {
    * Prepares note data for playback without creating oscillators upfront.
    * Oscillators are created just-in-time during play() to avoid blocking.
    */
-  preparePlayback(module: Module, fromTime: number): Promise<PreparedNote[]> {
+  preparePlayback<N extends { id: number }>(module: PlaybackSource<N>, fromTime: number): Promise<PreparedNote[]> {
     return new Promise((resolve) => {
       const resumePromise = this.audioContext.state === 'suspended'
         ? this.audioContext.resume()
@@ -301,7 +310,7 @@ export class AudioEngine {
         // Cache instrument lookups
         const instrumentCache = new Map<number, string>();
         const instrumentMemo = new Map<number, string>(); // shared by every lookup: each chain is walked once
-        const getInstrument = (note: Note): string => {
+        const getInstrument = (note: N): string => {
           const cached = instrumentCache.get(note.id);
           if (cached !== undefined) return cached;
           const resolved: string = module.findInstrument(note, instrumentMemo).toLowerCase();
@@ -637,7 +646,7 @@ export class AudioEngine {
    *
    * @returns {boolean} whether the loop was armed
    */
-  _applyLoop(s: StreamingState, loop: Loop | null) {
+  _applyLoop(s: Partial<Pick<StreamingState, 'looping' | 'period' | 'loopNotes' | 'firstLen' | 'cutRel' | 'loopEndTime' | 'transposeRatio'>>, loop: Loop | null) {
     if (!s || !loop) return false;
     const period = Number(loop.period);
     if (!Number.isFinite(period) || period < MIN_LOOP_PERIOD) return false;
@@ -687,7 +696,7 @@ export class AudioEngine {
   // A transposed pass reaches pitches its notes' preparation did not: decode every
   // zone of the sampled instruments these notes use, so no note of a later pass
   // falls back to a sine while its zone loads.
-  _prepareTransposed(s: StreamingState, notes: PlaybackNote[]) {
+  _prepareTransposed(s: Partial<Pick<StreamingState, 'transposeRatio'>>, notes: PlaybackNote[]) {
     if (!s.transposeRatio || !Array.isArray(notes)) return;
     const names = new Set(notes.map((n) => n && n.instrument).filter(Boolean));
     for (const name of names) {
@@ -822,7 +831,7 @@ export class AudioEngine {
   }
 
   /** Playback-relative time of the first pass boundary STRICTLY after `rel`. */
-  _nextSeamRel(rel: number, s: StreamingState) {
+  _nextSeamRel(rel: number, s: Pick<StreamingState, 'firstLen' | 'period'>) {
     if (rel < s.firstLen) return s.firstLen;
     const k = Math.floor((rel - s.firstLen) / s.period) + 1;
     return s.firstLen + k * s.period;
