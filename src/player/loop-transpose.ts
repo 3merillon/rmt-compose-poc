@@ -17,16 +17,17 @@
  * BaseNote's `repeat`), which wins over this setting.
  */
 
-const gcd = (a, b) => { while (b) [a, b] = [b, a % b]; return a; };
+const gcd = (a: number, b: number) => { while (b) [a, b] = [b, a % b]; return a; };
 
 /**
  * A loop ratio from settings: positive whole numbers n and d (at most 10^6),
  * n/d between 1/16 and 16, reduced. 1/1 (no transposition) is allowed.
  * @returns {{n:number, d:number}}
  */
-export function validateLoopRatio(raw, fallback = { n: 1, d: 1 }) {
-  const ok = (v) => Number.isInteger(v) && v >= 1 && v <= 1e6;
-  const n = Number(raw && raw.n), d = Number(raw && raw.d);
+export function validateLoopRatio(raw: unknown, fallback = { n: 1, d: 1 }) {
+  const ok = (v: number) => Number.isInteger(v) && v >= 1 && v <= 1e6;
+  const n = Number(raw && typeof raw === 'object' && 'n' in raw ? raw.n : undefined);
+  const d = Number(raw && typeof raw === 'object' && 'd' in raw ? raw.d : undefined);
   if (!ok(n) || !ok(d)) return { ...fallback };
   const r = n / d;
   if (!(r >= 1 / 16 && r <= 16)) return { ...fallback };

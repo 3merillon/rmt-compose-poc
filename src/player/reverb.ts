@@ -29,6 +29,20 @@
  * and wet level are live node params.
  */
 
+declare global {
+  interface Window {
+    webkitOfflineAudioContext?: typeof OfflineAudioContext;
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
+export interface ReverbOptions {
+  roomSize?: number;
+  decaySec?: number;
+  damping?: number;
+  sampleRate?: number;
+}
+
 const LN1000 = 6.907755278982137; // ln(1000) → ~−60 dB reference
 
 // Early-reflection tap positions, as fractions of the ER window; irregular, and
@@ -55,7 +69,7 @@ const ER_TAPS_R = [0.079, 0.191, 0.323, 0.463, 0.617, 0.787, 0.953];
  *        roomSize/damping in [0,1]; decaySec in seconds.
  * @returns {Promise<AudioBuffer>}
  */
-export async function generateImpulseResponse(audioContext, opts = {}) {
+export async function generateImpulseResponse(audioContext: Pick<BaseAudioContext, 'sampleRate'>, opts: ReverbOptions = {}) {
   const roomSize = clamp01(opts.roomSize != null ? opts.roomSize : 0.5);
   const damping = clamp01(opts.damping != null ? opts.damping : 0.5);
   const decaySec = clampNum(opts.decaySec != null ? opts.decaySec : 1.8, 0.1, 12);
@@ -140,13 +154,13 @@ export async function generateImpulseResponse(audioContext, opts = {}) {
   return offline.startRendering();
 }
 
-function clamp01(v) {
+function clamp01(v: number) {
   v = Number(v);
   if (!Number.isFinite(v)) return 0;
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-function clampNum(v, lo, hi) {
+function clampNum(v: number, lo: number, hi: number) {
   v = Number(v);
   if (!Number.isFinite(v)) return lo;
   return v < lo ? lo : v > hi ? hi : v;

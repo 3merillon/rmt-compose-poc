@@ -10,7 +10,7 @@
  * check script import it).
  */
 
-import { toNumber } from '../utils/fraction-num.js';
+import { toNumber } from '../utils/fraction-num.ts';
 
 /**
  * Largest gain the engine plays: 4 (+12 dB over the default 1).
@@ -29,7 +29,7 @@ export const MAX_AMPLITUDE = 4;
  * @returns {number} gain in [0, MAX_AMPLITUDE]; 0 is silence. A negative gain
  *   has no meaning for a peak level and is treated as 0.
  */
-export function amplitudeToGain(value) {
+export function amplitudeToGain(value: Parameters<typeof toNumber>[0]) {
   const a = toNumber(value, 1);
   if (Number.isNaN(a)) return 1;
   return a < 0 ? 0 : a > MAX_AMPLITUDE ? MAX_AMPLITUDE : a;

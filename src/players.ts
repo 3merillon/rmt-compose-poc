@@ -23,8 +23,10 @@
  * previous note, which line playing (legato) needs too. The frequency plays no
  * part: a bass note tuned from the melody is still the bass.
  */
-import { isMeasureNote } from './note.js';
-import { compare } from './value/exact.js';
+import { isMeasureNote, type Note } from './note.ts';
+import type { Module } from './module.ts';
+import type { ExpressionName } from './model-types.ts';
+import { compare } from './value/exact.ts';
 
 const FOLLOW = /^\s*\[(\d+)\]\.t\s*\+\s*\[(\d+)\]\.d\s*(?:\+\s*(.+?))?\s*$/;
 const COPY_T = /^\s*\[(\d+)\]\.t\s*(?:\+\s*(.+?))?\s*$/;
@@ -35,18 +37,23 @@ const START_REF = /\[(\d+)\]\.[td]\b/;
 /** Whether the saved module uses this rule (written by Module.createModuleJSON). */
 export const INSTRUMENT_RULE = 'start-time';
 
-const src = (note, name) => (note && typeof note.getExpressionSource === 'function' ? note.getExpressionSource(name) || '' : '');
+const src = (note: Note | null | undefined, name: ExpressionName) => (note && typeof note.getExpressionSource === 'function' ? note.getExpressionSource(name) || '' : '');
 /** A note or a silence that occupies time: start and duration, not a measure bar, not the BaseNote. */
-const timed = (n) => !!n && n.id !== 0 && !isMeasureNote(n) && !!src(n, 'startTime') && !!src(n, 'duration');
-const norm = (s) => String(s || '').replace(/\s+/g, '');
+const timed = (n: Note | null | undefined): n is Note => !!n && n.id !== 0 && !isMeasureNote(n) && !!src(n, 'startTime') && !!src(n, 'duration');
+const norm = (s: string | undefined) => String(s || '').replace(/\s+/g, '');
 
-function memoOf(memo) {
-  const m = memo || new Map();
-  if (!m.prev) m.prev = new Map();
-  return m;
+export interface PlayerMemo extends Map<number, string> {
+  prev?: Map<number, Note | null>;
 }
 
-function copiesDelayedDuration(note, source, offset) {
+function memoOf(memo?: PlayerMemo | null) {
+  const m: PlayerMemo = memo || new Map<number, string>();
+  if (!m.prev) m.prev = new Map<number, Note | null>();
+  // The shared Map now carries both caches, including when supplied by the caller.
+  return m as PlayerMemo & { prev: Map<number, Note | null> };
+}
+
+function copiesDelayedDuration(note: Note, source: Note, offset: string) {
   if (!offset || COPY_D.exec(src(note, 'duration'))?.[1] !== String(source.id)) return false;
   const start = note.getExactVariable('startTime');
   const origin = source.getExactVariable('startTime');
@@ -58,10 +65,10 @@ function copiesDelayedDuration(note, source, offset) {
  * @param {object} module @param {object} note
  * @param {Map} [memo] shared across calls in one pass (see instrumentOf)
  */
-export function linePredecessor(module, note, memo = null) {
+export function linePredecessor(module: Module, note: Note | null | undefined, memo: PlayerMemo | null = null): Note | null {
   const M = memoOf(memo);
   if (!note || note.id === 0) return null;
-  if (M.prev.has(note.id)) return M.prev.get(note.id);
+  if (M.prev.has(note.id)) return M.prev.get(note.id) ?? null;
   M.prev.set(note.id, null); // guard: a relation loop yields no predecessor
   let res = null;
   const start = src(note, 'startTime');
@@ -89,7 +96,7 @@ export function linePredecessor(module, note, memo = null) {
 }
 
 // Find the copy of k with the same written time offset as its successor.
-function copyOf(module, k, X, except) {
+function copyOf(module: Module, k: Note, X: string, except?: Note): Note | null {
   const graph = module._dependencyGraph;
   const ids = graph && typeof graph.getDependents === 'function' ? graph.getDependents(k.id) : Object.keys(module.notes).map(Number);
   let best = null, rhythmCopy = null, rhythmCount = 0;
@@ -119,7 +126,7 @@ function copyOf(module, k, X, except) {
  *   walked once rather than once per note on it
  * @param {string} defaultName the default instrument (Settings → Audio)
  */
-export function instrumentOf(module, note, memo, defaultName) {
+export function instrumentOf(module: Module, note: Note | null | undefined, memo: PlayerMemo | null, defaultName: string): string {
   if (!note) return 'sine-wave';
   const M = memoOf(memo);
   const base = module.baseNote;
@@ -154,10 +161,10 @@ export function instrumentOf(module, note, memo, defaultName) {
  * its own instrument, which starts a new player).
  * @returns {{head:number, prev:number|null}}
  */
-export function playerOf(module, note, memo = null) {
+export function playerOf(module: Module, note: Note | null | undefined, memo: PlayerMemo | null = null): { head: number; prev: number | null } {
   const M = memoOf(memo);
   if (!note) return { head: -1, prev: null };
-  const own = (n) => !!(n && n.properties && n.properties.instrument);
+  const own = (n: Note) => !!(n && n.properties && n.properties.instrument);
   const prevNote = own(note) ? null : linePredecessor(module, note, M);
   let head = note;
   const seen = new Set([note.id]);
@@ -175,13 +182,16 @@ export function playerOf(module, note, memo = null) {
  * default; a note without a frequency, the default. Kept only to migrate old
  * modules (migrateInstrumentRule), so they keep sounding as they did.
  */
-export function legacyInstrumentOf(module, note, memo, defaultName) {
+export function legacyInstrumentOf(module: Module, note: Note | null | undefined, memo: Map<number, string> | undefined, defaultName: string): string;
+export function legacyInstrumentOf(module: Module, note: Note | null | undefined, memo: null, defaultName: string): string | null;
+export function legacyInstrumentOf(module: Module, note: Note | null | undefined, memo: Map<number, string> | null | undefined, defaultName: string): string | null {
   if (!note) return 'sine-wave';
   const path = [];
   const seen = new Set();
   let r = defaultName;
   for (let n = note; n; ) {
     const hit = memo && memo.get(n.id);
+    if (hit === null) return null;
     if (hit !== undefined) { r = hit; break; }
     if (seen.has(n.id)) { r = defaultName; break; }
     seen.add(n.id);
@@ -207,10 +217,11 @@ export function legacyInstrumentOf(module, note, memo, defaultName) {
  * differs, since one pin can settle the notes that follow it.
  * @returns {number[]} the ids pinned
  */
-export function migrateInstrumentRule(module, defaultName) {
+export function migrateInstrumentRule(module: Module, defaultName: string) {
   const pinned = [];
   for (let pass = 0; pass < 16; pass++) {
-    const memoNew = new Map(), memoOld = new Map(), diff = [];
+    const memoNew = new Map<number, string>(), memoOld = new Map<number, string>();
+    const diff: [Note, string][] = [];
     for (const id in module.notes) {
       const n = module.notes[id];
       if (!timed(n) || !src(n, 'frequency') || n.properties.instrument) continue;

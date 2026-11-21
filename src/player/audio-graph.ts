@@ -29,17 +29,38 @@
  *                            (applied at schedule; see AudioEngine._scheduleNote)
  */
 
-import { settingsStore } from '../settings/settings-store.js';
-import { generateImpulseResponse } from './reverb.js';
+import { settingsStore, type SettingsChange } from '../settings/settings-store.ts';
+import type { Settings } from '../settings/settings-schema.ts';
+import { generateImpulseResponse } from './reverb.ts';
 
 const REGEN_DEBOUNCE_MS = 250;
 
 export class AudioGraph {
-  constructor(audioContext) {
+  declare ctx: BaseAudioContext;
+  declare masterGain: GainNode;
+  declare limiter: DynamicsCompressorNode;
+  declare peakLimiter: DynamicsCompressorNode;
+  declare outputTrim: GainNode;
+  declare reverbInput: GainNode;
+  declare preDelay: DelayNode;
+  declare convolver: ConvolverNode;
+  declare reverbReturn: GainNode;
+  declare _limiterEnabled: boolean;
+  declare _reverbEnabled: boolean;
+  declare _irKey: string;
+  declare _irToken: number;
+  declare _regenTimer: ReturnType<typeof setTimeout> | null;
+  declare _buses: Map<string, { bus: GainNode; send: GainNode }>;
+  declare _unsub: () => void;
+  declare stereoEnabled: boolean;
+  declare stereoWidth: number;
+  declare temperedEnabled: boolean;
+  declare maxVoices: number;
+  constructor(audioContext: BaseAudioContext) {
     const ctx = (this.ctx = audioContext);
-    const s = settingsStore.get('audio') || {};
-    const rv = s.reverb || {};
-    const st = s.stereo || {};
+    const s: Partial<Settings['audio']> = settingsStore.get('audio') || {};
+    const rv: Partial<Settings['audio']['reverb']> = s.reverb || {};
+    const st: Partial<Settings['audio']['stereo']> = s.stereo || {};
 
     // --- master + limiter ---------------------------------------------------
     this.masterGain = ctx.createGain();
@@ -139,7 +160,7 @@ export class AudioGraph {
    * @param {string} name instrument name
    * @returns {GainNode}
    */
-  getBus(name) {
+  getBus(name: string) {
     const key = String(name || '').toLowerCase();
     let entry = this._buses.get(key);
     if (!entry) {
@@ -159,14 +180,14 @@ export class AudioGraph {
    * Normalized pitch pan position in [-1, 1] before width scaling:
    * clamp(log2(f / baseF) / 3, -1, 1). Three octaves span full L↔R.
    */
-  panPosition(freq, baseF) {
+  panPosition(freq: number, baseF: number) {
     if (!(freq > 0) || !(baseF > 0)) return 0;
     const p = Math.log2(freq / baseF) / 3;
     return p < -1 ? -1 : p > 1 ? 1 : p;
   }
 
   /** Ramp the master volume (immediate if the ctx isn't running yet). */
-  setMasterVolume(value) {
+  setMasterVolume(value: number) {
     const v = clamp01(value);
     const g = this.masterGain.gain;
     if (this.ctx.state !== 'running') {
@@ -190,12 +211,12 @@ export class AudioGraph {
 
   // --- settings reactions ---------------------------------------------------
 
-  _onSettings({ path, settings }) {
+  _onSettings({ path, settings }: SettingsChange) {
     // React only to audio changes (path '' is a full reset).
     if (path && path !== '' && !path.startsWith('audio')) return;
-    const s = (settings && settings.audio) || settingsStore.get('audio') || {};
-    const rv = s.reverb || {};
-    const st = s.stereo || {};
+    const s: Partial<Settings['audio']> = (settings && settings.audio) || settingsStore.get('audio') || {};
+    const rv: Partial<Settings['audio']['reverb']> = s.reverb || {};
+    const st: Partial<Settings['audio']['stereo']> = s.stereo || {};
     const now = this.ctx.currentTime;
 
     // Master volume.
@@ -236,7 +257,7 @@ export class AudioGraph {
     }
   }
 
-  _scheduleRegen(rv) {
+  _scheduleRegen(rv: Partial<Settings['audio']['reverb']>) {
     if (this._regenTimer) clearTimeout(this._regenTimer);
     this._regenTimer = setTimeout(() => {
       this._regenTimer = null;
@@ -244,7 +265,7 @@ export class AudioGraph {
     }, REGEN_DEBOUNCE_MS);
   }
 
-  async _regenIR(rv) {
+  async _regenIR(rv: Partial<Settings['audio']['reverb']>) {
     const token = ++this._irToken;
     try {
       const ir = await generateImpulseResponse(this.ctx, {
@@ -267,18 +288,18 @@ export class AudioGraph {
 }
 
 // Params that require a fresh impulse response (pre-delay/wet are live).
-function irKey(rv) {
+function irKey(rv: Partial<Settings['audio']['reverb']>) {
   const r = rv || {};
   return `${r.roomSize != null ? r.roomSize : 0.5}|${r.decaySec != null ? r.decaySec : 1.8}|${r.damping != null ? r.damping : 0.5}`;
 }
 
-function clamp01(v) {
+function clamp01(v: number) {
   v = Number(v);
   if (!Number.isFinite(v)) return 0;
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-function clampNum(v, lo, hi) {
+function clampNum(v: number, lo: number, hi: number) {
   v = Number(v);
   if (!Number.isFinite(v)) return lo;
   return v < lo ? lo : v > hi ? hi : v;

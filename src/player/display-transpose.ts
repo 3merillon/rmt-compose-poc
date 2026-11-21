@@ -17,18 +17,20 @@
  * 263 Hz. A ratio is what one writes.)
  */
 import Fraction from 'fraction.js';
-import * as X from '../value/exact.js';
-import { compiler } from '../expression-compiler.js';
-import { BinaryEvaluator } from '../binary-evaluator.js';
+import * as X from '../value/exact.ts';
+import type { ExactValue } from '../value/exact.ts';
+import type { Module } from '../module.ts';
+import { compiler } from '../expression-compiler.ts';
+import { BinaryEvaluator } from '../binary-evaluator.ts';
 import { eventBus } from '../utils/event-bus.js';
 
-let current = { pass: 0, factor: null };
+let current: { pass: number; factor: ExactValue | null } = { pass: 0, factor: null };
 
 /** The pass being shown and its exact factor (null = as written). */
 export function getDisplayTransposition() { return current; }
 
 /** Set the pass on screen; emits `display:transposition` when it changes. */
-export function setDisplayTransposition(pass, factor) {
+export function setDisplayTransposition(pass: number, factor: ExactValue | null) {
   const f = factor && !(X.isRational(factor) && factor.n === factor.d && factor.s > 0n) ? factor : null;
   const p = f ? pass : 0;
   if (p === current.pass && ((f == null && current.factor == null) || (f && current.factor && X.equals(f, current.factor)))) return;
@@ -39,7 +41,7 @@ export function setDisplayTransposition(pass, factor) {
 export function clearDisplayTransposition() { setDisplayTransposition(0, null); }
 
 /** A written frequency (exact) as the current pass shows it. */
-export function shownFrequency(exact) {
+export function shownFrequency<T extends ExactValue | null | undefined>(exact: T): ExactValue | T {
   if (!current.factor || exact == null) return exact;
   try { return X.mul(exact, current.factor); } catch { return exact; }
 }
@@ -53,7 +55,7 @@ const HALF = new Fraction(1, 2);
  * within one octave when `fold` ([1, 2) rising, (1/2, 1] falling), by exact
  * comparison with powers of two.
  */
-export function passTransposition(ratio, pass, fold) {
+export function passTransposition(ratio: ExactValue | null, pass: number, fold: boolean): ExactValue {
   if (!ratio || !(pass > 0)) return ONE;
   let v = X.pow(ratio, new Fraction(pass));
   if (!fold) return v;
@@ -78,7 +80,7 @@ export function passTransposition(ratio, pass, fold) {
 export const REPEAT_MIN = 1 / 16, REPEAT_MAX = 16;
 
 /** Set (or, with null or '', remove) the module's repeat; emits `module:repeatChanged`. */
-export function setModuleRepeat(module, expr) {
+export function setModuleRepeat(module: Module | null, expr: string | null) {
   if (!module || !module.baseNote) return false;
   const text = expr == null ? '' : String(expr).trim();
   module.baseNote.setVariable('repeat', text || null);
@@ -87,7 +89,7 @@ export function setModuleRepeat(module, expr) {
 }
 
 /** The repeat written as a plain ratio: `n/d` (or none, for 1/1). */
-export function repeatExprForRatio(n, d) {
+export function repeatExprForRatio(n: number, d: number) {
   return n === d ? null : `${n}/${d}`;
 }
 
@@ -96,9 +98,9 @@ export function repeatExprForRatio(n, d) {
  * the module; exact (rational, or irrational for a tempered repeat). null when
  * the module sets none, or when it does not evaluate to a ratio between 1/16 and 16.
  */
-export function moduleRepeatRatio(module) {
+export function moduleRepeatRatio(module: Module | null): ExactValue | null {
   const src = module && module.baseNote && module.baseNote.properties && module.baseNote.properties.repeat;
-  if (!src || typeof src !== 'string') return null;
+  if (!module || !src || typeof src !== 'string') return null;
   try {
     const binary = compiler.compile(src);
     const cache = module.getEvaluationCache();
@@ -113,7 +115,7 @@ export function moduleRepeatRatio(module) {
     }
     return ratio;
   } catch (e) {
-    console.warn('[RMT] repeat: could not evaluate', src, e && e.message);
+    console.warn('[RMT] repeat: could not evaluate', src, e instanceof Error ? e.message : e);
     return null;
   }
 }
