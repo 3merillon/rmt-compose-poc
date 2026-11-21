@@ -857,11 +857,11 @@ const menuAPI = (function() {
         // their manifest metadata (and file) first. Rebuilding the built-in sections
         // below then skips what they already hold — otherwise a module the user had
         // dragged into Custom would be dealt out a second time in its home section.
-        const claimed = new Set();
+        const claimed = new Set<string>();
         for (const m of oldCustom.concat(...userSections.map(s => s.modules))) {
             if (healModuleMeta(m, index) && m.file) claimed.add(m.file);
         }
-        const unclaimed = (state: SectionState) => ({ ...state, modules: state.modules.filter(m => !claimed.has(m.file)) });
+        const unclaimed = (state: SectionState) => ({ ...state, modules: state.modules.filter(m => !m.file || !claimed.has(m.file)) });
 
         const states: SectionState[] = [];
         for (const section of manifest.sections) {
@@ -890,7 +890,7 @@ const menuAPI = (function() {
         if (!manifest) return states;
         const index = manifestIndex(manifest);
         const fileToItem = index.byFile;
-        const presentFiles = new Set();
+        const presentFiles = new Set<string>();
         const outStates = states.map((st) => {
             const modules = [];
             for (const m of st.modules) {
@@ -1618,7 +1618,7 @@ const menuAPI = (function() {
         }
 
         // Validate each note
-        const seenIds = new Set();
+        const seenIds = new Set<number>();
         for (let i = 0; i < data.notes.length; i++) {
             const note = data.notes[i];
             if (!isRecord(note)) {

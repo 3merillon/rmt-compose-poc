@@ -1,5 +1,5 @@
 import type { WorkspaceElement } from './renderer/webgl2/player-surface.ts';
-import { isInputScore, isRecord, type EvaluationCache, type InputScore, type ExpressionName } from './model-types.ts';
+import { isRecord, type EvaluationCache, type ExpressionName } from './model-types.ts';
 import type { ExactValue } from './value/exact.ts';
 import type { Note } from './note.ts';
 import type { GroupEdit } from './modals/group-widget.ts';
@@ -743,7 +743,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         // variable: the check used to read `variables.instrument`, always empty, and
         // overwrote every dependent's own instrument with this note's.)
         const directDependents = myModule.getDependentNotes(noteId);
-        const instrumentMemo = new Map();
+        const instrumentMemo = new Map<number, string>();
         const keep: [Note, string][] = [];
         directDependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
@@ -1175,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                               prev.entries.every((v, i) => v.type === entries[i].type && v.id === entries[i].id);
                             if (!sameStack && prev.lastX === event.clientX && prev.lastY === event.clientY &&
                                 prev.entries.length === entries.length) {
-                              const types = new Map();
+                              const types = new Map<number, SceneHit['type']>();
                               for (const hit of prev.entries) types.set(hit.id, hit.type);
                               sameStack = entries.every(hit => types.get(hit.id) === hit.type);
                             }
@@ -2964,7 +2964,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote: Note)
     // so M already rides. Testing only the direct anchor would move M twice.
     function __startChainTouchesSetGL(note: Note, ids: Set<number>) {
         let cur = __parseParentFromStartTimeStringGL(note);
-        const seen = new Set();
+        const seen = new Set<number>();
         while (cur) {
             const cid = Number(cur.id);
             if (ids.has(cid)) return true;
