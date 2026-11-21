@@ -8,24 +8,32 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs && node scripts/test-dirty-marking.mjs && node scripts/test-note-ids.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs && node scripts/test-relational-time.mjs && node scripts/test-live-tempo.mjs && node scripts/test-note-kinds.mjs && node scripts/test-legacy-syntax.mjs && node scripts/test-exact-values.mjs && node scripts/test-library.mjs && node scripts/test-group-edit.mjs && node scripts/test-group-copy.mjs && node scripts/test-css-color.mjs && node scripts/test-envelopes.mjs && node scripts/test-players.mjs && node scripts/test-repeat.mjs && node scripts/test-loops.mjs && node scripts/test-edit-cost.mjs && node scripts/test-detail-cutoff.mjs",
-    "gen:intervals": "node scripts/gen-interval-catalog.mjs",
-    "perf:gen": "node scripts/perf/generate-stress-module.mjs",
-    "perf:bench": "node scripts/perf/bench-node.mjs",
-    "samples:build": "node scripts/build-samples.mjs",
+    "test": "tsx scripts/validate-modules.mjs && tsx scripts/test-exactness.mjs && tsx scripts/test-variable-deps.mjs && tsx scripts/test-dirty-marking.mjs && tsx scripts/test-note-ids.mjs && tsx scripts/test-amplitude.mjs && tsx scripts/test-midi-export.mjs && tsx scripts/test-relational-time.mjs && tsx scripts/test-live-tempo.mjs && tsx scripts/test-note-kinds.mjs && tsx scripts/test-legacy-syntax.mjs && tsx scripts/test-exact-values.mjs && tsx scripts/test-library.mjs && tsx scripts/test-group-edit.mjs && tsx scripts/test-group-copy.mjs && tsx scripts/test-css-color.mjs && tsx scripts/test-envelopes.mjs && tsx scripts/test-players.mjs && tsx scripts/test-repeat.mjs && tsx scripts/test-loops.mjs && tsx scripts/test-edit-cost.mjs && tsx scripts/test-detail-cutoff.mjs",
+    "gen:intervals": "tsx scripts/gen-interval-catalog.mjs",
+    "perf:gen": "tsx scripts/perf/generate-stress-module.mjs",
+    "perf:bench": "tsx scripts/perf/bench-node.mjs",
+    "samples:build": "tsx scripts/build-samples.mjs",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json"
   },
   "dependencies": {
     "fraction.js": "^5.3.4"
   },
   "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/pngjs": "6.0.5",
     "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
     "vite": "^7.1.12",
     "vitepress": "^1.6.4"
   },
   "author": "Cyril Monkewitz",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
 }
