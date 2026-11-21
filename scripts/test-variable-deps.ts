@@ -347,6 +347,16 @@ console.log('\nE. Incremental evaluation equals a fresh load\n');
   check(difference === null, `E8 the module equals a fresh load of its JSON${difference ? `: ${difference}` : ''}`);
 }
 {
+  const mod = await Module.loadFromJSON({ baseNote: {}, notes: [
+    { id: 1, frequency: '330' }, { id: 2, frequency: '[1].f' },
+  ] });
+  mod.evaluateModule();
+  captureConsole(() => { mod.removeNote('1'); mod.evaluateModule(); });
+  check(!mod.getEvaluationCache().has(1) && !mod.getNoteById(1) &&
+    mod.getNoteById(2)?.getVariable('frequency')?.equals(440),
+    'a string ID from Object.keys deletes the same cached note and invalidates its readers');
+}
+{
   // The irrational-value ("corruption") flag is refreshed for every note that
   // gets re-evaluated, also one reached only through the BaseNote: [2].f is a
   // square root of [1].f, exact while base.f is 4 and irrational once it is 2.

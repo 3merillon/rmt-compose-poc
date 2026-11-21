@@ -642,11 +642,14 @@ export class Module {
   /**
    * Remove a note
    */
-  removeNote(id: number) {
+  removeNote(id: number | string) {
     this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
     const numId = Number(id);
+    // String IDs are object keys. A noncanonical key such as an empty string
+    // must never coerce to an unrelated note (in particular the BaseNote).
+    if (typeof id === 'string' && id !== String(numId)) return;
     // Warn about dependents left dangling: a LOAD_REF to a removed note pushes
     // hardcoded evaluator defaults (frequency 440, startTime 0, duration 1)
     // with no error. The UI's delete paths liberate dependents first; this
@@ -661,12 +664,12 @@ export class Module {
         `their references to note ${numId} will now evaluate to hardcoded defaults`
       );
     }
-    delete this.notes[id];
-    this._evaluationCache.delete(id);
-    this._dependencyGraph.removeNote(id);
+    delete this.notes[numId];
+    this._evaluationCache.delete(numId);
+    this._dependencyGraph.removeNote(numId);
 
     if (this._incrementalEvaluator) {
-      this._incrementalEvaluator.cache.delete(id);
+      this._incrementalEvaluator.cache.delete(numId);
     }
 
     // Re-evaluate the dangling notes, so they show now what a reload would
