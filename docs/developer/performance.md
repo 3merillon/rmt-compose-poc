@@ -50,6 +50,15 @@ panning were in the note overlays, including rebuilding and uploading the
 tab and arrow regions. The add-note form's `refreshEvaluations` also appeared
 on selection and drop. Each field built a new cache of every variable of every note.
 
+At 500k, `sync` accounted for 50% of non-idle samples in the commit recording,
+including time in `toNumber`. During undo, compilation took 24% and dependency
+registration 19%. Compilation accounted for 23% during redo. During a chain or
+hub drop the note widget's preview evaluation took 29%. Selecting the hub spent
+34% in `sync`. The render loop took 34% during hover and 35% during marquee,
+while the player's end-time lookup took 8% and 16% respectively. These percentages
+include callees and overlap. The gesture recordings include pointer dispatch and
+the frames drawn during the gesture.
+
 The add-note form now reads the explicit references of the compiled preview
 expression and the BaseNote for inherited values. The text and tooltips for
 valid, irrational, missing-reference, invalid and large-fraction inputs matched
@@ -123,7 +132,7 @@ properly idle)"*, and `bench-render.mjs` reports **0/100 idle frames redrawn** a
 notes.
 
 This does **not** mean rAF is descheduled. Both loops still tick every frame — the renderer's
-(`renderer.js:594-598`) and the player's (`player.js:1883-1903`, which updates the DOM playhead and
+(`renderer.js:594-598`) and the player's (`player.js:1847-1867`, which updates the DOM playhead and
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
@@ -364,8 +373,8 @@ actually passed in. The pixel diff caught this; eyeballing would not have.
 - `hitTestSubRegion` (`renderer.js:3935`) resolves *which* sub-region of a note was hit (pull tab,
   arrow column), and only runs once a body hit is confirmed.
 
-There is **no spatial index**, and measurement says none is warranted: 0.31 ms per call at 100,000
-notes. See [Picking](/developer/rendering/picking).
+The CPU point pick took 1.16 ms per call at 500,000 notes in the initial Edge profile.
+The measured drag and marquee costs were dominated by other work, so picking still uses the scan. See [Picking](/developer/rendering/picking).
 
 ## Cheap history
 
@@ -399,6 +408,15 @@ through two animation callbacks. The heap is decimal MB after initial load and G
 
 An octave step (`window.__rmtPerf.measureCommit()`, the `player:octaveChange` path) rewrites one
 expression, marks its dependents dirty, evaluates, syncs the renderer, and captures a snapshot.
+The player also reads the module end on animation frames. Each module keeps the maximum sounding
+end for blocks of 128 IDs. A changed evaluation updates the affected blocks. Unchanged frames
+read the cached result. The end of a sounding note is still its exact start plus its duration
+before conversion to seconds. On an edited duration the audio end lookup fell from
+35.9 to 0.3 ms at 100k, 84.6 to 0.3 ms at 250k and 193.2 to 0.2 ms at 500k. The last
+measure is still chosen by each caller's existing tie-break. In the same three modules,
+undo through the restored frame took 85 → 32, 327 → 73 and 464 → 111 ms.
+Redo took 87 → 44, 216 → 77 and 720 → 140 ms.
+
 Three parts of it used to cost the size of the whole module, whatever the edit changed:
 
 - **The rewrite check.** `multiplyExpressionByFraction()` keeps the folded expression only when it
@@ -408,13 +426,14 @@ Three parts of it used to cost the size of the whole module, whatever the edit c
   when first read (`noteRecords()`, `src/utils/simplify.js:118`): the same records, for the same
   ids. The simplifiers share the check.
 - **The snapshot.** History and autosave use canonical note text. The usual workspace edits
-  serialize the changed rows. The general save API checks all fields (`src/module.js:1032`).
+  serialize the changed rows. The general save API checks all fields (`src/module.js:1031`).
 - **`toNumber()`.** It wrote both BigInts of a fraction out in decimal to count their digits, for
   every value `sync()` reads. A comparison with 10^300 decides the same (`src/utils/fraction-num.js:90`).
 
 `scripts/test-edit-cost.mjs` (in `npm test`) holds all three to what they replaced, and
 `scripts/perf/compare-edits.mjs` runs the same edits and undos on two servers and compares the
-autosave, both history stacks and the renderer's instance buffers at every step.
+autosave, both history stacks, evaluated values and the renderer's CPU and GPU buffers.
+The sequence also swaps the selected note twice and returns selection to the BaseNote.
 
 Headless Edge, `bench-commit-pairs.mjs`, the median of the commit p50s over 5 back-to-back pairs
 (the server that goes first alternates):
@@ -600,7 +619,7 @@ and references above 65535 compile to `LOAD_REF_WIDE`. The UI's import paths (Lo
 upload, Load UI, Copy to Modules) accept up to 500,000 notes, and Load Module files up to 120 MB
 (`MAX_MODULE_NOTES`, `MAX_MODULE_BYTES` in `src/limits.js`).
 
-A loaded note costs about 2.4 KB of JavaScript heap in Edge (the whole app: module, graph,
+After the preceding memory pass, a loaded note cost about 2.4 KB of JavaScript heap in Edge (the whole app: module, graph,
 evaluation records, renderer, undo history) and about 3 KB in Node (the data model alone, without
 pointer compression). It was about 6.6 KB and 8.9 KB. Measured on `voices-*` modules after load and
 a full GC, per note at 100,000 notes:
@@ -618,7 +637,7 @@ Evaluation got faster with it: a full evaluation of `voices-100000` in Node went
 1,100 B, the graph about 500 B, the renderer about 330 B, the evaluation records about 240 B, and
 a whole-module string each for the undo history and the autosave's last write (about 155 B each).
 
-In headless Edge, on `voices-*` modules served as the default module (load: until the module is
+The following table records the earlier memory pass in headless Edge, on `voices-*` modules served as the default module (load: until the module is
 drawn; a commit: one octave step through the whole commit, `__rmtPerf.measureCommit()`, p50 once
 warm; `sync()` and a redraw: `measureSync()`, `measureRedraw()`, p50; undo: until the restored
 module is drawn; the heap before this pass in parentheses):
@@ -639,14 +658,14 @@ Two limits come before it:
   fallback (`QuotaExceededError`), so that session would not survive a reload. A module whose text
   holds any character above U+00FF is stored at two bytes per character, which halves the size it
   can reach.
-- **Time.** Everything an edit does still costs the module's size. A commit costs about 1 µs per
-  note, most of it `sync()`, which rebuilds every instance ([Deferred](#deferred-and-not-shipped)); a
-  redraw about 0.14 µs per note; an undo, which restores the whole module through `loadFromJSON`,
-  about 25 µs per note, as long as a load.
+- **Interaction time.** Work on an ordinary body edit follows the affected notes. A full
+  import, a structural undo, complex instance geometry and a view containing every note
+  can still scale with the score. A deferred save copies the full string into IndexedDB.
 
-The import limits sit below both: 500,000 notes take about 1.1 GB and save as about 79 million
-characters, and a Load Module file of at most 120 MB keeps its text under the 127 MB the autosave can
-write (as long as it holds no character above U+00FF).
+After an octave edit to the 500,000-note fixture, writing and reading back the single
+IndexedDB value took 403 ms. Its 78,865,576 characters matched a fresh serialization,
+and a page reload restored the edited expression. The name, expressions and other text in an arbitrary module can
+change its byte length. The measurements support keeping the 500,000-note and 120 MB caps.
 
 The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
 localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored

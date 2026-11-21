@@ -47,13 +47,13 @@ property with `note.setVariable(name + 'String', expr)` and then calls `markNote
 
 ::: info Drag and resize do not use the batch path
 A move commit writes each moved note individually with `n.setVariable('startTimeString', raw)` inside
-`commitNoteStartGL()` (`src/player.js:4970`), then runs the dependent-retarget passes, then evaluates
+`commitNoteStartGL()` (`src/player.js:4940`), then runs the dependent-retarget passes, then evaluates
 once. A group move does the same per mover.
 :::
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:244`):
+`Module.markNoteDirty(noteId)` (`src/module.js:243`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,12 +71,12 @@ once. A group move does the same per mover.
 
 Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a
 walk of the same dirty cycle now only re-registers its own bytecode (`Module._dirtyClosed`,
-`src/module.js:259`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
+`src/module.js:258`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
 in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do this.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:690`) delegates to
+`Module.evaluateModule()` (`src/module.js:689`) delegates to
 `IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1057`):
 
 ```
@@ -166,7 +166,7 @@ draws. When nothing changed, `_render()` returns immediately and the frame costs
 `player.js` calls `sync()` on every commit. A drag does **not** call it: the workspace previews the
 gesture through the renderer's preview setters (`setDragOffsetPreview()` shifts moving notes on the
 GPU), and `sync()` runs once, on the drop. `player.js`'s rAF loop still carries a `tempOverrides`
-re-sync branch (`player.js:1890`), but nothing assigns `glTempOverrides` today, so it never fires.
+re-sync branch (`player.js:1854`), but nothing assigns `glTempOverrides` today, so it never fires.
 See [WebGL2 Renderer](/developer/rendering/webgl2-renderer).
 
 ## 5. Audio playback
@@ -216,7 +216,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:457`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:456`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }
@@ -243,7 +243,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Event | Emitted by | Does |
 |---|---|---|
-| `workspace:noteMoveCommit` | `note.js:364` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
+| `workspace:noteMoveCommit` | `workspace.js:1746` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
 | `workspace:noteResizeCommit` | `workspace.js:1756` | `{noteId, newDurationSec}` |
 | `workspace:measureResizeCommit` | `workspace.js:1765` | `{measureId, newStartSec}` |
 | `workspace:groupMoveCommit` | `workspace.js:1737` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
@@ -256,7 +256,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 | `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the autosave. |
 | `settings:changed` / `settings:loaded` / `settings:panelToggled` | `settings-store.js`, `settings-panel.js` | `{path, value, settings}` |
 | `modals:show` / `requestRefresh` / `cleared` / `init` | modals | Widget lifecycle. |
-| `audio:masterVolumeInput` | `player.js:4306` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
+| `audio:masterVolumeInput` | `player.js:4270` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
 
 ## Settings → runtime
 
@@ -307,8 +307,8 @@ beside it (key `unloadable`) before the autosave replaces it, and the default mo
 
 ```
 any committing edit
-  → captureSnapshot(label, tracked)     player.js:5651
-      → module.historySnapshot(tracked) → snapshotStr, version   module.js:1053
+  → captureSnapshot(label, tracked)     player.js:5621
+      → module.historySnapshot(tracked) → snapshotStr, version   module.js:1052
           (= JSON.stringify(createModuleJSON()); tracked edits serialize the changed rows)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
       → eventBus.emit('history:capture',     { label, snapshotStr })

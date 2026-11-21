@@ -2,7 +2,7 @@ import Fraction from 'fraction.js';
 import { getDisplayTransposition, setDisplayTransposition, clearDisplayTransposition, passTransposition, moduleRepeatRatio, setModuleRepeat } from './player/display-transpose.js';
 import { equals as X_equals } from './value/exact.js';
 const X_isOne = (v) => { try { return X_equals(v, new Fraction(1)); } catch { return false; } };
-import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal, setDefaultInstrument } from './module.js';
+import { Module, setDefaultInstrument } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
@@ -821,18 +821,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
       
-    let memoizedModuleEndTime = null;
-    let moduleLastModifiedTime = 0;
-
     function getModuleEndTime() {
-        const currentModifiedTime = getCurrentModifiedTime();
-        
-        if (memoizedModuleEndTime !== null && currentModifiedTime === moduleLastModifiedTime) {
-            return memoizedModuleEndTime;
-        }
-
+        const timing = myModule.getTimingSummary();
+        if (timing.playerEnd !== undefined) return timing.playerEnd;
         let measureEnd = 0;
-        const measureNotes = Object.values(myModule.notes).filter(isMeasureNote);
+        const measureNotes = timing.measures.slice();
         if (measureNotes.length > 0) {
             // Exact ordering with id tie-break; a valueOf() subtraction here
             // collapses rationals that differ past double precision, and a
@@ -856,38 +849,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }
 
-        let lastNoteEnd = 0;
-        Object.values(myModule.notes).forEach(note => {
-            if (note.id === 0) return; // the BaseNote's duration is the time unit, not a note
-            // hasExpression, not note.variables: that made a Proxy and three wrappers per note
-            if (note.hasExpression('startTime') && note.hasExpression('duration') && note.hasExpression('frequency')) {
-                const noteStart = note.getVariable('startTime');
-                const noteDuration = note.getVariable('duration');
-                if (!noteStart || !noteDuration) return;
-                let noteEnd;
-                try {
-                    noteEnd = toNumber(noteStart.add(noteDuration));
-                } catch (e) {
-                    noteEnd = toNumber(noteStart) + toNumber(noteDuration);
-                }
-                if (noteEnd > lastNoteEnd) {
-                    lastNoteEnd = noteEnd;
-                }
-            }
-        });
-
-        memoizedModuleEndTime = Math.max(measureEnd, lastNoteEnd);
-        moduleLastModifiedTime = currentModifiedTime;
-        return memoizedModuleEndTime;
+        return timing.playerEnd = Math.max(measureEnd, timing.soundEnd);
     }
 
-    function getCurrentModifiedTime() {
-        return Object.values(myModule.notes).reduce((maxTime, note) => {
-            const noteTime = note.lastModifiedTime || 0;
-            return Math.max(maxTime, noteTime);
-        }, 0);
-    }
-  
     // Load the last session if there is one (src/store/autosave.js: IndexedDB, or a
     // module left in localStorage); otherwise load the default module
     let savedSnapshot = null;
@@ -4448,8 +4412,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             
             cleanupCurrentModule();
             
-            memoizedModuleEndTime = null;
-            moduleLastModifiedTime = Date.now();
+            invalidateModuleEndTimeCache();
             
             if (modals && modals.invalidateDependencyGraphCache) {
                 modals.invalidateDependencyGraphCache();
@@ -4844,10 +4807,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     updateLockButton();
 
     function invalidateModuleEndTimeCache() {
-        memoizedModuleEndTime = null;
-        moduleLastModifiedTime = Date.now();
-        // Also invalidate the global cache in module.js used by audio-engine
-        invalidateModuleEndTimeCacheGlobal();
+        // Evaluation revisions already account for edits. An external explicit
+        // invalidation may also follow direct writes to note fields.
+        if (myModule?._timingSummary) {
+            delete myModule._timingSummary.playerEnd;
+            delete myModule._timingSummary.moduleEnd;
+        }
     }
 
 // Event bus subscriptions for incremental modularization
@@ -4929,8 +4894,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     console.warn('importModuleAtTarget via eventBus failed', e);
   }
 });
-      eventBus.on('player:invalidateModuleEndTimeCache', () => {
-        try { invalidateModuleEndTimeCache(); updateMeasureBarPositions(); } catch {}
+      eventBus.on('player:invalidateModuleEndTimeCache', (change) => {
+        try {
+          // An external explicit invalidation can follow a direct field write.
+          if (change?.noteId == null) myModule._timingSummary = null;
+          invalidateModuleEndTimeCache();
+          updateMeasureBarPositions();
+        } catch {}
       });
 
       // External selection request: update selection state so GL highlights/ordering refresh immediately

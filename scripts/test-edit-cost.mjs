@@ -170,6 +170,29 @@ const modules = [];
   check(m.historySnapshot().snapshotStr === m.createModuleJSONString(), 'unscoped checkpoints include direct field writes and removed notes');
 }
 
+{
+  const m = await load({ baseNote: {}, notes: [
+    { id: 1, startTime: 'base.t', duration: '5 * base.d', frequency: 'base.f' },
+    { id: 130, startTime: '[1].d', duration: 'base.d', frequency: 'base.f' },
+    { id: 200000, startTime: 'base.t', duration: '4 * base.d', frequency: 'base.f' }
+  ] });
+  check(m.getModuleEndTime() === 6, 'end index includes sparse IDs and dependent starts');
+  m.notes[1].setVariable('duration', '2 * base.d');
+  m.evaluateModule();
+  check(m.getModuleEndTime() === 4, 'shortening the last note reveals the next maximum after evaluation');
+  m.removeNote(200000);
+  check(m.getModuleEndTime() === 3, 'removing the maximum reveals the dependent note');
+  const bar = m.addNote({startTime: '7 * base.d', duration: '2 * base.d', measure: true});
+  m.addNote({startTime: '7 * base.d', duration: '3 * base.d', measure: true});
+  check(m.getModuleEndTime() === 9, 'audio end keeps the first measure at equal exact start times');
+  bar.setVariable('measure', false);
+  check(m.getModuleEndTime() === 10, 'changing note kind updates the measure set');
+  m.baseNote.setVariable('duration', '1/2');
+  check(m.getModuleEndTime() === 5, 'changing the base time unit updates every affected end');
+}
+
+
+
 console.log('\nChecked rewrites: the same verdict as a check that reads every note');
 // The check as it was: a record of every note of the module, built up front.
 function evaluateEager(expr, moduleInstance) {

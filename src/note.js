@@ -361,7 +361,7 @@ export class Note {
       this.module.markNoteDirty(this.id);
     }
     try {
-      eventBus.emit('player:invalidateModuleEndTimeCache');
+      eventBus.emit('player:invalidateModuleEndTimeCache', { noteId: this.id });
     } catch (e) {
       // Ignore event bus errors
     }

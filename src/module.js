@@ -12,12 +12,11 @@ import { compare as compareExact } from './value/exact.js';
 import { MAX_NOTE_ID } from './binary-note.js';
 import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.js';
 
-let memoizedModuleEndTime = null;
-let moduleLastModifiedTime = 0;
+// Explicit invalidations without a known evaluation invalidate all derived timing.
+let timingGeneration = 0;
 
 export function invalidateModuleEndTimeCache() {
-  memoizedModuleEndTime = null;
-  moduleLastModifiedTime = Date.now();
+  timingGeneration++;
 }
 
 // Global default instrument for notes that don't resolve to an explicit or
@@ -1138,7 +1137,6 @@ export class Module {
     }
     this._historyIds.clear();
     this._historyVersion = target;
-    invalidateModuleEndTimeCache();
     return true;
   }
 
@@ -1316,21 +1314,61 @@ export class Module {
     }
   }
 
-  /**
-   * Get the module end time (cached for performance)
-   * Returns the time in seconds when the last note/measure ends
-   */
-  getModuleEndTime() {
-    // Use cached value if available and module hasn't changed
-    if (memoizedModuleEndTime !== null && this._dirtyNotes.size === 0) {
-      return memoizedModuleEndTime;
+  // One maximum per 128 note IDs. Sound ends use the same exact addition and
+  // final conversion as the transport. Measure ties are resolved by each caller.
+  getTimingSummary() {
+    const blockSize = 128;
+    const values = this.evaluateModule();
+    const previous = this._timingSummary;
+    if (previous?.revision === this._evaluationRevision && previous.generation === timingGeneration) return previous;
+    const dirty = previous?.generation === timingGeneration ? this.evaluationChangesSince(previous.revision) : null;
+    const blocks = dirty ? previous.blocks : new Map();
+    const measureIds = dirty ? previous.measureIds : new Set();
+    const noteEnd = note => {
+      if (!note.hasExpression('startTime') || !note.hasExpression('duration') || !note.hasExpression('frequency')) return 0;
+      const record = note.module === this ? values.get(note.id) : null;
+      const start = record?.startTime ?? note.getVariable('startTime');
+      const duration = record?.duration ?? note.getVariable('duration');
+      if (!start || !duration) return 0;
+      try { return toNumber(start.add(duration)); }
+      catch { return toNumber(start) + toNumber(duration); }
+    };
+    const visit = (id, block) => {
+      const note = this.notes[id];
+      if (!note) return;
+      if (isMeasureNote(note)) measureIds.add(id);
+      if (!id) return;
+      const end = noteEnd(note);
+      if (end > (blocks.get(block) || 0)) blocks.set(block, end);
+    };
+    if (dirty) {
+      const touched = new Set();
+      for (const id of dirty) {
+        touched.add(Math.floor(id / blockSize));
+        measureIds.delete(id);
+      }
+      for (const block of touched) {
+        blocks.delete(block);
+        for (let id = block * blockSize; id < (block + 1) * blockSize; id++) visit(id, block);
+      }
+    } else {
+      for (const key in this.notes) {
+        const id = Number(key);
+        visit(id, Math.floor(id / blockSize));
+      }
     }
+    let soundEnd = 0;
+    for (const end of blocks.values()) if (end > soundEnd) soundEnd = end;
+    const measures = Array.from(measureIds).sort((a, b) => a - b).map(id => this.notes[id]);
+    return this._timingSummary = {
+      revision: this._evaluationRevision, generation: timingGeneration, blocks, measureIds, measures, soundEnd
+    };
+  }
 
-    // Ensure evaluation cache is up to date
-    this.evaluateModule();
-
-    // Compute measure end time
-    const measureNotes = this.getMeasureNotes();
+  getModuleEndTime() {
+    const timing = this.getTimingSummary();
+    if (timing.moduleEnd !== undefined) return timing.moduleEnd;
+    const measureNotes = timing.measures;
 
     let measureEnd = 0;
     if (measureNotes.length > 0) {
@@ -1359,29 +1397,7 @@ export class Module {
       }
     }
 
-    // Compute last note end time — exact add, then one conversion
-    let lastNoteEnd = 0;
-    for (const id in this.notes) {
-      if (Number(id) === 0) continue; // the BaseNote's duration is the time unit, not a note
-      const note = this.notes[id];
-      // hasExpression, not note.variables: that made a Proxy and three wrappers per note
-      if (note.hasExpression('startTime') && note.hasExpression('duration') && note.hasExpression('frequency')) {
-        const noteStart = note.getVariable('startTime');
-        const noteDuration = note.getVariable('duration');
-        if (noteStart && noteDuration) {
-          let noteEnd;
-          try {
-            noteEnd = toNumber(noteStart.add(noteDuration));
-          } catch (e) {
-            noteEnd = toNumber(noteStart) + toNumber(noteDuration);
-          }
-          if (noteEnd > lastNoteEnd) lastNoteEnd = noteEnd;
-        }
-      }
-    }
-
-    memoizedModuleEndTime = Math.max(measureEnd, lastNoteEnd);
-    return memoizedModuleEndTime;
+    return timing.moduleEnd = Math.max(measureEnd, timing.soundEnd);
   }
 
   /**

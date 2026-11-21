@@ -507,7 +507,7 @@ sounds (a live tempo change, a loop switched off) restores the release of the vo
 
 ## Instrument inheritance
 
-A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:852`)
+A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:851`)
 calls `instrumentOf()` in `src/players.js`, which resolves one in this order. A **player** is a line of
 notes, each starting where the previous one ends.
 
@@ -536,7 +536,7 @@ Consequences worth stating plainly:
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1053-1068`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1017-1032`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 
