@@ -25,7 +25,19 @@
  * shadow() (the nearest double, as a Fraction, for code that still reads Fractions).
  */
 import Fraction from 'fraction.js';
-import { toNumber as fracToNumber } from '../utils/fraction-num.js';
+import { toNumber as fracToNumber } from '../utils/fraction-num.ts';
+
+/** Rationals are bare fraction.js objects and have no runtime discriminator. */
+export type Rational = Fraction & { readonly kind?: undefined };
+export type ExactValue = Rational | Irrational | Approx;
+type Algebraic = Rational | Irrational;
+type MaybeValue = ExactValue | null | undefined;
+type Radical = [bigint, Fraction];
+interface Term {
+  c: Fraction;
+  rad: Radical[];
+  key: string;
+}
 
 export const MAX_TERMS = 64;
 export const MAX_INT_POW = 8;
@@ -37,10 +49,10 @@ const ONE = new Fraction(1);
 const ZERO = new Fraction(0);
 
 /** A term: coefficient c (Fraction, ≠ 0) × Π rad[i][0] ^ rad[i][1]; rad sorted by base, exps in (0, 1). */
-function makeTerm(c, rad) {
+function makeTerm(c: Fraction, rad: Radical[]): Term {
   return { c, rad, key: radKey(rad) };
 }
-function radKey(rad) {
+function radKey(rad: Radical[]): string {
   let k = '';
   for (const [b, e] of rad) k += (k ? '*' : '') + b + '^' + (e.s * e.n) + '/' + e.d;
   return k;
@@ -48,7 +60,9 @@ function radKey(rad) {
 
 export class Irrational {
   /** @param {Array} terms canonical terms, at least one with a non-empty radical */
-  constructor(terms) {
+  declare readonly kind: 'irrational';
+  declare terms: Term[];
+  constructor(terms: Term[]) {
     this.kind = 'irrational';
     this.terms = terms;
   }
@@ -56,18 +70,20 @@ export class Irrational {
 
 export class Approx {
   /** @param {Fraction} frac the best known value */
-  constructor(frac) {
+  declare readonly kind: 'approx';
+  declare frac: Fraction;
+  constructor(frac: Fraction) {
     this.kind = 'approx';
     this.frac = frac;
   }
 }
 
-export const isRational = (v) => v != null && v.kind === undefined;
-export const isIrrational = (v) => v != null && v.kind === 'irrational';
-export const isApprox = (v) => v != null && v.kind === 'approx';
+export const isRational = (v: MaybeValue): v is Rational => v != null && v.kind === undefined;
+export const isIrrational = (v: MaybeValue): v is Irrational => v != null && v.kind === 'irrational';
+export const isApprox = (v: MaybeValue): v is Approx => v != null && v.kind === 'approx';
 
 /** 'rational' | 'irrational' | 'approximate' */
-export function kindOf(v) {
+export function kindOf(v: MaybeValue) {
   if (v == null) return null;
   return v.kind === undefined ? 'rational' : v.kind === 'approx' ? 'approximate' : 'irrational';
 }
@@ -76,7 +92,7 @@ export function kindOf(v) {
 // BigInt helpers
 // ---------------------------------------------------------------------------
 
-function cappedPow(base, exp) {
+function cappedPow(base: bigint, exp: bigint) {
   if (exp === 0n) return 1n;
   if (exp > MAX_POW_EXPONENT) return null;
   const mag = base < 0n ? -base : base;
@@ -85,7 +101,7 @@ function cappedPow(base, exp) {
 }
 
 /** floor(value ^ (1/n)) for value ≥ 0, n ≥ 1 */
-function floorNthRoot(value, n) {
+function floorNthRoot(value: bigint, n: bigint) {
   if (value < 2n || n === 1n) return value;
   const bitLen = BigInt(value.toString(2).length);
   let lo = 0n;
@@ -97,15 +113,15 @@ function floorNthRoot(value, n) {
   return lo;
 }
 
-function exactNthRoot(value, n) {
+function exactNthRoot(value: bigint, n: bigint) {
   const r = floorNthRoot(value, n);
   return r ** n === value ? r : null;
 }
 
 /** Prime factors of a positive BigInt by trial division up to FACTOR_LIMIT; the rest as one cofactor. */
-function factor(n, into, sign) {
+function factor(n: bigint, into: Map<bigint, bigint>, sign: bigint): void {
   // into: Map<bigint, bigint> base → exponent (times sign)
-  const add = (p, k) => into.set(p, (into.get(p) || 0n) + sign * k);
+  const add = (p: bigint, k: bigint) => into.set(p, (into.get(p) || 0n) + sign * k);
   if (n <= 1n) return;
   let k = 0n;
   while ((n & 1n) === 0n) { n >>= 1n; k++; }
@@ -128,9 +144,9 @@ function factor(n, into, sign) {
  * integer parts of exponents move into the coefficient. Returns null when a
  * capped power would be exceeded.
  */
-function normalizeTerm(c, bases) {
+function normalizeTerm(c: Fraction, bases: Map<bigint, Fraction>): Term | null {
   let num = c.s * c.n, den = c.d;
-  const rad = [];
+  const rad: Radical[] = [];
   for (const [b, e] of bases) {
     if (e.n === 0n) continue;
     // e = q + r, 0 ≤ r < 1
@@ -150,8 +166,11 @@ function normalizeTerm(c, bases) {
 }
 
 /** Terms → canonical value: a Fraction when no radical is left, else Irrational; null past MAX_TERMS. */
-function fromTerms(list) {
-  const byKey = new Map();
+// Combining a singleton can never exceed MAX_TERMS.
+function fromTerms(list: [Term]): Algebraic;
+function fromTerms(list: Term[]): Algebraic | null;
+function fromTerms(list: Term[]): Algebraic | null {
+  const byKey = new Map<string, Term>();
   for (const t of list) {
     const prev = byKey.get(t.key);
     if (prev) byKey.set(t.key, makeTermKeyed(prev.c.add(t.c), prev.rad, t.key));
@@ -164,14 +183,14 @@ function fromTerms(list) {
   terms.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
   return new Irrational(terms);
 }
-function makeTermKeyed(c, rad, key) { return { c, rad, key }; }
+function makeTermKeyed(c: Fraction, rad: Radical[], key: string): Term { return { c, rad, key }; }
 
-const termsOf = (v) => (isIrrational(v) ? v.terms : (v.n === 0n ? [] : [makeTerm(v, [])]));
+const termsOf = (v: Algebraic): Term[] => (isIrrational(v) ? v.terms : (v.n === 0n ? [] : [makeTerm(v, [])]));
 
-function mulTerms(a, b) {
-  const bases = new Map();
+function mulTerms(a: Term, b: Term) {
+  const bases = new Map<bigint, Fraction>();
   for (const [base, e] of a.rad) bases.set(base, e);
-  for (const [base, e] of b.rad) bases.set(base, bases.has(base) ? bases.get(base).add(e) : e);
+  for (const [base, e] of b.rad) bases.set(base, bases.get(base)?.add(e) ?? e);
   return normalizeTerm(a.c.mul(b.c), bases);
 }
 
@@ -180,7 +199,7 @@ function mulTerms(a, b) {
 // ---------------------------------------------------------------------------
 
 /** The value as a double: the only way a number leaves this module for drawing and sound. */
-export function toNumber(v, fallback = 0) {
+export function toNumber(v: MaybeValue, fallback = 0): number {
   if (v == null) return fallback;
   if (v.kind === undefined) return fracToNumber(v, fallback);
   if (v.kind === 'approx') return fracToNumber(v.frac, fallback);
@@ -196,7 +215,7 @@ export function toNumber(v, fallback = 0) {
 // A double's exact value as a Fraction (m × 2^e), so toNumber(shadow) gives the double back.
 // fraction.js's own conversion is a continued fraction good to about 1e-14 only.
 const F64 = new DataView(new ArrayBuffer(8));
-function exactDouble(x) {
+function exactDouble(x: number): Fraction {
   if (x === 0) return new Fraction(0);
   F64.setFloat64(0, x);
   const hi = F64.getUint32(0), lo = F64.getUint32(4);
@@ -208,14 +227,17 @@ function exactDouble(x) {
   return e >= 0 ? new Fraction(sign * (mant << BigInt(e))) : new Fraction(sign * mant, 1n << BigInt(-e));
 }
 
-function fractionFromDouble(x) {
+function fractionFromDouble(x: number): Fraction {
   if (Number.isFinite(x)) return exactDouble(x);
   if (Number.isNaN(x)) return new Fraction(0);
   return new Fraction(x > 0 ? Number.MAX_VALUE : -Number.MAX_VALUE);
 }
 
 /** A Fraction for code that reads Fractions: the value itself, its approximation, or the nearest double. */
-export function shadow(v) {
+export function shadow(v: ExactValue): Rational;
+export function shadow<T extends null | undefined>(v: T): T;
+export function shadow(v: MaybeValue): Rational | null | undefined;
+export function shadow(v: MaybeValue): Rational | null | undefined {
   if (v == null) return v;
   if (v.kind === undefined) return v;
   if (v.kind === 'approx') return v.frac;
@@ -223,13 +245,12 @@ export function shadow(v) {
 }
 
 /** An approximate value from a double (the fallback of every operation this module cannot keep exact). */
-export function approxFromNumber(x) {
+export function approxFromNumber(x: number) {
   return new Approx(fractionFromDouble(x));
 }
-const approxOf = (v) => (v.kind === 'approx' ? v : new Approx(shadow(v)));
 
 /** value × 2^scale as a BigInt, floor, error a few units (for ordering only). */
-function fixedPoint(v, scale) {
+function fixedPoint(v: Algebraic, scale: number): bigint {
   let sum = 0n;
   const S = BigInt(scale);
   for (const t of termsOf(v)) {
@@ -248,23 +269,23 @@ function fixedPoint(v, scale) {
 // Arithmetic
 // ---------------------------------------------------------------------------
 
-export function add(a, b) {
+export function add(a: ExactValue, b: ExactValue): ExactValue {
   if (a.kind === undefined && b.kind === undefined) return a.add(b);
   if (a.kind === 'approx' || b.kind === 'approx') return new Approx(shadow(a).add(shadow(b)));
   return fromTerms([...termsOf(a), ...termsOf(b)]) ?? new Approx(shadow(a).add(shadow(b)));
 }
 
-export function neg(a) {
+export function neg(a: ExactValue): ExactValue {
   if (a.kind === undefined) return a.neg();
   if (a.kind === 'approx') return new Approx(a.frac.neg());
   return new Irrational(a.terms.map((t) => makeTermKeyed(t.c.neg(), t.rad, t.key)));
 }
 
-export function sub(a, b) {
+export function sub(a: ExactValue, b: ExactValue): ExactValue {
   return add(a, neg(b));
 }
 
-export function mul(a, b) {
+export function mul(a: ExactValue, b: ExactValue): ExactValue {
   if (a.kind === undefined && b.kind === undefined) return a.mul(b);
   if (a.kind === 'approx' || b.kind === 'approx') return new Approx(shadow(a).mul(shadow(b)));
   const ta = termsOf(a), tb = termsOf(b);
@@ -279,14 +300,14 @@ export function mul(a, b) {
 }
 
 /** 1 / (single term): coefficient inverted, exponents negated and renormalized. */
-function invertTerm(t) {
-  const bases = new Map();
+function invertTerm(t: Term) {
+  const bases = new Map<bigint, Fraction>();
   for (const [b, e] of t.rad) bases.set(b, e.neg());
   return normalizeTerm(ONE.div(t.c), bases);
 }
 
 /** a / b; the caller has ruled out b = 0. */
-export function div(a, b) {
+export function div(a: ExactValue, b: ExactValue): ExactValue {
   if (a.kind === undefined && b.kind === undefined) return a.div(b);
   if (a.kind === 'approx' || b.kind === 'approx') return new Approx(shadow(a).div(shadow(b)));
   const tb = termsOf(b);
@@ -296,14 +317,14 @@ export function div(a, b) {
   return mul(a, fromTerms([inv]));
 }
 
-export function isZero(v) {
+export function isZero(v: ExactValue): boolean {
   if (v.kind === undefined) return v.n === 0n;
   if (v.kind === 'approx') return v.frac.n === 0n;
   return false; // a canonical irrational value is never zero
 }
 
 /** A rational number to a rational power: Fraction, Irrational, or Approx. */
-function rationalPow(base, e) {
+function rationalPow(base: Fraction, e: Fraction): ExactValue {
   const en = e.s * e.n;
   if (en === 0n) return ONE;
   if (base.n === 0n) {
@@ -331,10 +352,10 @@ function rationalPow(base, e) {
     if (rn !== null && rd !== null) return en > 0n ? new Fraction(sign * rn, rd) : new Fraction(sign * rd, rn);
   }
   // Factor |base| and raise each prime
-  const exps = new Map();
+  const exps = new Map<bigint, bigint>();
   factor(base.n, exps, 1n);
   factor(base.d, exps, -1n);
-  const bases = new Map();
+  const bases = new Map<bigint, Fraction>();
   for (const [p, m] of exps) if (m !== 0n) bases.set(p, new Fraction(m).mul(e));
   const t = normalizeTerm(new Fraction(sign), bases);
   if (t === null) return approxFromNumber(Math.pow(fracToNumber(base), Number(en) / Number(e.d)));
@@ -342,7 +363,7 @@ function rationalPow(base, e) {
 }
 
 /** a ^ e */
-export function pow(a, e) {
+export function pow(a: ExactValue, e: ExactValue): ExactValue {
   if (e.kind === 'irrational' || e.kind === 'approx' || a.kind === 'approx') {
     return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
   }
@@ -352,7 +373,7 @@ export function pow(a, e) {
     const t = ta[0];
     let out = rationalPow(t.c, e);
     if (out.kind === 'approx') return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
-    const bases = new Map();
+    const bases = new Map<bigint, Fraction>();
     for (const [b, x] of t.rad) bases.set(b, x.mul(e));
     const r = normalizeTerm(ONE, bases);
     if (r === null) return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
@@ -361,7 +382,7 @@ export function pow(a, e) {
   // A sum: only small non-negative integer powers stay exact
   const en = e.s * e.n;
   if (e.d === 1n && en >= 0n && en <= BigInt(MAX_INT_POW)) {
-    let out = ONE;
+    let out: ExactValue = ONE;
     for (let i = 0n; i < en; i++) out = mul(out, a);
     return out;
   }
@@ -373,13 +394,13 @@ export function pow(a, e) {
 // ---------------------------------------------------------------------------
 
 /** Exact equality. An approximate value never equals an exact one. */
-export function equals(a, b) {
+export function equals(a: MaybeValue, b: MaybeValue): boolean {
   if (a == null || b == null) return a === b;
   if (a.kind === undefined && b.kind === undefined) return a.equals(b);
   if (a.kind === 'approx' || b.kind === 'approx') {
     return a.kind === 'approx' && b.kind === 'approx' && a.frac.equals(b.frac);
   }
-  if (a.kind !== b.kind || a.terms.length !== b.terms.length) return false;
+  if (a.kind !== 'irrational' || b.kind !== 'irrational' || a.terms.length !== b.terms.length) return false;
   for (let i = 0; i < a.terms.length; i++) {
     if (a.terms[i].key !== b.terms[i].key || !a.terms[i].c.equals(b.terms[i].c)) return false;
   }
@@ -387,7 +408,7 @@ export function equals(a, b) {
 }
 
 /** -1, 0, 1. Exact for rational and irrational values (refined at 192 bits when doubles are too close). */
-export function compare(a, b) {
+export function compare(a: ExactValue, b: ExactValue): number {
   if (a.kind === undefined && b.kind === undefined) return a.compare(b);
   if (equals(a, b)) return 0;
   const x = toNumber(a, NaN), y = toNumber(b, NaN);
@@ -405,10 +426,10 @@ export function compare(a, b) {
 // Text
 // ---------------------------------------------------------------------------
 
-const fracText = (f) => (f.d === 1n ? `${f.s * f.n}` : `(${f.s * f.n}/${f.d})`);
+const fracText = (f: Fraction) => (f.d === 1n ? `${f.s * f.n}` : `(${f.s * f.n}/${f.d})`);
 
 /** The value in DSL notation: `263 * 2^(7/12)`, `~(26163/100)`. */
-export function toText(v) {
+export function toText(v: MaybeValue): string {
   if (v == null) return '';
   if (v.kind === undefined) return fracText(v);
   if (v.kind === 'approx') return '~' + fracText(v.frac);

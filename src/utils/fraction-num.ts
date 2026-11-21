@@ -10,8 +10,16 @@
  * gesture checks converts through it — once, late, and overflow-safe.
  */
 
+interface FractionLike {
+  s?: number | bigint;
+  n?: number | bigint;
+  d?: number | bigint;
+  valueOf?(): unknown;
+}
+type NumericInput = FractionLike | number | bigint | string | null | undefined;
+
 /** BigInt gcd of absolute values. Returns 1n when both inputs are 0n. */
-export function bigGcd(a, b) {
+export function bigGcd(a: bigint, b: bigint): bigint {
   a = a < 0n ? -a : a;
   b = b < 0n ? -b : b;
   while (b) {
@@ -33,7 +41,7 @@ const DECIMAL_RE = /^(-?)(\d+)(?:\.(\d+))?$/;
  * @param {string} str
  * @returns {{num: bigint, den: bigint} | null}
  */
-export function decimalStringToBigFraction(str) {
+export function decimalStringToBigFraction(str: unknown) {
   if (typeof str !== 'string') return null;
   const m = DECIMAL_RE.exec(str.trim());
   if (!m) return null;
@@ -47,7 +55,7 @@ export function decimalStringToBigFraction(str) {
 }
 
 /** Decimal digit count of a BigInt magnitude (sign ignored). */
-export function bigDigits(v) {
+export function bigDigits(v: bigint) {
   const s = (v < 0n ? -v : v).toString();
   return s.length;
 }
@@ -75,15 +83,15 @@ const SAFE_LIMIT = 10n ** BigInt(SAFE_DIGITS);
  * @param {number} [fallback=0] value when frac is null/undefined/invalid
  * @returns {number} always finite unless the true value overflows a double
  */
-export function toNumber(frac, fallback = 0) {
+export function toNumber(frac: NumericInput, fallback = 0): number {
   if (frac == null) return fallback;
   if (typeof frac === 'number') return frac;
   if (typeof frac === 'bigint') return Number(frac);
 
-  const n = frac.n;
-  const d = frac.d;
+  const n = typeof frac === 'string' ? undefined : frac.n;
+  const d = typeof frac === 'string' ? undefined : frac.d;
   if (typeof n === 'bigint' && typeof d === 'bigint') {
-    const s = frac.s != null && frac.s < 0n ? -1 : 1;
+    const s = typeof frac !== 'string' && frac.s != null && frac.s < 0n ? -1 : 1;
     // Both within SAFE_DIGITS digits (every value the editor meets): the plain
     // division below. Comparing magnitudes costs nothing; counting digits wrote
     // both out in decimal, for every note on every renderer sync.

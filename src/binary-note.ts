@@ -1,3 +1,5 @@
+import type Fraction from 'fraction.js';
+
 /**
  * Binary Expression Format for RMT Compose
  *
@@ -39,7 +41,7 @@ export const OP = {
   // Stack operations
   DUP:            0x30,  // Duplicate top of stack
   SWAP:           0x31,  // Swap top two stack values
-};
+} as const;
 
 // Variable indices for compact storage
 //
@@ -54,7 +56,7 @@ export const VAR = {
   AMPLITUDE: 3,
   ATTACK: 4,
   RELEASE: 5,
-};
+} as const;
 
 /** First variable index that interprets rather than relates (inherits from the BaseNote). */
 export const FIRST_INTERPRETATION_VAR = VAR.AMPLITUDE;
@@ -67,7 +69,11 @@ export const VAR_NAMES = {
   3: 'amplitude',
   4: 'attack',
   5: 'release',
-};
+} as const;
+
+export type VariableIndex = keyof typeof VAR_NAMES;
+export type ExpressionName = (typeof VAR_NAMES)[VariableIndex];
+export type NoteId = number;
 
 // Corruption flags (bitmask indicating which properties contain irrational values)
 export const CORRUPT = {
@@ -77,19 +83,21 @@ export const CORRUPT = {
   AMPLITUDE:        0x08,
   ATTACK:           0x10,
   RELEASE:          0x20,
-};
+} as const;
 
 /**
  * Get corruption flag for a variable index
  * @param {number} varIndex - Variable index (0-5)
  * @returns {number} Corruption flag bitmask
  */
-export function getCorruptionFlag(varIndex) {
+export function getCorruptionFlag(varIndex: number) {
   return 1 << varIndex;
 }
 
 /** The empty dependency and reference list that expressions share; frozen, never written. */
-const EMPTY_LIST = Object.freeze([]);
+// Freeze the shared empty buffer after construction. Writes grow it before indexing.
+const EMPTY_LIST: number[] = [];
+Object.freeze(EMPTY_LIST);
 
 /**
  * Binary expression storage
@@ -101,7 +109,9 @@ export class BinaryExpression {
    * @param {ArrayLike<number>|null} [dependencies] - the dependency list to
    *   start from (clone() passes an exact-size one); a Uint32Array(16) if none
    */
-  constructor(initialSize = 64, dependencies = null) {
+  declare dependencies: number[] | Uint32Array;
+  declare _varRefs: readonly number[] | null;
+  constructor(initialSize = 64, dependencies: number[] | Uint32Array | null = null) {
     // Instruction bytecode buffer
     this.bytecode = new Uint8Array(initialSize);
     this.length = 0;
@@ -125,7 +135,7 @@ export class BinaryExpression {
   /**
    * Ensure bytecode buffer has enough capacity
    */
-  ensureCapacity(needed) {
+  ensureCapacity(needed: number) {
     if (this.length + needed > this.bytecode.length) {
       const newSize = Math.max(this.bytecode.length * 2, this.length + needed);
       const newBuffer = new Uint8Array(newSize);
@@ -137,7 +147,7 @@ export class BinaryExpression {
   /**
    * Write a single byte
    */
-  writeByte(value) {
+  writeByte(value: number) {
     this.ensureCapacity(1);
     this.bytecode[this.length++] = value & 0xFF;
   }
@@ -145,7 +155,7 @@ export class BinaryExpression {
   /**
    * Write a 16-bit unsigned integer (big-endian)
    */
-  writeUint16(value) {
+  writeUint16(value: number) {
     this.ensureCapacity(2);
     this.bytecode[this.length++] = (value >> 8) & 0xFF;
     this.bytecode[this.length++] = value & 0xFF;
@@ -154,7 +164,7 @@ export class BinaryExpression {
   /**
    * Write a 32-bit unsigned integer (big-endian)
    */
-  writeUint32(value) {
+  writeUint32(value: number) {
     this.ensureCapacity(4);
     this.bytecode[this.length++] = (value >>> 24) & 0xFF;
     this.bytecode[this.length++] = (value >>> 16) & 0xFF;
@@ -165,7 +175,7 @@ export class BinaryExpression {
   /**
    * Write a 32-bit signed integer (big-endian)
    */
-  writeInt32(value) {
+  writeInt32(value: number) {
     this.ensureCapacity(4);
     this.bytecode[this.length++] = (value >> 24) & 0xFF;
     this.bytecode[this.length++] = (value >> 16) & 0xFF;
@@ -178,7 +188,7 @@ export class BinaryExpression {
    * Format: [sign(1)] [len(2)] [bytes(n)]
    * @param {bigint} value - The BigInt value to write
    */
-  writeBigIntSigned(value) {
+  writeBigIntSigned(value: bigint) {
     const bigVal = BigInt(value);
     const isNegative = bigVal < 0n;
     const magnitude = isNegative ? -bigVal : bigVal;
@@ -195,7 +205,7 @@ export class BinaryExpression {
    * Format: [len(2)] [bytes(n)]
    * @param {bigint} value - The BigInt value to write (must be non-negative)
    */
-  writeBigIntUnsigned(value) {
+  writeBigIntUnsigned(value: bigint) {
     const bigVal = BigInt(value);
     if (bigVal < 0n) {
       throw new Error('writeBigIntUnsigned requires non-negative value');
@@ -229,7 +239,7 @@ export class BinaryExpression {
   /**
    * Add a note dependency
    */
-  addDependency(noteId) {
+  addDependency(noteId: NoteId) {
     // Check if already tracked
     for (let i = 0; i < this.depCount; i++) {
       if (this.dependencies[i] === noteId) return;
@@ -249,7 +259,7 @@ export class BinaryExpression {
    * Get dependencies as a Set for compatibility
    */
   getDependencySet() {
-    const set = new Set();
+    const set = new Set<NoteId>();
     for (let i = 0; i < this.depCount; i++) {
       set.add(this.dependencies[i]);
     }
@@ -261,7 +271,7 @@ export class BinaryExpression {
    * Returns Map<noteId, Set<varIndex>> showing which properties are referenced
    */
   getPropertyDependencies() {
-    const deps = new Map(); // noteId -> Set<varIndex>
+    const deps = new Map<NoteId, Set<number>>(); // noteId -> Set<varIndex>
     const bytecode = this.bytecode;
     const len = this.length;
     let pc = 0;
@@ -302,7 +312,7 @@ export class BinaryExpression {
           if (!deps.has(noteId)) {
             deps.set(noteId, new Set());
           }
-          deps.get(noteId).add(varIdx);
+          deps.get(noteId)!.add(varIdx);
           break;
         }
 
@@ -335,8 +345,8 @@ export class BinaryExpression {
       return this._varRefs;
     }
 
-    const refs = [];
-    const addRef = (ref) => { if (!refs.includes(ref)) refs.push(ref); };
+    const refs: number[] = [];
+    const addRef = (ref: number) => { if (!refs.includes(ref)) refs.push(ref); };
     const bytecode = this.bytecode;
     const len = this.length;
     let pc = 0;
@@ -395,7 +405,7 @@ export class BinaryExpression {
    * @param {number} varIndex - The variable index (VAR.START_TIME, VAR.DURATION, etc.)
    * @returns {boolean}
    */
-  referencesProperty(noteId, varIndex) {
+  referencesProperty(noteId: NoteId, varIndex: number) {
     const deps = this.getPropertyDependencies();
     const noteProps = deps.get(noteId);
     return noteProps ? noteProps.has(varIndex) : false;
@@ -430,9 +440,8 @@ export class BinaryExpression {
    */
   clone() {
     const n = this.depCount;
-    let deps = EMPTY_LIST;
+    const deps = n ? new Array<number>(n) : EMPTY_LIST;
     if (n > 0) {
-      deps = new Array(n);
       for (let i = 0; i < n; i++) deps[i] = this.dependencies[i];
     }
     const copy = new BinaryExpression(this.length, deps);
@@ -470,7 +479,13 @@ export const EMPTY_EXPRESSION = (() => {
  * Stores all note parameters as binary expressions
  */
 export class BinaryNote {
-  constructor(id) {
+  declare _cachedStart: Fraction | null;
+  declare _cachedDur: Fraction | null;
+  declare _cachedFreq: Fraction | null;
+  declare _cachedAmp: Fraction | null;
+  declare _cachedAttack: Fraction | null;
+  declare _cachedRelease: Fraction | null;
+  constructor(id: NoteId) {
     this.id = id;
 
     // Binary expressions for each variable
@@ -500,7 +515,7 @@ export class BinaryNote {
   /**
    * Get binary expression for a variable name
    */
-  getExpression(varName) {
+  getExpression(varName: string) {
     switch (varName) {
       case 'startTime': return this.startTime;
       case 'duration': return this.duration;
@@ -515,7 +530,7 @@ export class BinaryNote {
   /**
    * Set binary expression for a variable name
    */
-  setExpression(varName, expr) {
+  setExpression(varName: string, expr: BinaryExpression) {
     switch (varName) {
       case 'startTime': this.startTime = expr; break;
       case 'duration': this.duration = expr; break;
@@ -529,7 +544,7 @@ export class BinaryNote {
   /**
    * Get cached value for a variable
    */
-  getCachedValue(varName) {
+  getCachedValue(varName: string) {
     switch (varName) {
       case 'startTime': return this._cachedStart;
       case 'duration': return this._cachedDur;
@@ -544,7 +559,7 @@ export class BinaryNote {
   /**
    * Set cached value for a variable
    */
-  setCachedValue(varName, value) {
+  setCachedValue(varName: string, value: Fraction | null) {
     switch (varName) {
       case 'startTime': this._cachedStart = value; break;
       case 'duration': this._cachedDur = value; break;
@@ -572,9 +587,9 @@ export class BinaryNote {
    * Get all dependencies across all expressions
    */
   getAllDependencies() {
-    const deps = new Set();
+    const deps = new Set<NoteId>();
 
-    const addDeps = (expr) => {
+    const addDeps = (expr: BinaryExpression) => {
       for (let i = 0; i < expr.depCount; i++) {
         deps.add(expr.dependencies[i]);
       }
@@ -626,7 +641,7 @@ export class BinaryNote {
 export class BinaryModule {
   constructor() {
     // Note storage: id -> BinaryNote
-    this.notes = new Map();
+    this.notes = new Map<NoteId, BinaryNote>();
 
     // Base note (id = 0) with default values
     this.baseNote = new BinaryNote(0);
@@ -642,14 +657,14 @@ export class BinaryModule {
   /**
    * Get a note by ID
    */
-  getNoteById(id) {
+  getNoteById(id: NoteId) {
     return this.notes.get(id) || null;
   }
 
   /**
    * Add a new note
    */
-  addNote(note) {
+  addNote(note: BinaryNote) {
     if (note.id === 0) {
       // Replace base note
       this.baseNote = note;
@@ -675,7 +690,7 @@ export class BinaryModule {
   /**
    * Remove a note by ID
    */
-  removeNote(id) {
+  removeNote(id: NoteId) {
     if (id === 0) return false; // Cannot remove base note
     const removed = this.notes.delete(id);
     if (removed) {
