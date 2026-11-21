@@ -1,8 +1,15 @@
-import { InstanceRanges } from './instance-ranges.js';
-import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
+import type { Module } from '../../module.ts';
+import type { ExpressionName } from '../../model-types.ts';
+import type { Note } from '../../note.ts';
+import type Fraction from 'fraction.js';
+import type { CameraController } from './camera-controller.ts';
+import type { RendererConfig, RendererConfigPatch } from './renderer-config.ts';
+import type { Preview, RenderRecord, EvaluatedScene, SyncArgs, Marquee, SceneHit, DragOffset, DragOverlay, ByRelation, InputTheme, ColorCache, GlyphRun, Sprite, TextureEntry, Glyph, AtlasGlyph, Atlas, AtlasScratch, LinkWriter, LinkBasis, Overview, CachedRings } from './render-types.ts';
+import { InstanceRanges } from './instance-ranges.ts';
+import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.ts';
 import { toNumber } from '../../utils/fraction-num.js';
-import { noteLabel, LINE_LABEL } from './note-label.js';
-import { parseCssColor } from '../../utils/css-color.js';
+import { noteLabel, LINE_LABEL } from './note-label.ts';
+import { parseCssColor } from '../../utils/css-color.ts';
 import { amplitudeToGain } from '../../player/amplitude.js';
 import { isMeasureNote } from '../../note.js';
 import { envelopeShares } from '../../instruments/instrument-manager.js';
@@ -16,8 +23,393 @@ import { getInstrumentManager } from '../../store/app-state.js';
  *     x = seconds * 200 * xScaleFactor
  *     y = log2(baseFreq / freq) * 100 * yScaleFactor
  */
+type FrequencyShadow = Fraction & { _irrational?: boolean; _floatValue?: number };
+
 export class RendererAdapter {
-  constructor(config = null) {
+  declare _config: RendererConfig;
+  declare canvas: HTMLCanvasElement | null;
+  declare gl: WebGL2RenderingContext | null;
+  declare rectProgram: WebGLProgram | null;
+  declare playheadProgram: WebGLProgram | null;
+  declare measureDashProgram: WebGLProgram | null;
+  declare rectBorderProgram: WebGLProgram | null;
+  declare borderOnlyProgram: WebGLProgram | null;
+  declare rectVAO: WebGLVertexArrayObject | null;
+  declare rectUnitBuffer: WebGLBuffer | null;
+  declare rectInstancePosSizeBuffer: WebGLBuffer | null;
+  declare rectInstanceColorBuffer: WebGLBuffer | null;
+  declare rectInstanceFlagsBuffer: WebGLBuffer | null;
+  declare rectInstanceDragFlagsBuffer: WebGLBuffer | null;
+  declare playheadVAO: WebGLVertexArrayObject | null;
+  declare playheadPosSizeBuffer: WebGLBuffer | null;
+  declare playheadColorBuffer: WebGLBuffer | null;
+  declare instanceCount: number;
+  declare devicePixelRatio: number;
+  declare matrix: Float32Array<ArrayBuffer>;
+  declare xScalePxPerWU: number;
+  declare yScalePxPerWU: number;
+  declare canvasOffset: { x: number; y: number; };
+  declare _cachedCanvasRect: DOMRect | null;
+  declare posSize: Float32Array<ArrayBuffer> | null;
+  declare colors: Float32Array<ArrayBuffer> | null;
+  declare _dragFlags: Float32Array<ArrayBuffer> | null;
+  declare _corruptionType: Float32Array<ArrayBuffer> | null;
+  declare _dragOffsetX: number;
+  declare _dragOffsetW: number;
+  declare _dragFlagsInited: boolean;
+  declare _dragActive: boolean;
+  declare _dragLastWasResize: boolean;
+  declare currentXScaleFactor: number;
+  declare currentYScaleFactor: number;
+  declare _dragFlagsLastCount: number;
+  declare _dragSetHash: number;
+  declare _dragSetSize: number;
+  declare _dragSetIndices: Int32Array<ArrayBuffer> | null;
+  declare _dragAnchorIndex: number;
+  declare _baselineNonMovingEndSec: number | null;
+  declare _baselineMovingIdx: Int32Array<ArrayBuffer> | null;
+  declare _dragDxSec: number;
+  declare _dragDdSec: number;
+  declare _lastDragXScale: number | null;
+  declare _xScaleFactorAtLastSync: number;
+  declare playheadTimeSec: number;
+  declare playheadXWorld: number;
+  declare _lastPlayheadLocalX: number | null;
+  declare _lastPlayheadViewEpoch: number;
+  declare _lastPlayheadScale: number;
+  declare animHandle: number | null;
+  declare needsRedraw: boolean;
+  declare _resizeObserver: ResizeObserver | null;
+  declare _baseFreqCache: number;
+  declare _instanceNoteIds: Int32Array<ArrayBuffer> | null;
+  declare _xScaleAtInit: number | null;
+  declare trackingMode: boolean;
+  declare _viewEpoch: number;
+  declare _lastMeasureEpoch: number;
+  declare _lastMeasureSolidEpoch: number;
+  declare _lastTriEpoch: number;
+  declare _triDataEpoch: number;
+  declare _lastTriDataEpoch: number;
+  declare _measurePreview: Record<number, number> | null;
+  declare _triPreviewEpoch: number;
+  declare _lastTriPreviewEpoch: number;
+  declare _lastOctaveEpoch: number;
+  declare _lastOctaveSelected: number | null | undefined;
+  declare _lastOctaveRefFreq: number | null | undefined;
+  declare _lastTabEpoch: number;
+  declare _tabRegions: Float32Array<ArrayBuffer> | null;
+  declare _tabInnerRegions: Float32Array<ArrayBuffer> | null;
+  declare _lastArrowEpoch: number;
+  declare _arrowUpRegions: Float32Array<ArrayBuffer> | null;
+  declare _arrowDownRegions: Float32Array<ArrayBuffer> | null;
+  declare _lastArrowUploadEpoch: number;
+  declare _arrowRegionsDirty: boolean;
+  declare _posEpoch: number;
+  declare _sceneEpoch: number;
+  declare _lastLinkPosEpoch: number;
+  declare _lastLinkViewEpoch: number;
+  declare _lastLinkAnchorId: number | null;
+  declare _linkEndpointsDeps: Float32Array<ArrayBuffer> | null;
+  declare _linkEndpointsRdeps: Float32Array<ArrayBuffer> | null;
+  declare _linkDepsCount: number;
+  declare _linkRdepsCount: number;
+  declare _linkEndpointsByProperty: ByRelation<Float32Array<ArrayBuffer> | null | undefined>;
+  declare _linkCountByProperty: { frequency: number; startTime: number; duration: number; };
+  declare _linkFlagsByProperty: ByRelation<Float32Array<ArrayBuffer> | null | undefined>;
+  declare _linkDepsEndpointsByProperty: ByRelation<Float32Array<ArrayBuffer> | null | undefined>;
+  declare _linkDepsCountByProperty: { frequency: number; startTime: number; duration: number; };
+  declare _linkDepsFlagsByProperty: ByRelation<Float32Array<ArrayBuffer> | null | undefined>;
+  declare drawMeasureBars: boolean;
+  declare drawMeasureSolids: boolean;
+  declare drawOctaveGuides: boolean;
+  declare drawNoteArrows: boolean;
+  declare drawBaseFraction: boolean;
+  declare _baseFracNum: string;
+  declare _baseFracDen: string;
+  declare drawNoteOverlays: boolean;
+  declare enableSilenceEraseBands: boolean;
+  declare _softTextureCapPx: number;
+  declare _maxTextureSize: number | null;
+  declare _maxOnscreenFontPx: number;
+  declare _glyphBasePx: number;
+  declare useGlyphCache: boolean;
+  declare useGlyphAtlas: boolean;
+  declare _atlasEnabledFlagRead: boolean;
+  declare _atlas: Atlas | null;
+  declare _uniforms: Record<string, Record<string, WebGLUniformLocation | null>>;
+  declare _sceneDirty: boolean;
+  declare _textDirty: boolean;
+  declare _lastTextViewEpoch: number;
+  declare _lastTextPosEpoch: number;
+  declare _lastInstanceCount: number;
+  declare _glyphRunsCache: GlyphRun[] | null;
+  declare _dragEpoch: number;
+  declare _lastTextDragEpoch: number;
+  declare _lastLinkDragEpoch: number;
+  declare _lastTabDragGeom: number;
+  declare _lastArrowDragGeom: number;
+  declare _lastTabPosEpoch: number;
+  declare _lastArrowPosEpoch: number;
+  declare _lastDividerEpoch: number;
+  declare _lastDividerUploadEpoch: number;
+  declare _dividerRegions: Float32Array<ArrayBuffer> | null;
+  declare _anyDivider: boolean;
+  declare _lastSelectedNoteId: number | null;
+  declare _lastNoteFracNumStrs: (string | null)[] | null | undefined;
+  declare _lastNoteFracDenStrs: (string | null)[] | null | undefined;
+  declare _hoveredNoteId: number | null;
+  declare _hoverSub: { id: number; region: string; } | null;
+  declare _hoverBase: boolean;
+  declare _hoveredMeasureId: number | null;
+  declare _multiSelIds: Set<number> | null;
+  declare _multiSelNoteIdx: number[] | null;
+  declare _multiSelNoteMapRef: Map<number, number> | null;
+  declare _marqueeRect: Marquee | null;
+  declare _relDepsIdx: number[] | null;
+  declare _relRdepsIdx: number[] | null;
+  declare _relDepsMeasureIds: number[] | null;
+  declare _relRdepsMeasureIds: number[] | null;
+  declare _relDepsHasBase: boolean;
+  declare _relRdepsHasBase: boolean;
+  declare _relRdepsIdxByProperty: ByRelation<number[] | null>;
+  declare _relDepsIdxByProperty: ByRelation<number[] | null>;
+  declare _relRdepsHasBaseByProperty: { frequency: boolean; startTime: boolean; duration: boolean; };
+  declare _relDepsHasBaseByProperty: { frequency: boolean; startTime: boolean; duration: boolean; };
+  declare _themeColors: ColorCache;
+  declare _colorEpoch: number;
+  declare tailCount: number;
+  declare _containerEl: HTMLElement | null;
+  declare _onWinScroll: (() => void) | null | undefined;
+  declare _onWinResize: (() => void) | null | undefined;
+  declare _restoredDragIds: Set<number> | null;
+  declare _syncRevision: number;
+  declare _syncConfig: RendererConfig;
+  declare _hasPreviewGeometry: boolean;
+  declare _parsedColorCache: Map<string, number[] | null> | null;
+  declare _idColorCache: Map<number, number[]> | null;
+  declare _fracStrCache: Map<number, string[]> | null;
+  declare _moduleRef: Module | null;
+  declare _baseFreqExact: X.ExactValue | null;
+  declare _maxNoteEndId: number | null;
+  declare _maxNoteEndSec: number;
+  declare _refLines: { id: number; freq: number; startSec: number | null }[];
+  declare _tailItems: { x: number; y: number; w: number; h: number; color: number[]; level: number; under: number; }[];
+  declare _naturalLastId: number | undefined;
+  declare _instanceFlags: Float32Array<ArrayBuffer>;
+  declare _envShape: Float32Array<ArrayBuffer>;
+  declare _noteIdToIndex: Map<number, number>;
+  declare _relDepsChainByProperty: ByRelation<number[]>;
+  declare _relDepsChainIdxByProperty: ByRelation<number[]>;
+  declare _linkTreeCache: { module: Module; anchor: number; pos: number; trees: ReturnType<Module['getChildrenTreeByAllProperties']> } | null;
+  declare _noteFracNumStrs: (string | null)[];
+  declare _noteFracDenStrs: (string | null)[];
+  declare _noteLabelApprox: Uint8Array<ArrayBuffer>;
+  declare _exactLabelCache: WeakMap<X.ExactValue, ReturnType<typeof noteLabel>>;
+  declare _labelCacheBase: X.ExactValue | null;
+  declare _rangeIndex: InstanceRanges | null | undefined;
+  declare _simpleInstances: boolean;
+  declare _lastSyncWasPartial: boolean;
+  declare _zeros4Cache: Float32Array<ArrayBuffer>;
+  declare _lastNoteLabelApprox: Uint8Array<ArrayBuffer>;
+  declare _prospectiveParentId: number | null;
+  declare _multiSelMeasureIds: number[] | null;
+  declare tailProgram: WebGLProgram | null | undefined;
+  declare selectionRingProgram: WebGLProgram | null | undefined;
+  declare selectionFillProgram: WebGLProgram | null | undefined;
+  declare tabMaskProgram: WebGLProgram | null | undefined;
+  declare silenceDashRingProgram: WebGLProgram | null | undefined;
+  declare rectInstanceTabRegionBuffer: WebGLBuffer;
+  declare rectInstanceTabInnerBuffer: WebGLBuffer;
+  declare rectInstanceArrowRegionBuffer: WebGLBuffer;
+  declare rectInstanceArrowDownRegionBuffer: WebGLBuffer;
+  declare rectInstanceDividerRegionBuffer: WebGLBuffer;
+  declare rectInstanceCorruptionBuffer: WebGLBuffer;
+  declare rectInstanceEnvBuffer: WebGLBuffer;
+  declare tailVAO: WebGLVertexArrayObject;
+  declare tailPosSizeBuffer: WebGLBuffer;
+  declare tailColorBuffer: WebGLBuffer;
+  declare tailLevelBuffer: WebGLBuffer;
+  declare _singlePosSizeBuffer: WebGLBuffer;
+  declare _ringBuffers: Map<string, CachedRings>;
+  declare _depRingBatch: Float32Array<ArrayBuffer>;
+  declare _detailRanges: number[];
+  declare _nextVisibleRanges: number[];
+  declare _visibleRanges: number[];
+  declare _lastDetailRanges: number[];
+  declare _detailBlocks: number[];
+  declare _overviewDetails: Overview;
+  declare _instanceBaseUniforms: WeakMap<WebGLProgram, WebGLUniformLocation | null>;
+  declare _dragPreviewIdsRef: number[] | Set<number> | null | undefined;
+  declare _dragMovingIds: Set<number> | null;
+  declare _pendingDragIdxArr: number[] | null | undefined;
+  declare _dragOriginalPos: Map<number, {x: number; w: number}> | null;
+  declare _endTimePreviewSec: number | null | undefined;
+  declare measureVAO: WebGLVertexArrayObject;
+  declare _measureUnitBuffer: WebGLBuffer;
+  declare measurePosSizeBuffer: WebGLBuffer;
+  declare measureColorBuffer: WebGLBuffer;
+  declare measureCount: number;
+  declare measurePosSize: Float32Array<ArrayBuffer> | null | undefined;
+  declare measureColors: Float32Array<ArrayBuffer> | null | undefined;
+  declare measureSolidVAO: WebGLVertexArrayObject;
+  declare _measureSolidUnitBuffer: WebGLBuffer;
+  declare measureSolidPosSizeBuffer: WebGLBuffer;
+  declare measureSolidColorBuffer: WebGLBuffer;
+  declare measureSolidCount: number;
+  declare measureSolidPosSize: Float32Array<ArrayBuffer> | null | undefined;
+  declare measureSolidColors: Float32Array<ArrayBuffer> | null | undefined;
+  declare measureTriProgram: WebGLProgram | null | undefined;
+  declare measureTriOutlineProgram: WebGLProgram | null | undefined;
+  declare baseCircleProgram: WebGLProgram | null | undefined;
+  declare baseCircleVAO: WebGLVertexArrayObject;
+  declare _baseCircleUnitBuffer: WebGLBuffer;
+  declare baseCirclePosSizeBuffer: WebGLBuffer;
+  declare baseCirclePosSize: Float32Array<ArrayBuffer> | null;
+  declare measureTriVAO: WebGLVertexArrayObject;
+  declare _measureTriUnitBuffer: WebGLBuffer;
+  declare measureTriPosSizeBuffer: WebGLBuffer;
+  declare measureTriDragFlagBuffer: WebGLBuffer;
+  declare measureTriPosSizeOutlineBuffer: WebGLBuffer;
+  declare measureTriCount: number;
+  declare measureTriPosSize: Float32Array<ArrayBuffer> | null | undefined;
+  declare measureTriPosSizeOutline: Float32Array<ArrayBuffer> | null | undefined;
+  declare _measureTriTimes: number[] | null | undefined;
+  declare _measureTriIds: number[] | null;
+  declare octaveLineProgram: WebGLProgram | null | undefined;
+  declare silenceVLineProgram: WebGLProgram | null | undefined;
+  declare octaveLineVAO: WebGLVertexArrayObject;
+  declare _octaveUnitBuffer: WebGLBuffer;
+  declare octaveLinePosSizeBuffer: WebGLBuffer;
+  declare measureDashDragFlagBuffer: WebGLBuffer;
+  declare textProgram: WebGLProgram | null | undefined;
+  declare textVAO: WebGLVertexArrayObject;
+  declare _textUnitBuffer: WebGLBuffer;
+  declare textPosSizeBuffer: WebGLBuffer;
+  declare solidCssProgram: WebGLProgram | null | undefined;
+  declare textCircMaskProgram: WebGLProgram | null | undefined;
+  declare solidCssCircMaskProgram: WebGLProgram | null | undefined;
+  declare _octaveLinesPosSize: Float32Array<ArrayBuffer> | null | undefined;
+  declare _octaveLabelCache: Map<string, TextureEntry>;
+  declare _octaveIndices: number[];
+  declare _syncedMeasures: Note[];
+  declare _moduleEndTime: number;
+  declare _measureTriIdToIndex: Map<number, number>;
+  declare _lastMeasureMeta: { id: number; baseStartSec: number; lengthSec: number } | null;
+  declare _lastDashFlagsKey: string | null;
+  declare _baseCircleCss: { cx: number; cy: number; r: number; };
+  declare _measureTriCss: Float32Array<ArrayBuffer> | null | undefined;
+  declare _lastTriFlagsKey: string | null;
+  declare _measureRingCache: {rect: Marquee | null; committed: number[] | null; css: Float32Array<ArrayBuffer> | null | undefined; map: Map<number,number> | null; view: number; preview: number; boxes: Float32Array<ArrayBuffer>};
+  declare _deferredGlyphRuns: GlyphRun[];
+  declare _atlasGlyphCache: { runs: GlyphRun[]; count: number } | null;
+  declare _textRebuildThisFrame: boolean;
+  declare _deferredTextSprites: Sprite[];
+  declare _hoverRegionScratchBuffer: WebGLBuffer;
+  declare _silenceEraseRegions: Float32Array<ArrayBuffer> | null;
+  declare _anySilenceErase: boolean;
+  declare _glyphCache: Map<string, Glyph>;
+  declare _wordCache: Map<string, TextureEntry>;
+  declare _glyphCacheInitialized: boolean;
+  declare _runMetricsCache: Map<string, {ascent: number; descent: number; width: number; height: number}>;
+  declare _metricsCanvas: HTMLCanvasElement;
+  declare _metricsCtx: CanvasRenderingContext2D | null | undefined;
+  declare atlasTextProgram: WebGLProgram | null | undefined;
+  declare atlasVAO: WebGLVertexArrayObject;
+  declare _atlasUnitBuffer: WebGLBuffer;
+  declare atlasPosSizeBuffer: WebGLBuffer;
+  declare atlasUVRectBuffer: WebGLBuffer;
+  declare atlasColorBuffer: WebGLBuffer;
+  declare atlasZBuffer: WebGLBuffer;
+  declare atlasClipRectBuffer: WebGLBuffer;
+  declare atlasRRCenterSizeBuffer: WebGLBuffer;
+  declare atlasRRRadiusBuffer: WebGLBuffer;
+  declare atlasDragFlagBuffer: WebGLBuffer;
+  declare _atlasScratch: AtlasScratch;
+  declare _atlasDragFlagsDirty: boolean;
+  declare _selectedNoteIdForGuides: number | null | undefined;
+  declare _refFreqForGuides: number;
+  declare _selectedHasFrequencyForGuides: boolean;
+  declare octaveLineInstProgram: WebGLProgram | null | undefined;
+  declare octaveLineInstVAO: WebGLVertexArrayObject;
+  declare octaveLineInstPosSizeBuffer: WebGLBuffer;
+  declare octaveLineInstHoleBuffer: WebGLBuffer;
+  declare octaveLineInstColorBuffer: WebGLBuffer;
+  declare _octInstPosSize: Float32Array<ArrayBuffer>;
+  declare _octInstHole: Float32Array<ArrayBuffer>;
+  declare _octInstColor: Float32Array<ArrayBuffer>;
+  declare _linkPool: Map<string, LinkWriter>;
+  declare drawLinkLines: boolean;
+  declare drawDragOverlays: boolean;
+  declare drawDragGhosts: boolean;
+  declare linkLineProgram: WebGLProgram | null | undefined;
+  declare linkLineVAO: WebGLVertexArrayObject;
+  declare _linkLineUnitBuffer: WebGLBuffer;
+  declare linkLineEndpointsBufferDeps: WebGLBuffer;
+  declare linkLineEndpointsBufferRdeps: WebGLBuffer;
+  declare linkLineFlagsBufferDeps: WebGLBuffer;
+  declare linkLineFlagsBufferRdeps: WebGLBuffer;
+  declare _linkBuffersByProperty: Record<string, {endpoints: WebGLBuffer; flags: WebGLBuffer}>;
+  declare _linkDepsBuffersByProperty: Record<string, {endpoints: WebGLBuffer; flags: WebGLBuffer}>;
+  declare _dragOverlay: DragOverlay | null;
+  declare _dragOverlayIdsRef: number[] | null;
+  declare _lastLinkTriDataEpoch: number;
+  declare _lastLinkProspectiveParentId: number | null;
+  declare _linkBasis: LinkBasis;
+  declare marqueeProgram: WebGLProgram | null | undefined;
+  declare marqueeVAO: WebGLVertexArrayObject;
+  declare _marqueeUnitBuffer: WebGLBuffer;
+  declare _refLineCss: {id: number; y: number; x0: number}[];
+  declare _pickRanges: number[];
+  declare _initMeasurePass: () => void;
+  declare _collectMeasureNotes: (module: Module) => Note[];
+  declare _computeModuleEndTime: (module: Module, measureNotes?: Note[] | null) => number;
+  declare _syncMeasureBars: (module: Module, knownMeasures?: Note[] | null) => void;
+  declare _renderMeasureBars: () => void;
+  declare _renderBaseFractionIfMissing: () => void;
+  declare _renderNoteOverlays: () => void;
+  declare _approximateFraction: (x: number, maxDen: number, maxDigits: number) => { n: number; d: number };
+  declare _getMaxTextureCapPx: () => number;
+  declare _calcTextBackingScale: (wPx: number, hPx: number) => number;
+  declare _clampFontPx: (px: number) => number;
+  declare _createTextTexture: (label: string) => TextureEntry | null;
+  declare _createNarrowTextTexture: (label: string, fontPx?: number, pad?: number) => TextureEntry | null;
+  declare _createStyledTextTexture: (label: string, fontPx?: number, pad?: number, color?: string, shadowColor?: string, shadowBlur?: number) => TextureEntry | null;
+  declare _createTightDigitTexture: (label: string, fontPx?: number, pad?: number, color?: string) => TextureEntry | null;
+  declare _initGlyphCache: () => void;
+  declare _getGlyph: (ch: string) => Glyph | null | undefined;
+  declare _getGlyphSize: (ch: string, targetFontPx: number) => {w: number; h: number; ascent: number; inkTop: number; inkBottom: number} | null;
+  declare _refreshGlyphCaches: () => void;
+  declare _measureGlyphRunWidth: (text: string, targetFontPx: number) => number;
+  declare _getRunAscent: (text: string, targetFontPx: number) => number;
+  declare _getRunHeight: (text: string, targetFontPx: number) => number;
+  declare _measureRunMetricsCanvas: (text: string, fontPx: number) => {ascent: number; descent: number; width: number; height: number};
+  declare _getWordSilence: () => TextureEntry | null;
+  declare _initGlyphAtlas: () => void;
+  declare _ensureAtlasGlyph: (ch: string) => AtlasGlyph | null | undefined;
+  declare _flushGlyphRunsAtlas: () => void;
+  declare _buildAtlasGlyphInstances: (runs: GlyphRun[], vpW: number, vpH: number) => number;
+  declare _uploadAtlasDragFlags: (runs: GlyphRun[], count: number) => void;
+  declare _drawAtlasGlyphInstances: (count: number, vpW: number, vpH: number, reused: boolean) => void;
+  declare _drawGlyphRun: (text: string, x: number, y: number, fontPx: number, scaleX?: number) => void;
+  declare _ensureOctaveGuides: () => void;
+  declare _renderOctaveGuides: () => void;
+  declare _pointInTriangle: (px: number, py: number, ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => boolean;
+  declare pickBaseCircleAt: (clientX: number, clientY: number) => SceneHit[];
+  declare pickTrianglesAt: (clientX: number, clientY: number, firstOnly?: boolean) => SceneHit[];
+  declare pickTopAt: (clientX: number, clientY: number, expandCssPx?: number, noteHit?: SceneHit | null) => SceneHit | null;
+  declare pickAllAt: (clientX: number, clientY: number, expandCssPx?: number) => SceneHit[];
+  declare _renderOctaveGuidesInstanced: () => void;
+  declare _linkWriter: (key: string) => LinkWriter;
+  declare _initLinkLinesPass: () => void;
+  declare setDragOverlay: (state: DragOverlay | null) => void;
+  declare clearDragOverlay: () => void;
+  declare _renderDependencyLinesAndDragOverlay: () => void;
+  declare _initMarqueePass: () => void;
+  declare _renderMarquee: () => void;
+  declare _renderReferenceLines: () => void;
+  declare pickReferenceLinesAt: (clientX: number, clientY: number, firstOnly?: boolean) => SceneHit[];
+
+  constructor(config: RendererConfigPatch | null = null) {
     // Normalize configuration; defaults preserve existing behavior
     this._config = normalizeRendererConfig(config);
     this.canvas = null;
@@ -321,7 +713,7 @@ export class RendererAdapter {
   }
 
   // Update configuration at runtime. Merges partial into current and normalizes; triggers redraw.
-  setConfig(partial) {
+  setConfig(partial: RendererConfigPatch) {
     try {
       this._config = normalizeRendererConfig(deepMerge(this._config, partial || {}));
       this.needsRedraw = true;
@@ -336,10 +728,10 @@ export class RendererAdapter {
    * cache and bump the color epoch so they regenerate in the new color.
    * @param {{accent?:string,noteBorder?:string,measureBar?:string,selectionRing?:string,hoverRing?:string,depFrequency?:string,depStartTime?:string,depDuration?:string,textPrimary?:string}} colors
    */
-  setThemeColors(colors) {
+  setThemeColors(colors: InputTheme) {
     try {
       if (!colors || typeof colors !== 'object') return;
-      const hexToRgba = (hex, fallback) => {
+      const hexToRgba = (hex: unknown, fallback: number[]) => {
         if (typeof hex !== 'string') return fallback;
         let h = hex.trim().replace(/^#/, '');
         if (h.length === 3) h = h.split('').map((c) => c + c).join('');
@@ -399,13 +791,13 @@ export class RendererAdapter {
   // root of the gain playback uses (amplitude clamped to 0..4), kept within
   // 0.6x..2x so that the quietest note still holds its labels. Amplitude 1 gives
   // exactly 1: a module that sets no amplitude draws as it always has.
-  _amplitudeHeightScale(amplitude) {
+  _amplitudeHeightScale(amplitude: Fraction | number | null) {
     const gain = amplitudeToGain(amplitude);
     if (gain === 1) return 1;
     const s = Math.sqrt(gain);
     return s < 0.6 ? 0.6 : (s > 2 ? 2 : s);
   }
-  _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
+  _noteCenterY(freq: number) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
   // The envelope of one note as shares of its duration, from the same function the
   // audio engine uses (envelopeShares in instrument-manager.js): the note's own
   // attack and release, the instrument's envelope (in seconds, some following the
@@ -414,7 +806,7 @@ export class RendererAdapter {
   // end, so inside the note there is none to draw (release share 0): the band holds
   // the level the body reaches until the end. `tail` is that release as a share of
   // the duration (drawn past the end when tails are on), starting from `levelAtEnd`.
-  _envelopeSharesFor(module, note, durSec, attack, release, freq, memo = null) {
+  _envelopeSharesFor(module: Module, note: Note, durSec: number, attack: Fraction | null | undefined, release: Fraction | null | undefined, freq: number | null, memo: Parameters<Module['findInstrument']>[1] = null) {
     try {
       const shape = { attack: attack ? toNumber(attack, null) : null, release: release ? toNumber(release, null) : null };
       let env = {};
@@ -448,8 +840,9 @@ export class RendererAdapter {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer); gl.bufferData(gl.ARRAY_BUFFER, lvl, gl.DYNAMIC_DRAW);
   }
 
-  _drawTails(vpW, vpH) {
+  _drawTails(vpW: number, vpH: number) {
     const gl = this.gl, prog = this.tailProgram;
+    if (!gl || !prog) return;
     if (!this._uniforms) this._uniforms = {};
     const U = this._uniforms.tail || (this._uniforms.tail = {
       u_matrix: gl.getUniformLocation(prog, 'u_matrix'), u_viewport: gl.getUniformLocation(prog, 'u_viewport'),
@@ -469,7 +862,7 @@ export class RendererAdapter {
     gl.enable(gl.DEPTH_TEST);
   }
 
-  init(containerEl) {
+  init(containerEl: HTMLElement) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
 
     // Create canvas overlay (attach to body as fixed to escape Workspace stacking contexts)
@@ -551,6 +944,7 @@ export class RendererAdapter {
 
     // Helper to update cached canvas rect (avoids per-frame getBoundingClientRect)
     const updateCachedRect = () => {
+      if (!this.canvas) return;
       try { this._cachedCanvasRect = this.canvas.getBoundingClientRect(); } catch {}
     };
 
@@ -616,7 +1010,7 @@ export class RendererAdapter {
    * [ b d f ]
    * [ 0 0 1 ]
    */
-  updateViewportBasis(raw) {
+  updateViewportBasis(raw: ReturnType<CameraController['getBasis']>) {
     if (!raw) return;
 
     // An unchanged basis is a no-op. player.js's rAF loop pushes a camera update on EVERY
@@ -663,26 +1057,26 @@ export class RendererAdapter {
    *  evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId
    * }
    */
-  sync(args) {
+  sync(args: SyncArgs) {
     this._syncInstances(args);
   }
 
   // A transposed repeat changes this label and the note inspector. Note positions
   // and frequency ratios on the canvas are relative to the same written base.
-  syncBaseFrequencyLabel(evaluatedFrequency) {
+  syncBaseFrequencyLabel(evaluatedFrequency: Fraction | number | null | undefined) {
     // Keep the last label while an empty score is being initialized.
     try {
       const { factor } = getDisplayTransposition();
-      const transposed = factor && X.isRational(factor) && this._baseFreqExact && X.isRational(this._baseFreqExact);
-      const frequency = transposed ? X.mul(this._baseFreqExact, factor)
+      const base = this._baseFreqExact;
+      const frequency = factor && X.isRational(factor) && base && X.isRational(base) ? X.mul(base, factor) as Fraction
         : evaluatedFrequency ?? this._moduleRef?.baseNote?.getVariable?.('frequency');
       if (frequency == null) return;
 
       let num, den;
-      if (frequency.n != null && frequency.d != null) {
+      if (typeof frequency === 'object' && frequency.n != null && frequency.d != null) {
         num = (frequency.s < 0 ? '-' : '') + String(frequency.n);
         den = String(frequency.d);
-      } else if (typeof frequency.toFraction === 'function') {
+      } else if (typeof frequency === 'object' && typeof frequency.toFraction === 'function') {
         [num, den = '1'] = frequency.toFraction().split('/');
       } else {
         const hz = toNumber(frequency, NaN);
@@ -690,7 +1084,7 @@ export class RendererAdapter {
         num = String(hz);
         den = '1';
       }
-      const elide = value => {
+      const elide = (value: string) => {
         const negative = value.startsWith('-');
         const digits = negative ? value.slice(1) : value;
         if (digits.length <= 12) return value;
@@ -702,7 +1096,7 @@ export class RendererAdapter {
     } catch { /* Keep the previous label until a frequency is available. */ }
   }
 
-  _syncInstances(args) {
+  _syncInstances(args: SyncArgs): void {
     const { evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId = null, tempOverrides = null } = args;
     if (!module) return;
     const partial = args.incremental && this._simpleInstances && this._moduleRef === module &&
@@ -748,10 +1142,10 @@ export class RendererAdapter {
     const pxToWorldY = 1.0 / (this.yScalePxPerWU || 1.0);
 
     // Helper to access evaluatedNotes (handles both Map and object)
-    const getEv = (id) => {
+    const getEv = (id: number): RenderRecord | null | undefined => {
       if (!evaluatedNotes) return null;
-      if (typeof evaluatedNotes.get === 'function') return evaluatedNotes.get(id);
-      return evaluatedNotes[id];
+      if ('get' in evaluatedNotes && typeof evaluatedNotes.get === 'function') return evaluatedNotes.get(id);
+      return (evaluatedNotes as Record<number, RenderRecord>)[id];
     };
 
     // The BaseNote's exact frequency (src/value/exact.js), for exact note labels
@@ -794,7 +1188,7 @@ export class RendererAdapter {
     // The tails to draw past the notes' ends (display only; see _drawTails).
     const tails = [];
     // Instruments resolved during this pass, by note id (see Module.findInstrument).
-    const instrumentMemo = new Map();
+    const instrumentMemo = new Map<number, string>();
     const tailUnder = Math.max(0, this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0);
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
@@ -821,7 +1215,7 @@ export class RendererAdapter {
         const hasStart = ev ? (ev.startTime != null) : !!note.getVariable('startTime');
         const hasDur = ev ? (ev.duration != null) : !!note.getVariable('duration');
         if (!hasDur && note.hasExpression && note.hasExpression('frequency') && !note.hasExpression('duration')) {
-          const fr = (ev && ev.frequency != null) ? ev.frequency : note.getVariable('frequency');
+          const fr: FrequencyShadow | null = (ev && ev.frequency != null) ? ev.frequency : note.getVariable('frequency');
           const fv = fr ? (fr._floatValue !== undefined && fr._irrational ? fr._floatValue : toNumber(fr, NaN)) : NaN;
           if (isFinite(fv) && fv > 0) {
             let startSec = null;
@@ -838,7 +1232,7 @@ export class RendererAdapter {
         // Prefer evaluated cache values to avoid stale data after module reorder
         const startTimeRaw = (ev?.startTime != null) ? toNumber(ev.startTime, NaN) : toNumber(note.getVariable('startTime'), NaN);
         const durationRaw  = (ev?.duration  != null) ? toNumber(ev.duration,  NaN) : toNumber(note.getVariable('duration'),  NaN);
-        const freqRaw = ev?.frequency;
+        const freqRaw: FrequencyShadow | null | undefined = ev?.frequency;
         // For irrational/corrupted frequencies (or large fractions that overflow u32),
         // use _floatValue if available for precision
         let freqVal = null;
@@ -849,7 +1243,7 @@ export class RendererAdapter {
             freqVal = toNumber(freqRaw, null);
           }
         } else {
-          const noteFreq = note.getVariable('frequency');
+          const noteFreq: FrequencyShadow | null = note.getVariable('frequency');
           if (noteFreq) {
             freqVal = noteFreq._floatValue ?? toNumber(noteFreq, null);
           }
@@ -939,7 +1333,8 @@ export class RendererAdapter {
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
     if (dirty) {
-      const swapWithLast = id => {
+      const swapWithLast = (id: number | null | undefined) => {
+        if (id == null || !this._instanceNoteIds) return;
         const index = this._noteIdToIndex.get(id), last = this.instanceCount - 1;
         if (index == null || index === last) return;
         const top = this._instanceNoteIds[last];
@@ -969,7 +1364,7 @@ export class RendererAdapter {
 
     // Allocate/resize typed arrays only when count changes
     const N = dirty ? this.instanceCount : items.length;
-    if (!this.posSize || this.posSize.length !== N * 4) {
+    if (!this.colors || !this.posSize || this.posSize.length !== N * 4) {
       this.posSize = new Float32Array(N * 4);
       this.colors  = new Float32Array(N * 4);
       // Use Int32 to avoid precision loss for large numeric IDs (prevents wrong highlight/pick)
@@ -985,7 +1380,7 @@ export class RendererAdapter {
     // Fill arrays with reordered data
     for (let k = 0; k < items.length; k++) {
       const it = items[k];
-      const i = dirty ? this._noteIdToIndex.get(it.id) : k;
+      const i = dirty ? this._noteIdToIndex.get(it.id)! : k;
       const o = i * 4;
       this.posSize[o + 0] = it.x;
       this.posSize[o + 1] = it.y;
@@ -1047,7 +1442,7 @@ export class RendererAdapter {
           const corruptSet = depGraph.getCorruptedNotes();
           if (corruptSet && corruptSet.size > 0) {
             // hasCorruptDep = { every transitive dependent of any corrupt note }.
-            const hasCorruptDep = new Set();
+            const hasCorruptDep = new Set<number>();
             const queue = [];
             for (const c of corruptSet) queue.push(c);
             const enqueued = new Set(queue);
@@ -1113,13 +1508,13 @@ export class RendererAdapter {
         const trees = this._selectionTrees(module, selIdNum);
         const fallback = trees ? null : module.getDependentsByProperty?.(selIdNum);
 
-        const toIdx = id => this._noteIdToIndex.get(Number(id));
+        const toIdx = (id: number) => this._noteIdToIndex.get(Number(id));
         const selIdx = toIdx(selIdNum);
         const measureIds = module.getTimingSummary?.()?.measureIds;
-        const isBarId = id => measureIds ? measureIds.has(id) : isMeasureNote(module.getNoteById(id));
+        const isBarId = (id: number) => measureIds ? measureIds.has(id) : isMeasureNote(module.getNoteById(id));
         this._relDepsMeasureIds = deps.filter(isBarId);
         this._relDepsHasBase = deps.includes(0);
-        this._relDepsIdx = deps.map(toIdx).filter(i => i != null && i !== selIdx);
+        this._relDepsIdx = deps.map(toIdx).filter((i): i is number => i != null && i !== selIdx);
 
         // Uncolored dependencies can include properties other than pitch, start
         // and duration. Only bars, a dependent BaseNote, and optional drag ghosts
@@ -1129,25 +1524,25 @@ export class RendererAdapter {
         const rdeps = needAll ? module.getDependentNotes?.(selIdNum) || [] : null;
         this._relRdepsMeasureIds = rdeps?.filter(isBarId) || [];
         this._relRdepsHasBase = rdeps?.includes(0) || false;
-        this._relRdepsIdx = rdeps?.map(toIdx).filter(i => i != null && i !== selIdx) ?? null;
+        this._relRdepsIdx = rdeps?.map(toIdx).filter((i): i is number => i != null && i !== selIdx) ?? null;
 
         // The edges already visited for the colored lines identify the same
         // affected notes as the three property traversals. A child reached by
         // two changed properties needs only one ring of each origin color.
-        const indices = { frequency: [], startTime: [], duration: [] };
+        const indices: ByRelation<number[]> = { frequency: [], startTime: [], duration: [] };
         const hasBase = { frequency: false, startTime: false, duration: false };
         let seen;
         let bit = 1;
-        for (const prop of ['frequency', 'startTime', 'duration']) {
+        for (const prop of ['frequency', 'startTime', 'duration'] as const) {
           const list = trees ? trees.edgesByProperty[prop] : fallback?.[prop] || [];
           if (list.length && !seen) seen = new Uint8Array(N);
           for (const entry of list) {
-            const id = trees ? entry.childId : entry;
+            const id = typeof entry === 'number' ? entry : entry.childId;
             if (id === 0) hasBase[prop] = true;
             const idx = toIdx(id);
-            if (idx != null && idx !== selIdx && !(seen[idx] & bit)) {
+            if (idx != null && idx !== selIdx && !(seen![idx] & bit)) {
               indices[prop].push(idx);
-              seen[idx] |= bit;
+              seen![idx] |= bit;
             }
           }
           bit <<= 1;
@@ -1156,10 +1551,10 @@ export class RendererAdapter {
         this._relRdepsHasBaseByProperty = hasBase;
 
         // Compute property-colored indices for deps (dependencies)
-        const depsIdxByProp = { frequency: [], startTime: [], duration: [] };
-        for (const prop of ['frequency', 'startTime', 'duration']) {
+        const depsIdxByProp: ByRelation<number[]> = { frequency: [], startTime: [], duration: [] };
+        for (const prop of ['frequency', 'startTime', 'duration'] as const) {
           const propIds = depsByProperty[prop] || [];
-          const propIdxSet = new Set();
+          const propIdxSet = new Set<number>();
           for (const id of propIds) {
             const ii = toIdx(id);
             if (ii != null && ii !== selIdx) propIdxSet.add(ii);
@@ -1177,14 +1572,14 @@ export class RendererAdapter {
 
         // Compute full parent chains per property for segmented line visualization
         // Each chain is an array of note IDs from the selected note back to baseNote
-        const chainsByProp = { frequency: [], startTime: [], duration: [] };
-        const chainIdxByProp = { frequency: [], startTime: [], duration: [] };
+        const chainsByProp: ByRelation<number[]> = { frequency: [], startTime: [], duration: [] };
+        const chainIdxByProp: ByRelation<number[]> = { frequency: [], startTime: [], duration: [] };
         if (typeof module.getParentChainByProperty === 'function') {
-          for (const prop of ['frequency', 'startTime', 'duration']) {
+          for (const prop of ['frequency', 'startTime', 'duration'] as const) {
             const chain = module.getParentChainByProperty(selIdNum, prop);
             chainsByProp[prop] = chain;
             // Convert chain to indices (excluding baseNote which is handled separately)
-            const chainIdxSet = new Set();
+            const chainIdxSet = new Set<number>();
             for (const id of chain) {
               if (id === 0) continue; // baseNote handled via _relDepsHasBaseByProperty
               const ii = toIdx(id);
@@ -1224,13 +1619,13 @@ export class RendererAdapter {
     if (!dirty) this._noteLabelApprox = new Uint8Array(N);
     const baseValNum = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
     const baseExact = this._baseFreqExact;
-    const fracCache = this._fracStrCache || (this._fracStrCache = new Map());
+    const fracCache = this._fracStrCache || (this._fracStrCache = new Map<number, string[]>());
     // Exact labels, memoised per value object: a record keeps its Fraction / exact value
     // until the note is re-evaluated, so a steady sync costs one WeakMap lookup per note.
-    const exactCache = (this._labelCacheBase === baseExact && this._exactLabelCache) || new WeakMap();
+    const exactCache = (this._labelCacheBase === baseExact && this._exactLabelCache) || new WeakMap<X.ExactValue, ReturnType<typeof noteLabel>>();
     this._exactLabelCache = exactCache;
     this._labelCacheBase = baseExact;
-    const approxFrac = (ratio) => {
+    const approxFrac = (ratio: number) => {
       let pair = fracCache.get(ratio);
       if (pair === undefined) {
         const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
@@ -1241,7 +1636,7 @@ export class RendererAdapter {
       return pair;
     };
     for (let k = 0; k < items.length; k++) {
-      const i = dirty ? this._noteIdToIndex.get(items[k].id) : k;
+      const i = dirty ? this._noteIdToIndex.get(items[k].id)! : k;
       if (dirty) this._noteLabelApprox[i] = 0;
       try {
         // items[k] is instance i (the selected-note swap above keeps them aligned), and its
@@ -1260,7 +1655,7 @@ export class RendererAdapter {
             exactCache.set(fex, label);
           }
           if (label) {
-            if (label.approx) {
+            if ('approx' in label) {
               const pair = approxFrac(fnum / baseValNum);
               this._noteFracNumStrs[i] = pair[0];
               this._noteFracDenStrs[i] = pair[1];
@@ -1289,7 +1684,7 @@ export class RendererAdapter {
 
     this.instanceCount = N;
     if (dirty) {
-      const slots = [...dirty].map(id => this._noteIdToIndex.get(id)).sort((a, b) => a - b);
+      const slots = [...dirty].map(id => this._noteIdToIndex.get(id)!).sort((a, b) => a - b);
       this._rangeIndex?.update(this.posSize, slots);
       this._uploadChangedInstances(slots);
     } else {
@@ -1439,7 +1834,7 @@ export class RendererAdapter {
     this.needsRedraw = true;
   }
 
-  setPlayhead(timeSec) {
+  setPlayhead(timeSec: number) {
     const t = (typeof timeSec === 'number') ? timeSec : 0;
     // Keep legacy world-x in sync for any consumers reading it prior to render
     this.playheadXWorld = t * this._cfgSX() * (this.currentXScaleFactor || 1.0);
@@ -1464,7 +1859,7 @@ export class RendererAdapter {
   // Public API: set hovered note id for hover ring rendering
   // Public API: update only scale factors without rebuilding scene. This prevents a 1-frame playhead pop
   // when the x-scale slider updates the camera basis before the renderer receives new scale factors.
-  setScaleFactors(x, y) {
+  setScaleFactors(x: number, y: number) {
     try {
       if (typeof x === 'number' && isFinite(x)) this.currentXScaleFactor = x;
       if (typeof y === 'number' && isFinite(y)) this.currentYScaleFactor = y;
@@ -1474,7 +1869,7 @@ export class RendererAdapter {
 
   // Public API: toggle tracking mode. When enabled, playhead renders at viewport center in screen space,
   // eliminating any transient mismatch between camera basis updates and world-scale updates.
-  setTrackingMode(enabled) {
+  setTrackingMode(enabled: boolean) {
     try {
       this.trackingMode = !!enabled;
       this.needsRedraw = true;
@@ -1486,7 +1881,7 @@ export class RendererAdapter {
   // divider are all laid out around that column, so toggling it RELAYOUTS them into (or out of)
   // the reclaimed space. Their cached glyph runs and note-local regions therefore have to be
   // rebuilt — a bare needsRedraw would just redraw the stale layout.
-  setDrawNoteArrows(enabled) {
+  setDrawNoteArrows(enabled: boolean) {
     try {
       const v = !!enabled;
       if (this.drawNoteArrows === v) return;
@@ -1497,7 +1892,7 @@ export class RendererAdapter {
     } catch {}
   }
   // Clearing: pass null/undefined to remove hover highlight.
-  setHoverNoteId(noteId) {
+  setHoverNoteId(noteId: number | null) {
     try {
       const id = (noteId == null) ? null : Number(noteId);
       if (this._hoveredNoteId !== id) {
@@ -1512,7 +1907,7 @@ export class RendererAdapter {
   }
 
   // Public API: set hovered MEASURE id (triangle)
-  setHoverMeasureId(measureId) {
+  setHoverMeasureId(measureId: number | null) {
     try {
       const id = (measureId == null) ? null : Number(measureId);
       if (this._hoveredMeasureId !== id) {
@@ -1526,7 +1921,7 @@ export class RendererAdapter {
   }
 
   // Public API: set BaseNote hover flag
-  setHoverBase(flag) {
+  setHoverBase(flag: boolean) {
     try {
       const v = !!flag;
       if (this._hoverBase !== v) {
@@ -1541,7 +1936,7 @@ export class RendererAdapter {
 
   // Public API: set hovered sub-region target for background emphasis
   // target: null to clear, or { id: number, region: 'tab'|'octaveUp'|'octaveDown' }
-  setHoverSubRegion(target) {
+  setHoverSubRegion(target: {id: number; region: string} | null) {
     try {
       const next = (target && typeof target === 'object' && target.id != null && target.region)
         ? { id: Number(target.id), region: String(target.region) }
@@ -1560,7 +1955,7 @@ export class RendererAdapter {
 
   // Public API: set prospective parent candidate id for live link-line remapping during drag
   // Pass null to clear. Accepts 0 for BaseNote.
-  setProspectiveParentId(parentId) {
+  setProspectiveParentId(parentId: number | null) {
     try {
       const pid = (parentId == null) ? null : Number(parentId);
       if (this._prospectiveParentId !== pid) {
@@ -1579,14 +1974,14 @@ export class RendererAdapter {
   // Public API: set the multi-selection (marquee / additive selection).
   // Accepts any iterable of note or measure ids; null/empty clears it.
   // Ids that are not currently present in the scene are skipped silently.
-  setMultiSelection(ids) {
+  setMultiSelection(ids: Iterable<number> | null) {
     try {
       let next = null;
       if (ids) {
         for (const raw of ids) {
           const id = Number(raw);
           if (!Number.isFinite(id)) continue;
-          if (!next) next = new Set();
+          if (!next) next = new Set<number>();
           next.add(id);
         }
       }
@@ -1611,7 +2006,7 @@ export class RendererAdapter {
   // player.js owns this Set and calls here after each mutation. Keep one copy
   // of the IDs when committing a large group. The public setter above takes
   // a snapshot of an arbitrary caller's iterable.
-  syncMultiSelection(ids) {
+  syncMultiSelection(ids: Set<number> | null) {
     this._multiSelIds = ids?.size ? ids : null;
     this._resolveMultiSelIndices();
     this.needsRedraw = true;
@@ -1629,7 +2024,7 @@ export class RendererAdapter {
   }
 
   // Public API: rubber-band rectangle in CLIENT CSS px ({x0,y0,x1,y1}), or null to hide.
-  setMarqueeRect(rect) {
+  setMarqueeRect(rect: Marquee | null) {
     try {
       if (!rect) {
         if (!this._marqueeRect) return;
@@ -1657,18 +2052,18 @@ export class RendererAdapter {
    *
    * Measures participate through their visible triangle handles.
    */
-  pickRect(clientX0, clientY0, clientX1, clientY1) {
+  pickRect(clientX0: number, clientY0: number, clientX1: number, clientY1: number) {
     return this.pickRectIds(clientX0, clientY0, clientX1, clientY1).map(id => ({ type: this._measureTriIdToIndex?.has(id) ? 'measure' : 'note', id }));
   }
 
-  _worldRect(x0, y0, x1, y1) {
+  _worldRect(x0: number, y0: number, x1: number, y1: number) {
     const a = this.screenToWorld(Math.min(x0, x1), Math.min(y0, y1));
     const b = this.screenToWorld(Math.max(x0, x1), Math.max(y0, y1));
     return [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)];
   }
 
-  _measureRectHits(x0, y0, x1, y1) {
-    const hits = [];
+  _measureRectHits(x0: number, y0: number, x1: number, y1: number) {
+    const hits: number[] = [];
     const css = this._measureTriCss;
     if (!css) return hits;
     const ox = this.canvasOffset?.x ?? 0, oy = this.canvasOffset?.y ?? 0;
@@ -1698,11 +2093,11 @@ export class RendererAdapter {
     return hits;
   }
 
-  pickRectIds(x0, y0, x1, y1) {
+  pickRectIds(x0: number, y0: number, x1: number, y1: number) {
     const hits = this._measureRectHits(x0, y0, x1, y1);
     if (!this.posSize || !this._instanceNoteIds) return hits;
     const [left, minY, right, maxY] = this._worldRect(x0, y0, x1, y1);
-    const ranges = [];
+    const ranges: number[] = [];
     if (this._rangeIndex) this._rangeIndex.collect(left, right, ranges, minY, maxY);
     else ranges.push(0, this.instanceCount);
     const ps = this.posSize;
@@ -1763,7 +2158,7 @@ export class RendererAdapter {
     return (this._config?.selection?.multiRingThicknessPxAtZoom1 ?? 4.0);
   }
 
-  _setAttr4Enabled(flag) {
+  _setAttr4Enabled(flag: boolean) {
     try {
       const gl = this.gl;
       const vao = this.rectVAO;
@@ -1775,7 +2170,7 @@ export class RendererAdapter {
   }
 
   // Enable/disable attrib 2 (dragFlag) on the octaveLineVAO (used by vertical lines)
-  _setOctaveAttr2Enabled(flag) {
+  _setOctaveAttr2Enabled(flag: boolean) {
     try {
       const gl = this.gl;
       const vao = this.octaveLineVAO;
@@ -2752,6 +3147,7 @@ export class RendererAdapter {
  
   _initGeometry() {
     const gl = this.gl;
+    if (!gl) return;
 
     // Base quad unit (0,0)-(1,1) using TRIANGLE_FAN with 4 vertices
     const unit = new Float32Array([
@@ -2935,7 +3331,7 @@ export class RendererAdapter {
    * instanced call. Hoisted out of _render() so ring passes that are not tied to the
    * single selected note (dependency rings, multi-selection) can share it.
    */
-  _drawRingIdxList(indices, rgba, borderPx, marqueeBounds = null, cacheKey = null) {
+  _drawRingIdxList(indices: number[] | null, rgba: number[], borderPx: number, marqueeBounds: number[] | null = null, cacheKey: string | null = null) {
     const gl = this.gl;
     if (!gl || !this.selectionRingProgram) return;
     if (!indices?.length && !marqueeBounds) return;
@@ -2970,7 +3366,7 @@ export class RendererAdapter {
     if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
 
     gl.bindVertexArray(this.rectVAO);
-    if (marqueeBounds) {
+    if (marqueeBounds && Us) {
       gl.uniform4fv(Us.u_marqueeBounds, marqueeBounds);
       gl.uniform1i(Us.u_marqueeFilter, indices ? -1 : 1);
       if (!indices) {
@@ -2985,6 +3381,7 @@ export class RendererAdapter {
         return;
       }
     }
+    if (!indices) return;
     if (!this._singlePosSizeBuffer) {
       this._singlePosSizeBuffer = gl.createBuffer();
     }
@@ -2996,7 +3393,7 @@ export class RendererAdapter {
     // batch on the GPU across camera frames; drag previews retain their offsets.
     let saved = null;
     if (cacheKey && !this._dragActive && indices.length >= 512) {
-      const buffers = this._ringBuffers || (this._ringBuffers = new Map());
+      const buffers = this._ringBuffers || (this._ringBuffers = new Map<string, CachedRings>());
       saved = buffers.get(cacheKey);
       if (!saved) {
         saved = { buffer: gl.createBuffer() };
@@ -3009,7 +3406,7 @@ export class RendererAdapter {
       this._depRingBatch = new Float32Array(Math.max(need, 64));
     }
     const batch = this._depRingBatch;
-    let count = upload ? 0 : saved.count, moving = false;
+    let count = upload ? 0 : (saved?.count ?? 0), moving = false;
     const flush = () => {
       if (uDrag) gl.uniform2f(uDrag, moving ? this._dragOffsetX || 0 : 0, moving ? this._dragOffsetW || 0 : 0);
       if (upload) {
@@ -3040,7 +3437,7 @@ export class RendererAdapter {
       count++;
     }
     if (count) flush();
-    if (marqueeBounds) gl.uniform1i(Us.u_marqueeFilter, 0);
+    if (marqueeBounds && Us) gl.uniform1i(Us.u_marqueeFilter, 0);
 
     // Restore instanced buffer for attribute 1
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
@@ -3052,7 +3449,7 @@ export class RendererAdapter {
     gl.depthMask(true);
   }
 
-  _selectionTrees(module, anchor) {
+  _selectionTrees(module: Module, anchor: number) {
     if (!module?.getChildrenTreeByAllProperties) return null;
     const cached = this._linkTreeCache;
     if (cached?.module === module && cached.anchor === anchor && cached.pos === this._posEpoch) return cached.trees;
@@ -3070,7 +3467,7 @@ export class RendererAdapter {
   }
 
   // Compute ranges once for all body and overlay passes of this frame.
-  _updateVisibleInstances(vpW, vpH) {
+  _updateVisibleInstances(vpW: number, vpH: number) {
     const ranges = this._nextVisibleRanges || [];
     const old = this._visibleRanges || [];
     const m = this.matrix;
@@ -3103,7 +3500,7 @@ export class RendererAdapter {
 
   // Count intersecting bodies in the actual viewport. Index leaf blocks may
   // contain offscreen notes, so their slot counts alone cannot decide the cutoff.
-  _viewportDetailRanges(bodyRanges, x0, x1, y0, y1, dragPad, cutoff) {
+  _viewportDetailRanges(bodyRanges: number[], x0: number, x1: number, y0: number, y1: number, dragPad: number, cutoff: number) {
     let cache = this._overviewDetails;
     const sx = this.matrix[0], sy = this.matrix[4];
     if (!cache || cache.pos !== this._posEpoch || cache.drag !== this._dragEpoch ||
@@ -3112,9 +3509,10 @@ export class RendererAdapter {
       const blocks = this._detailBlocks || (this._detailBlocks = []);
       if (this._rangeIndex) this._rangeIndex.collect(x0 - dragPad, x1 + dragPad, blocks, y0, y1);
       const candidates = this._rangeIndex ? blocks : bodyRanges;
-      const ranges = [];
+      const ranges: number[] = [];
       let visible = 0;
       const p = this.posSize;
+      if (!p) return [];
       for (let j = 0; j < candidates.length && visible <= cutoff; j += 2) {
         for (let i = candidates[j]; i < candidates[j + 1]; i++) {
           const o = i * 4;
@@ -3132,18 +3530,19 @@ export class RendererAdapter {
         pos: this._posEpoch, drag: this._dragEpoch, ranges, crowded: visible > cutoff };
     }
     if (!cache.crowded) return cache.ranges;
-    const selected = this._noteIdToIndex?.get(this._lastSelectedNoteId);
-    const hovered = this._noteIdToIndex?.get(this._hoveredNoteId);
-    const ranges = [];
+    const selected = this._lastSelectedNoteId == null ? undefined : this._noteIdToIndex?.get(this._lastSelectedNoteId);
+    const hovered = this._hoveredNoteId == null ? undefined : this._noteIdToIndex?.get(this._hoveredNoteId);
+    const ranges: number[] = [];
     if (hovered != null && hovered !== selected) ranges.push(hovered, hovered + 1);
     if (selected != null) ranges.push(selected, selected + 1);
     return ranges;
   }
 
-  _uploadChangedInstances(slots) {
+  _uploadChangedInstances(slots: number[]) {
     const gl = this.gl;
     if (!gl || !slots.length) return;
-    const update = (buffer, array, width) => {
+    const update = (buffer: WebGLBuffer | null, array: Float32Array<ArrayBuffer> | null, width: number) => {
+      if (!array) return;
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
       for (let k = 0; k < slots.length;) {
         const first = slots[k++];
@@ -3157,29 +3556,31 @@ export class RendererAdapter {
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
   }
 
-  _uploadVisibleRegions(data) {
+  _uploadVisibleRegions(data: Float32Array<ArrayBuffer> | null) {
     const gl = this.gl;
+    if (!gl || !data) return;
     for (let j = 0; j < this._detailRanges.length; j += 2) {
       const start = this._detailRanges[j], end = this._detailRanges[j + 1];
       if (end > start) gl.bufferSubData(gl.ARRAY_BUFFER, start * 16, data, start * 4, (end - start) * 4);
     }
   }
 
-  _drawVisibleInstances(program, regionBuffer = null, ranges = this._detailRanges) {
+  _drawVisibleInstances(program: WebGLProgram, regionBuffer: WebGLBuffer | null = null, ranges: number[] = this._detailRanges) {
     const gl = this.gl;
+    if (!gl) return;
     if (ranges.length === 2 && ranges[0] === 0 && ranges[1] === this.instanceCount) {
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
       return;
     }
     if (!ranges.length) return;
-    const uniforms = this._instanceBaseUniforms || (this._instanceBaseUniforms = new WeakMap());
+    const uniforms = this._instanceBaseUniforms || (this._instanceBaseUniforms = new WeakMap<WebGLProgram, WebGLUniformLocation | null>());
     if (!uniforms.has(program)) uniforms.set(program, gl.getUniformLocation(program, 'u_instanceBase'));
-    const base = uniforms.get(program);
-    const pointer = (loc, buffer, size, first) => {
+    const base = uniforms.get(program) ?? null;
+    const pointer = (loc: number, buffer: WebGLBuffer | null, size: number, first: number) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, first * size * 4);
     };
-    const bind = first => {
+    const bind = (first: number) => {
       pointer(1, this.rectInstancePosSizeBuffer, 4, first);
       pointer(2, this.rectInstanceColorBuffer, 4, first);
       if (regionBuffer) pointer(4, regionBuffer, 4, first);
@@ -3237,9 +3638,10 @@ export class RendererAdapter {
     if (this.tailCount > 0 && this.tailProgram && this.tailVAO && !this._dragActive) this._drawTails(vpW, vpH);
 
     // Draw notes as simple rectangles with flat colors (clipped to rounded rect)
-    if (this.instanceCount > 0) {
+    if (this.instanceCount > 0 && this.posSize) {
       // First pass: draw the note bodies (rounded clip)
       const prog = this.rectBorderProgram || this.rectProgram;
+      if (!prog) return;
       gl.useProgram(prog);
       const U = (this._uniforms && this._uniforms.rectBorder) ? this._uniforms.rectBorder : null;
       const uMat = U ? U.u_matrix       : gl.getUniformLocation(prog, 'u_matrix');
@@ -3325,7 +3727,7 @@ export class RendererAdapter {
         const fqC = this._depFrequencyRgba();
         const stC = this._depStartTimeRgba();
         const duC = this._depDurationRgba();
-        const withA = (c, a) => [c[0], c[1], c[2], a];
+        const withA = (c: number[], a: number) => [c[0], c[1], c[2], a];
 
         // Normal colors (full brightness)
         const HIGHLIGHT_COLORS_NORMAL = {
@@ -3358,7 +3760,7 @@ export class RendererAdapter {
         // Draw property-colored rings for dependents (notes affected by property change)
         // Draw in order: startTime first (teal), then frequency (orange), then duration (purple)
         // This stacking order ensures all colors are visible for overlapping dependencies
-        for (const prop of ['startTime', 'frequency', 'duration']) {
+        for (const prop of ['startTime', 'frequency', 'duration'] as const) {
           const rdepsIdx = this._relRdepsIdxByProperty?.[prop];
           if (rdepsIdx?.length) {
             this._drawRingIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS, null, 'child:' + prop);
@@ -3367,7 +3769,7 @@ export class RendererAdapter {
 
         // Draw property-colored rings for full parent chain (all ancestors back to baseNote)
         // Uses chain indices instead of direct deps to show the full dependency path
-        for (const prop of ['startTime', 'frequency', 'duration']) {
+        for (const prop of ['startTime', 'frequency', 'duration'] as const) {
           const chainIdx = this._relDepsChainIdxByProperty?.[prop];
           if (chainIdx?.length) {
             this._drawRingIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS, null, 'parent:' + prop);
@@ -3391,7 +3793,7 @@ export class RendererAdapter {
     try {
       if (this.selectionRingProgram && this._lastSelectedNoteId != null && this._noteIdToIndex && typeof this._noteIdToIndex.get === 'function') {
         const idx = this._noteIdToIndex.get(this._lastSelectedNoteId);
-        if (idx != null && idx >= 0 && idx < this.instanceCount) {
+        if (idx != null && idx >= 0 && idx < this.instanceCount && this.posSize) {
           const base = idx * 4;
           const arr = new Float32Array([
             this.posSize[base + 0],
@@ -3513,7 +3915,7 @@ export class RendererAdapter {
       if (this.selectionRingProgram && hoverId != null) {
         const sameAsSelected = (hoverId === this._lastSelectedNoteId);
         const idx = this._noteIdToIndex && this._noteIdToIndex.get ? this._noteIdToIndex.get(hoverId) : null;
-        if (idx != null && idx >= 0 && idx < this.instanceCount) {
+        if (idx != null && idx >= 0 && idx < this.instanceCount && this.posSize) {
           const base = idx * 4;
           const arr = new Float32Array([
             this.posSize[base + 0],
@@ -3584,6 +3986,7 @@ export class RendererAdapter {
     } catch {}
 
      // Draw playhead as a screen-space 1px line spanning full viewport height
+    if (!this.solidCssProgram) return;
     gl.useProgram(this.solidCssProgram);
     const Us = (this._uniforms && this._uniforms.solidCss) ? this._uniforms.solidCss : null;
     const uVPs = Us ? Us.u_viewport : gl.getUniformLocation(this.solidCssProgram, 'u_viewport');
@@ -3628,10 +4031,16 @@ export class RendererAdapter {
   }
 
 
-  _createProgram(vsSource, fsSource) {
+  _createProgram(vsSource: string, fsSource: string) {
     const gl = this.gl;
+    if (!gl) return null;
     const vs = this._compile(gl.VERTEX_SHADER, vsSource);
     const fs = this._compile(gl.FRAGMENT_SHADER, fsSource);
+    if (!vs || !fs) {
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return null;
+    }
     const prog = gl.createProgram();
     gl.attachShader(prog, vs);
     gl.attachShader(prog, fs);
@@ -3646,9 +4055,11 @@ export class RendererAdapter {
     return prog;
   }
 
-  _compile(type, source) {
+  _compile(type: number, source: string) {
     const gl = this.gl;
+    if (!gl) return null;
     const sh = gl.createShader(type);
+    if (!sh) return null;
     gl.shaderSource(sh, source);
     gl.compileShader(sh);
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
@@ -3659,14 +4070,14 @@ export class RendererAdapter {
     return sh;
   }
 
-  _frequencyToY(freq) {
+  _frequencyToY(freq: number) {
     const base = (this._baseFreqCache && typeof this._baseFreqCache === 'number') ? this._baseFreqCache : 440;
     const logRatio = Math.log2(base / (freq || 1e-6));
     return logRatio * this._cfgSY() * this.currentYScaleFactor;
     // matches player.js frequencyToY semantics
   }
 
-  _yForSilence(module, note, evaluatedNotes) {
+  _yForSilence(module: Module, note: Note, evaluatedNotes: EvaluatedScene | null) {
     // For silence notes (no frequency), follow player.js heuristic:
     // use parent with frequency if possible, otherwise baseNote.
     try {
@@ -3679,7 +4090,7 @@ export class RendererAdapter {
     return this._frequencyToY(this._baseFreqCache);
   }
 
-  _findParentWithFrequency(module, note) {
+  _findParentWithFrequency(module: Module, note: Note): Note {
     if (!note) return module.baseNote;
 
     const startTimeString = note.variables?.startTimeString;
@@ -3697,7 +4108,7 @@ export class RendererAdapter {
     return this._findParentWithFrequency(module, parent);
   }
 
-  _resolveColor(evNote, note, module) {
+  _resolveColor(evNote: RenderRecord | null | undefined, note: Note, module: Module) {
     // Try evaluated color first
     let c = evNote?.color;
     if (c != null) {
@@ -3738,7 +4149,7 @@ export class RendererAdapter {
    * @param {Object} module - The module (unused, kept for API compatibility)
    * @returns {Array<number>} - Original rgba color unchanged
    */
-  _applyCorruptionTint(rgba, note, module) {
+  _applyCorruptionTint(rgba: number[], note: Note, module: Module) {
     // Corruption visualization is now handled by diagonal hatching in the shader
     // See rectBorderFS fragment shader for the hatching implementation
     return rgba;
@@ -3747,11 +4158,11 @@ export class RendererAdapter {
   /**
    * Convert HSL to RGBA (h in 0-360, s,l in 0-100)
    */
-  _hslToRgba(h, s, l, a) {
+  _hslToRgba(h: number, s: number, l: number, a: number) {
     return this._hslaToRgba(h, s, l, a);
   }
 
-  _parseAnyColor(col) {
+  _parseAnyColor(col: unknown) {
     if (!col) return null;
 
     // Memoised by source string. Colours are immutable strings on the notes, so re-parsing
@@ -3777,11 +4188,11 @@ export class RendererAdapter {
   // Any CSS colour a note can be given (src/utils/css-color.js). It used to read only
   // rgba(), hsl()/hsla() and 3- or 6-digit hex, so rgb(255,255,255) or a colour name
   // fell through to the id-derived colour: a different hue on every note.
-  _parseAnyColorUncached(col) {
+  _parseAnyColorUncached(col: unknown) {
     return parseCssColor(col);
   }
 
-  _hslaToRgba(h, s, l, a) {
+  _hslaToRgba(h: number, s: number, l: number, a: number) {
     // h in [0,360], s,l in [0,100]
     h = (h % 360 + 360) % 360;
     s = Math.max(0, Math.min(100, s)) / 100;
@@ -3803,7 +4214,7 @@ export class RendererAdapter {
   }
 
   // Convert page CSS pixel coordinates to world coordinates using inverse affine
-  screenToWorld(clientX, clientY) {
+  screenToWorld(clientX: number, clientY: number) {
     try {
       const offX = this.canvasOffset?.x || 0;
       const offY = this.canvasOffset?.y || 0;
@@ -3838,9 +4249,10 @@ export class RendererAdapter {
   //  - Exact inside test uses the same SDF as the shaders (outside <= 0).
   //  - Optional expandCssPx tolerance applies ONLY along straight edges, not in corner arcs,
   //    to prevent selecting when clicking near the visual rounded corners.
-  _isPointInsideRoundedNote(i, wx, wy, expandCssPx = 0) {
+  _isPointInsideRoundedNote(i: number, wx: number, wy: number, expandCssPx: number = 0) {
     try {
-      const o = i * 4;
+      if (!this.posSize) return false;
+    const o = i * 4;
       const x = this.posSize[o + 0];
       const y = this.posSize[o + 1];
       const w = this.posSize[o + 2];
@@ -3893,18 +4305,18 @@ export class RendererAdapter {
   }
 
   // CPU picking against rounded-rect geometry. Returns top-most note id or null.
-  pickAt(clientX, clientY, expandCssPx = 2) {
+  pickAt(clientX: number, clientY: number, expandCssPx: number = 2) {
     return this._pickNotes(clientX, clientY, expandCssPx, null);
   }
 
   // Stack and top-only queries share the same exact shape test and painter order.
-  pickStackAt(clientX, clientY, expandCssPx = 2) {
-    const hits = [];
+  pickStackAt(clientX: number, clientY: number, expandCssPx: number = 2) {
+    const hits: SceneHit[] = [];
     this._pickNotes(clientX, clientY, expandCssPx, hits);
     return hits;
   }
 
-  _pickNotes(clientX, clientY, expandCssPx, hits) {
+  _pickNotes(clientX: number, clientY: number, expandCssPx: number, hits: SceneHit[] | null) {
     if (!this.posSize || !this._instanceNoteIds) return null;
     const p = this.screenToWorld(clientX, clientY);
     const ex = expandCssPx / (this.xScalePxPerWU || 1);
@@ -3925,7 +4337,7 @@ export class RendererAdapter {
         if (rects[o] > right || rects[o] + rects[o + 2] < left ||
             rects[o + 1] > bottom || rects[o + 1] + rects[o + 3] < top) continue;
         if (!this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) continue;
-        const hit = { type: 'note', id: this._instanceNoteIds[i] };
+        const hit: SceneHit = { type: 'note', id: this._instanceNoteIds[i] };
         if (!hits) return hit;
         hits.push(hit);
       }
@@ -3939,7 +4351,7 @@ export class RendererAdapter {
    * - Respects rounded-rect interior via pickAt() (corner-safe); only runs when a note body is hit.
    * - Silence notes do not report octaveUp/Down regions.
    */
-  hitTestSubRegion(clientX, clientY, hit = this.pickAt(clientX, clientY, 2)) {
+  hitTestSubRegion(clientX: number, clientY: number, hit: SceneHit | null = this.pickAt(clientX, clientY, 2)) {
     try {
       if (!hit || hit.type !== 'note') return null;
       const id = hit.id | 0;
@@ -3948,7 +4360,7 @@ export class RendererAdapter {
       const idx = (this._noteIdToIndex && typeof this._noteIdToIndex.get === 'function')
         ? this._noteIdToIndex.get(id)
         : undefined;
-      if (idx == null || idx < 0 || idx >= this.instanceCount) {
+      if (idx == null || idx < 0 || idx >= this.instanceCount || !this.posSize) {
         return { id, region: 'body' };
       }
 
@@ -4037,7 +4449,7 @@ export class RendererAdapter {
   }
   // Event-driven preview: update a single instance via bufferSubData without full sync
   // DEPRECATED: Use setDragOffsetPreview for better performance with many notes
-  setTempOverridesPreview(noteId, startSec, durationSec) {
+  setTempOverridesPreview(noteId: number | null, startSec: number, durationSec: number) {
     try {
       if (!this.gl || !this.rectInstancePosSizeBuffer || !this.posSize) return false;
       const idNum = Number(noteId);
@@ -4075,7 +4487,7 @@ export class RendererAdapter {
     }
   }
  
-  clearTempOverridesPreview(noteId) {
+  clearTempOverridesPreview(noteId: number | null) {
     // No GPU state to revert; a subsequent full sync will provide final values.
     // Just mark for redraw to ensure latest playhead/overlay state is shown.
     this.needsRedraw = true;
@@ -4086,7 +4498,7 @@ export class RendererAdapter {
   // Optimized fallback: batch all updates and upload the entire posSize buffer once to avoid
   // thousands of tiny bufferSubData calls (major driver overhead on large N).
   // map: { [noteId:number]: { startSec:number, durationSec:number } }
-  setTempOverridesPreviewMap(map) {
+  setTempOverridesPreviewMap(map: Record<number, Preview> | null) {
     try {
       if (!this.gl || !this.rectInstancePosSizeBuffer || !this.posSize || !map) return false;
       const entries = Object.entries(map);
@@ -4147,7 +4559,7 @@ export class RendererAdapter {
    * @param {number|null} [params.anchorId] - Optional anchor note id (the one being dragged).
    *                                          Used to update CPU posSize only for the anchor so selection ring tracks.
    */
-  setDragOffsetPreview({ dxWorld = 0, dwWorld = 0, noteIds = [], anchorId = null }) {
+  setDragOffsetPreview({ dxWorld = 0, dwWorld = 0, noteIds = [], anchorId = null }: DragOffset) {
     try {
       if (!this.gl || !this._dragFlags) {
         console.warn('[PERF] setDragOffsetPreview: missing gl or dragFlags');
@@ -4189,7 +4601,7 @@ export class RendererAdapter {
       if (!sameSet) {
         // Persist moving ids (numeric) so glyph-atlas drag flags apply immediately, even before overlay is enabled.
         try {
-          const moving = new Set();
+          const moving = new Set<number>();
           for (const id of idsSet) moving.add(Number(id));
           this._dragMovingIds = moving;
         } catch { this._dragMovingIds = null; }
@@ -4240,7 +4652,7 @@ export class RendererAdapter {
           for (let i = 0; i < Ninst; i++) {
             if (movingMask[i]) continue;
             const o = i * 4;
-            const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
+            const endSec = ((this.posSize![o + 0] || 0) + (this.posSize![o + 2] || 0)) / denom;
             if (isFinite(endSec)) baseNonMoving = Math.max(baseNonMoving, endSec);
           }
           this._baselineNonMovingEndSec = baseNonMoving;
@@ -4427,7 +4839,7 @@ export class RendererAdapter {
             this.posSize[base + 0] = orig.x;
             this.posSize[base + 2] = orig.w;
             // A cancelled drag also restores the anchor on the next GPU sync.
-            (this._restoredDragIds ||= new Set()).add(this._instanceNoteIds[idx]);
+            if (this._instanceNoteIds) (this._restoredDragIds ||= new Set()).add(this._instanceNoteIds[idx]);
           }
         }
         this._dragOriginalPos = null;
@@ -4475,10 +4887,10 @@ export class RendererAdapter {
 
   // Live preview for measure triangles/bars/end bar positions.
   // map: { [measureId:number]: startSec:number }
-  setMeasurePreviewMap(map) {
+  setMeasurePreviewMap(map: Record<number, number> | null) {
     try {
       // Normalize numeric map
-      const next = {};
+      const next: Record<string, number> = {};
       if (map && typeof map === 'object') {
         for (const k in map) {
           const v = map[k];
@@ -4532,7 +4944,7 @@ export class RendererAdapter {
   }
 
   // Preview override for module end bar (seconds). When set, end bar will render at max(current end, preview end).
-  setModuleEndPreviewSec(sec) {
+  setModuleEndPreviewSec(sec: number) {
     try {
       const v = Number(sec);
       if (isFinite(v) && v >= 0) {
@@ -5164,7 +5576,7 @@ export class RendererAdapter {
     // the same thing, but it is a Proxy trap that allocates/looks up a closure on every read;
     // classifying 100k notes through it cost ~32ms per sync. hasExpression() is the direct
     // question the Proxy itself asks (see Note's proxy get handler).
-    const hasVar = (n, name) => {
+    const hasVar = (n: Note, name: ExpressionName) => {
       try { return !!(n && typeof n.hasExpression === 'function' && n.hasExpression(name)); }
       catch { return false; }
     };
@@ -5182,7 +5594,7 @@ export class RendererAdapter {
     };
 
     // A bar's length is its own duration, in seconds (0 when it has none).
-    const barLengthSec = (bar) => {
+    const barLengthSec = (bar: Note | null | undefined) => {
       try { return toNumber(bar ? bar.getVariable('duration') : null, 0) || 0; }
       catch { return 0; }
     };
@@ -5270,7 +5682,7 @@ export class RendererAdapter {
 
       // Prepare dashed buffers
       const Nd = dashedTimes.length;
-      if (!this.measurePosSize || this.measurePosSize.length !== Nd * 4) {
+      if (!this.measureColors || !this.measurePosSize || this.measurePosSize.length !== Nd * 4) {
         this.measurePosSize = new Float32Array(Nd * 4);
         this.measureColors = new Float32Array(Nd * 4);
       }
@@ -5292,7 +5704,7 @@ export class RendererAdapter {
 
       // Prepare solid buffers (offset-only: one left of start, one right of end)
       const Ns = endTime >= 0 ? 2 : 0;
-      if (!this.measureSolidPosSize || this.measureSolidPosSize.length !== Ns * 4) {
+      if (!this.measureSolidColors || !this.measureSolidPosSize || this.measureSolidPosSize.length !== Ns * 4) {
         this.measureSolidPosSize = new Float32Array(Ns * 4);
         this.measureSolidColors = new Float32Array(Ns * 4);
       }
@@ -5334,7 +5746,7 @@ export class RendererAdapter {
       // Prepare triangle measure points (one triangle per actual measure note; exclude origin/end)
       try {
         const triTimes = [];
-        const triIds = [];
+        const triIds: number[] = [];
         // One triangle per measure bar (the list collected above)
         for (let i = 0; i < measureNotes.length; i++) {
           const n = measureNotes[i];
@@ -5383,7 +5795,7 @@ export class RendererAdapter {
         let changed = true;
         try {
           changed = !prevTimes || !prevIds || prevTimes.length !== nextTimes.length || prevIds.length !== nextIds.length;
-          if (!changed) {
+          if (!changed && prevTimes && prevIds) {
             for (let i = 0; i < nextTimes.length; i++) {
               if (prevTimes[i] !== nextTimes[i] || prevIds[i] !== nextIds[i]) { changed = true; break; }
             }
@@ -5428,6 +5840,8 @@ export class RendererAdapter {
       const vpW = Math.max(1, rectCss.width);
       const vpH = Math.max(1, rectCss.height);
  
+      // Instance-indexed reads below only run for a synchronized note body.
+      const positions = this.posSize!;
       // Prevent measure graphics from writing depth so they never occlude overlays
       gl.disable(gl.DEPTH_TEST);
       gl.depthMask(false);
@@ -5527,7 +5941,7 @@ export class RendererAdapter {
         })();
 
         // Unified effective module-end preview based on baselines + drag deltas
-        const computeEffectiveEndSec = (triTimes) => {
+        const computeEffectiveEndSec = (triTimes: number[]) => {
           try {
             // Idle path: keep previous precise behavior (no baselines needed)
             if (!this._dragActive) {
@@ -5539,7 +5953,7 @@ export class RendererAdapter {
                   endFromNotes = Math.max(0, this._rangeIndex.right[1] / denom);
                 } else for (let i = 0; i < Ninst; i++) {
                   const o = i * 4;
-                  const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
+                  const endSec = ((positions[o + 0] || 0) + (positions[o + 2] || 0)) / denom;
                   if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
                 }
               } catch {}
@@ -5604,8 +6018,8 @@ const isMove = type === 'move';
                 const idx = movingIdx[i] | 0;
                 if (idx < 0 || idx >= (this.instanceCount | 0)) continue;
                 const o = idx * 4;
-                const startSec = (this.posSize[o + 0] || 0) / denom;
-                const durSec   = (this.posSize[o + 2] || 0) / denom;
+                const startSec = (positions[o + 0] || 0) / denom;
+                const durSec   = (positions[o + 2] || 0) / denom;
                 const isAnchor = (idx === anchorIdx);
 const addDx = isAnchor ? 0.0 : dxSec;
 const e = startSec + addDx + durSec;
@@ -5716,7 +6130,7 @@ const e = startSec + addDx + durSec;
         })();
 
         const endEff = (() => {
-  const computeEff = (triTimes) => {
+  const computeEff = (triTimes: number[]) => {
     try {
       // Idle path: same as dashed computation (uses cached last-measure length when available)
       if (!this._dragActive) {
@@ -5727,7 +6141,7 @@ const e = startSec + addDx + durSec;
           endFromNotes = Math.max(0, this._rangeIndex.right[1] / denom);
         } else for (let i = 0; i < Ninst; i++) {
           const o = i * 4;
-          const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
+          const endSec = ((positions[o + 0] || 0) + (positions[o + 2] || 0)) / denom;
           if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
         }
         let endFromMeasures = 0;
@@ -5784,8 +6198,8 @@ const e = startSec + addDx + durSec;
           const idx = movingIdx[i] | 0;
           if (idx < 0 || idx >= (this.instanceCount | 0)) continue;
           const o = idx * 4;
-          const startSec = (this.posSize[o + 0] || 0) / denom;
-          const durSec   = (this.posSize[o + 2] || 0) / denom;
+          const startSec = (positions[o + 0] || 0) / denom;
+          const durSec   = (positions[o + 2] || 0) / denom;
           const isAnchor = (idx === anchorIdx);
           const addDx = isAnchor ? 0.0 : dxSec;
           const e = startSec + addDx + durSec;
@@ -5909,7 +6323,8 @@ const e = startSec + addDx + durSec;
         // Dependency highlight ring for BaseNote when included in sets
         try {
           if (!this._dragActive && this.baseCircleProgram && this._lastSelectedNoteId !== 0) {
-            const drawBaseDepRing = (rgba, widthPx) => {
+            const drawBaseDepRing = (rgba: number[], widthPx: number) => {
+              if (!this.baseCircleProgram) return;
               gl.useProgram(this.baseCircleProgram);
               const U = (this._uniforms && this._uniforms.baseCircle) ? this._uniforms.baseCircle : null;
               const uVP = U ? U.u_viewport : gl.getUniformLocation(this.baseCircleProgram, 'u_viewport');
@@ -5945,13 +6360,13 @@ const e = startSec + addDx + durSec;
             };
 
             // Draw property-colored deps rings for baseNote
-            for (const prop of ['startTime', 'frequency', 'duration']) {
+            for (const prop of ['startTime', 'frequency', 'duration'] as const) {
               if (this._relDepsHasBaseByProperty?.[prop]) {
                 drawBaseDepRing(BASE_DEP_COLORS[prop], 2.5);
               }
             }
             // Draw property-colored rdeps rings for baseNote (if any)
-            for (const prop of ['startTime', 'frequency', 'duration']) {
+            for (const prop of ['startTime', 'frequency', 'duration'] as const) {
               if (this._relRdepsHasBaseByProperty?.[prop]) {
                 drawBaseDepRing(BASE_RDEP_COLORS[prop], 1.5);
               }
@@ -6061,6 +6476,7 @@ const e = startSec + addDx + durSec;
           this._lastTriDataEpoch = this._triDataEpoch;
           this._lastTriPreviewEpoch = this._triPreviewEpoch;
         }
+if (!this.measureTriPosSize || !this.measureTriPosSizeOutline || !this._measureTriIds) return;
 // Build per-instance drag flags for triangles and update CPU picking CSS to match shader shift
 {
   const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size) ? this._dragMovingIds : null;
@@ -6072,7 +6488,7 @@ const e = startSec + addDx + durSec;
   const flaggedIdx = [];
   if (moving && this._measureTriIdToIndex) {
     try {
-      const candidates = moving.size < count ? moving : this._measureTriIds;
+      const candidates = moving.size < count ? moving : (this._measureTriIds || []);
       for (const id of candidates) {
         if (!moving.has(id)) continue;
         const idNum = Number(id);
@@ -6431,10 +6847,12 @@ try {
     const uColD = UtoD ? UtoD.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
     if (uVPd) gl.uniform2f(uVPd, vpW, vpH);
 
-    const drawTriOutlineAtIndex = (idx, rgba, inflateArr) => {
+    const drawTriOutlineAtIndex = (idx: number | null | undefined, rgba: number[], inflateArr: Float32Array<ArrayBuffer> | null | undefined) => {
+      if (!this.measureTriOutlineProgram || !this._measureTriIds || idx == null) return;
       if (idx == null || idx < 0 || idx >= this._measureTriIds.length) return;
       const o = idx * 4;
       const src = inflateArr || this.measureTriPosSizeOutline;
+      if (!src) return;
       const arr = new Float32Array([
         src[o + 0], src[o + 1], src[o + 2], src[o + 3]
       ]);
@@ -6513,7 +6931,7 @@ try {
     const rect = this._marqueeRect;
     this._ensureMultiSelIndices();
     const committed = !rect || rect.additive ? this._multiSelMeasureIds : null;
-    if (rect || committed?.length) {
+    if ((rect || committed?.length) && this._measureTriCss) {
       const css = this._measureTriCss;
       let cache = this._measureRingCache;
       if (!cache || cache.rect !== rect || cache.committed !== committed || cache.css !== css
@@ -6878,7 +7296,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
     proto._renderNoteOverlays = function () {
       const gl = this.gl;
       if (!gl || !this.canvas) return;
-      if (!this.drawNoteOverlays || !this.instanceCount) return;
+      const positions = this.posSize;
+      if (!this.drawNoteOverlays || !this.instanceCount || !positions) return;
 
       const ranges = this._detailRanges;
       if (!ranges.length) {
@@ -6918,7 +7337,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       const dragAnchorIdx = (this._dragActive && this._dragAnchorIndex != null && this._dragAnchorIndex >= 0)
         ? (this._dragAnchorIndex | 0) : -1;
       const dragGeomSig = (dragAnchorIdx >= 0 && this.posSize && (dragAnchorIdx * 4 + 2) < this.posSize.length)
-        ? (this.posSize[dragAnchorIdx * 4 + 2] + (this._dragOffsetW || 0.0))
+        ? (positions[dragAnchorIdx * 4 + 2] + (this._dragOffsetW || 0.0))
         : -1;
 
       // Batching flags
@@ -6975,8 +7394,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
             for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               const o = i * 4;
-              const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
-              const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
+              const wCss = positions[o + 2] * (this.xScalePxPerWU || 1.0);
+              const hCss = positions[o + 3] * (this.yScalePxPerWU || 1.0);
 
               const pad = Math.max(2, Math.round(hCss * 0.08));
               const tabWidth = Math.max(10, Math.round(hCss * (this._config?.overlays?.tabWidthFactor ?? 0.5)) - borderCss);
@@ -7026,8 +7445,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               if (this._dragFlags[i] !== 1.0) continue;
               const o = i * 4;
-              const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
-              const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
+              const wCss = positions[o + 2] * (this.xScalePxPerWU || 1.0);
+              const hCss = positions[o + 3] * (this.yScalePxPerWU || 1.0);
 
               const tabWidth = Math.max(10, Math.round(hCss * 0.5) - borderCss);
               const heX = 0.5 * wCss;
@@ -7062,7 +7481,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             }
           }
 
-          const gl = this.gl;
+          
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
           const uMat = Utb ? Utb.u_matrix      : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -7149,7 +7568,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
         // is guarded by this same reuse condition, so a reuse frame cannot mutate it, and
         // keeping the array identity stable is what lets _flushGlyphRunsAtlas recognise
         // the run list as unchanged and skip re-expanding + re-uploading every glyph.
-        this._deferredGlyphRuns = this._glyphRunsCache;
+        this._deferredGlyphRuns = this._glyphRunsCache!;
         this._textRebuildThisFrame = false;
       } else {
         this._deferredGlyphRuns = [];   // will build below and cache post-flush
@@ -7194,8 +7613,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 
             for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               const o = i * 4;
-              const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
-              const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
+              const wCss = positions[o + 2] * (this.xScalePxPerWU || 1.0);
+              const hCss = positions[o + 3] * (this.yScalePxPerWU || 1.0);
               const isSilence = !!(this._instanceFlags && this._instanceFlags[i] === 1.0);
 
               if (isSilence || wCss <= 0 || hCss <= 0) {
@@ -7321,14 +7740,14 @@ try {
   const hs = this._hoverSub;
   if (hs && this._noteIdToIndex && this.tabMaskProgram && this.rectVAO) {
     const idx = this._noteIdToIndex.get(Number(hs.id));
-    if (idx != null && idx >= 0 && idx < this.instanceCount) {
+    if (idx != null && idx >= 0 && idx < this.instanceCount && this.posSize) {
       const base = idx * 4;
       // Build single-instance posSize for the hovered note, applying drag preview offsets
       // manually for moving notes (anchor already baked into CPU posSize).
-      let xwH = this.posSize[base + 0];
-      let ywH = this.posSize[base + 1];
-      let wwH = this.posSize[base + 2];
-      let hhH = this.posSize[base + 3];
+      let xwH = positions[base + 0];
+      let ywH = positions[base + 1];
+      let wwH = positions[base + 2];
+      let hhH = positions[base + 3];
       const movingHover = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !(this._dragAnchorIndex != null && idx === (this._dragAnchorIndex | 0)));
       if (movingHover) {
         xwH += (this._dragOffsetX || 0.0);
@@ -7336,7 +7755,7 @@ try {
       }
       const arrPos = new Float32Array([ xwH, ywH, wwH, hhH ]);
 
-      const gl = this.gl;
+      
       gl.useProgram(this.tabMaskProgram);
       const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
       const uMat = Utb ? Utb.u_matrix       : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -7379,7 +7798,7 @@ try {
       gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
       gl.vertexAttribDivisor(1, 1);
 
-      const drawRegion = (regionRect, color, bias) => {
+      const drawRegion = (regionRect: Float32Array<ArrayBuffer> | null, color: number[], bias: number) => {
         if (!regionRect) return;
         if (uBias) gl.uniform1f(uBias, bias);
         if (uCol)  gl.uniform4f(uCol, color[0], color[1], color[2], color[3]);
@@ -7453,11 +7872,11 @@ try {
         const o = i * 4;
         const so = i * 2;
 
-        const xw = this.posSize[o + 0];
-        const yw = this.posSize[o + 1];
+        const xw = positions[o + 0];
+        const yw = positions[o + 1];
         // Derive current CSS px from world size so overlays track zoom precisely
-        const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
-        const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
+        const wCss = positions[o + 2] * (this.xScalePxPerWU || 1.0);
+        const hCss = positions[o + 3] * (this.yScalePxPerWU || 1.0);
 
         // world (xw,yw) -> page CSS px (sx,sy) -> canvas-local CSS px (left, top)
         const sx = m[0] * xw + m[3] * yw + m[6];
@@ -7943,7 +8362,7 @@ try {
               // Disable unused attrib 4 for single-instance silence ring draw
               this._setAttr4Enabled(false);
               gl.bindVertexArray(this.rectVAO);
-              const arrPos = new Float32Array([xw, yw, this.posSize[o + 2], this.posSize[o + 3]]);
+              const arrPos = new Float32Array([xw, yw, positions[o + 2], positions[o + 3]]);
               // Use dedicated single-instance buffer and temporarily re-point attrib 1
               if (!this._singlePosSizeBuffer) {
                 this._singlePosSizeBuffer = gl.createBuffer();
@@ -7989,7 +8408,7 @@ try {
       // Batched silence erase bands (covers any DOM-drawn fraction bar when glonly=0)
       try {
         if (this.enableSilenceEraseBands && this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && this._anySilenceErase && this._silenceEraseRegions) {
-          const gl = this.gl;
+          
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
           const uMat = Utb ? Utb.u_matrix      : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -8047,7 +8466,7 @@ try {
       // Batched fraction dividers (single instanced pass, masked to inner rounded-rect)
       try {
         if (this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && _anyDivider) {
-          const gl = this.gl;
+          
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
           const uMat = Utb ? Utb.u_matrix      : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -8104,7 +8523,7 @@ try {
       // Batched silence dashed rings (single instanced pass; non-silence instances discard in shader)
       try {
         if (batchSilenceRings && this.silenceDashRingProgram && this.rectVAO && this.instanceCount > 0) {
-          const gl = this.gl;
+          
           gl.useProgram(this.silenceDashRingProgram);
           const Usr = (this._uniforms && this._uniforms.silenceRing) ? this._uniforms.silenceRing : null;
           const uMat   = Usr ? Usr.u_matrix      : gl.getUniformLocation(this.silenceDashRingProgram, 'u_matrix');
@@ -8258,6 +8677,7 @@ try {
  
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
  
       // Measure in CSS px
       ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
@@ -8314,6 +8734,7 @@ try {
 
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
 
       ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       const metrics = ctx.measureText(label);
@@ -8365,6 +8786,7 @@ try {
 
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
 
       ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       const metrics = ctx.measureText(label);
@@ -8417,6 +8839,7 @@ try {
 
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
 
       ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       // Use alphabetic baseline to get reliable ascent/descent metrics
@@ -8508,11 +8931,12 @@ try {
       const basePx = this._glyphBasePx || 64;
       const key = `glyph|${ch}|${basePx}|${dpr}`;
       if (this._glyphCache && this._glyphCache.has(key)) {
-        return this._glyphCache.get(key);
+        return this._glyphCache.get(key)!;
       }
 
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
 
       // Measure tight bounds in CSS px at base size
       ctx.font = `${basePx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
@@ -8697,6 +9121,7 @@ try {
         if (!this._metricsCanvas) this._metricsCanvas = document.createElement('canvas');
         if (!this._metricsCtx) this._metricsCtx = this._metricsCanvas.getContext('2d');
         const ctx = this._metricsCtx;
+        if (!ctx) throw new Error('Canvas2D context unavailable');
         ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
         ctx.textBaseline = 'alphabetic';
         // Normalize ascent for numeric runs by measuring a canonical digit set,
@@ -8730,11 +9155,12 @@ try {
       const basePx = this._glyphBasePx || 64;
       const key = `word|silence|${basePx}|${dpr}`;
       if (!this._wordCache) this._wordCache = new Map();
-      if (this._wordCache.has(key)) return this._wordCache.get(key);
+      if (this._wordCache.has(key)) return this._wordCache.get(key)!;
 
       const label = 'silence';
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
 
       ctx.font = `${basePx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       ctx.textBaseline = 'alphabetic';
@@ -8980,6 +9406,7 @@ try {
       canvas.width = size;
       canvas.height = size;
       const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
       // Clear
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -9032,6 +9459,7 @@ try {
       // Rasterize glyph at base size into temporary canvas (reuse glyph cache metrics)
       const tmpCanvas = document.createElement('canvas');
       const ctx = tmpCanvas.getContext('2d');
+      if (!ctx) return null;
       ctx.font = `${basePx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       ctx.textBaseline = 'alphabetic';
       const metrics = ctx.measureText(ch);
@@ -9153,6 +9581,7 @@ try {
     // state allocates nothing.
     proto._buildAtlasGlyphInstances = function (runs, vpW, vpH) {
       const gl = this.gl;
+    if (!gl) return 0;
 
       // Count glyphs
       let glyphCount = 0;
@@ -9176,13 +9605,13 @@ try {
         S.rrR = new Float32Array(cap);
         S.dragFlags = new Float32Array(cap);
       }
-      const posSize = S.posSize;
-      const uvRect = S.uvRect;
-      const color = S.color;
-      const zArr = S.zArr;
-      const clip = S.clip;
-      const rrCS = S.rrCS;
-      const rrR = S.rrR;
+      const posSize = S.posSize!;
+      const uvRect = S.uvRect!;
+      const color = S.color!;
+      const zArr = S.zArr!;
+      const clip = S.clip!;
+      const rrCS = S.rrCS!;
+      const rrR = S.rrR!;
 
       let gi = 0;
       for (let i = 0; i < runs.length; i++) {
@@ -9312,7 +9741,7 @@ try {
       if (!moving && !this._atlasDragFlagsDirty) return;
 
       const S = this._atlasScratch;
-      const dragFlags = S.dragFlags;
+      const dragFlags = S.dragFlags!;
       let gi = 0;
       for (let i = 0; i < runs.length; i++) {
         const r = runs[i];
@@ -9333,6 +9762,7 @@ try {
 
     proto._drawAtlasGlyphInstances = function (count, vpW, vpH, reused) {
       const gl = this.gl;
+    if (!gl || !this.atlasTextProgram || !this._atlas) return;
 
       this._uploadAtlasDragFlags(this._deferredGlyphRuns, count);
 
@@ -9419,7 +9849,7 @@ try {
     // Render horizontal dotted lines and labels in screen space
     proto._renderOctaveGuides = function () {
       const gl = this.gl;
-      if (!gl || !this.canvas) return;
+      if (!gl || !this.canvas || !this.octaveLineProgram || !this.textProgram) return;
 
       // Ensure data
       this._ensureOctaveGuides();
@@ -9435,7 +9865,7 @@ try {
       }
 
       // Helper: world (0, y) -> canvas-local CSS px Y
-      const worldYToLocalCssY = (yWorld) => {
+      const worldYToLocalCssY = (yWorld: number) => {
         const sx = this.matrix[3] * yWorld + this.matrix[6];
         const sy = this.matrix[4] * yWorld + this.matrix[7];
         const localY = (this.canvasOffset?.y != null) ? (sy - this.canvasOffset.y) : sy;
@@ -9705,7 +10135,7 @@ try {
           const px = clientX - (this.canvasOffset?.x ?? 0);
           const py = clientY - (this.canvasOffset?.y ?? 0);
           const count = Math.floor(css.length / 4);
-          const hits = [];
+          const hits: SceneHit[] = [];
           // Reverse order to approximate top-most first
           for (let i = count - 1; i >= 0; i--) {
             const o = i * 4;
@@ -9763,7 +10193,7 @@ try {
       const vpH = Math.max(1, rectCss.height);
 
       // Helper: world (0, y) -> canvas-local CSS px Y
-      const worldYToLocalCssY = (yWorld) => {
+      const worldYToLocalCssY = (yWorld: number) => {
         const sx = this.matrix[3] * yWorld + this.matrix[6];
         const sy = this.matrix[4] * yWorld + this.matrix[7];
         const localY = (this.canvasOffset?.y != null) ? (sy - this.canvasOffset.y) : sy;
@@ -9974,6 +10404,7 @@ try {
       }
 
       // Draw all lines in one instanced call
+      if (!this.octaveLineInstProgram) return;
       gl.useProgram(this.octaveLineInstProgram);
       const Uoi = (this._uniforms && this._uniforms.octaveInst) ? this._uniforms.octaveInst : null;
       const uVP = Uoi ? Uoi.u_viewport : gl.getUniformLocation(this.octaveLineInstProgram, 'u_viewport');
@@ -10085,7 +10516,7 @@ try {
     // steady-state drag allocates nothing. Views stay valid because a bucket is only rewritten
     // on a rebuild, and the caller re-reads the view on that same rebuild.
     proto._linkWriter = function (key) {
-      const pool = this._linkPool || (this._linkPool = new Map());
+      const pool = this._linkPool || (this._linkPool = new Map<string, LinkWriter>());
       let w = pool.get(key);
       if (!w) {
         w = {
@@ -10108,7 +10539,7 @@ try {
             } else {
               this._grow(this.n + 4);
               this.a[this.n++] = v0; this.a[this.n++] = v1;
-              this.a[this.n++] = v2; this.a[this.n++] = v3;
+              this.a[this.n++] = v2; this.a[this.n++] = v3!;
             }
           },
           get length() { return this.n; },
@@ -10221,7 +10652,7 @@ try {
 
       // Property-colored link line buffers (rdeps split by property)
       this._linkBuffersByProperty = {};
-      for (const prop of ['frequency', 'startTime', 'duration']) {
+      for (const prop of ['frequency', 'startTime', 'duration'] as const) {
         this._linkBuffersByProperty[prop] = {
           endpoints: gl.createBuffer(),
           flags: gl.createBuffer()
@@ -10234,7 +10665,7 @@ try {
 
       // Property-colored link line buffers (deps split by property)
       this._linkDepsBuffersByProperty = {};
-      for (const prop of ['frequency', 'startTime', 'duration']) {
+      for (const prop of ['frequency', 'startTime', 'duration'] as const) {
         this._linkDepsBuffersByProperty[prop] = {
           endpoints: gl.createBuffer(),
           flags: gl.createBuffer()
@@ -10286,7 +10717,7 @@ try {
           }
           if (!unchanged) {
             try {
-              const s = new Set();
+              const s = new Set<number>();
               for (let i = 0; i < ids.length; i++) s.add(Number(ids[i]));
               this._dragMovingIds = s;
             } catch { this._dragMovingIds = null; }
@@ -10320,6 +10751,8 @@ try {
       const gl = this.gl, canvas = this.canvas;
       if (!gl || !canvas) return;
 
+      // Instance-indexed reads below only run for a synchronized note body.
+      const positions = this.posSize!;
       // Ensure link-line resources exist
       try { this._initLinkLinesPass(); } catch {}
 
@@ -10327,7 +10760,7 @@ try {
       const vpW = Math.max(1, rectCss.width);
       const vpH = Math.max(1, rectCss.height);
 
-      const toLocalCss = (wx, wy) => {
+      const toLocalCss = (wx: number, wy: number) => {
         // world -> page CSS
         const sx = this.matrix[0] * wx + this.matrix[3] * wy + this.matrix[6];
         const sy = this.matrix[1] * wx + this.matrix[4] * wy + this.matrix[7];
@@ -10346,7 +10779,7 @@ try {
         const suppressLinkLines = false;
         if (!suppressLinkLines && this.drawLinkLines && this.linkLineProgram && this.linkLineVAO && this._noteIdToIndex && ((this._dragOverlay && this._dragOverlay.noteId != null) || (this._lastSelectedNoteId != null))) {
           const anchorId = (this._dragOverlay && this._dragOverlay.noteId != null) ? this._dragOverlay.noteId : this._lastSelectedNoteId;
-          const selIdx = (this._noteIdToIndex && this._noteIdToIndex.get) ? this._noteIdToIndex.get(anchorId) : null;
+          const selIdx = (this._noteIdToIndex && this._noteIdToIndex.get) ? this._noteIdToIndex.get(anchorId!) : null;
           let selC = null;
 
           // Resolve anchor center in canvas-local CSS px for: BaseNote (0), normal note ids, and measure triangle ids.
@@ -10370,8 +10803,8 @@ try {
             } else if (selIdx != null && selIdx >= 0 && selIdx < this.instanceCount) {
             // Anchor is a normal note rectangle
             const baseSel = selIdx * 4;
-            const sxW = this.posSize[baseSel + 0], syW = this.posSize[baseSel + 1];
-            const sw  = this.posSize[baseSel + 2], sh  = this.posSize[baseSel + 3];
+            const sxW = positions[baseSel + 0], syW = positions[baseSel + 1];
+            const sw  = positions[baseSel + 2], sh  = positions[baseSel + 3];
             selC = toLocalCss(sxW + 0.5 * sw, syW + 0.5 * sh);
           } else {
             // Anchor may be a measure triangle; use its apex (top center)
@@ -10408,7 +10841,7 @@ try {
           const needsRebuild = anchorChanged || viewChanged || posChanged || prosChanged || triChanged || dragChanged;
 
           if (selC && needsRebuild) {
-            const buildEndpoints = (indices) => {
+            const buildEndpoints = (indices: number[] | null) => {
               if (!indices || !indices.length) return null;
               const arr = new Float32Array(indices.length * 4);
               let k = 0;
@@ -10416,8 +10849,8 @@ try {
                 const idx = indices[i];
                 if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
                 const o = idx * 4;
-                const xw = this.posSize[o + 0], yw = this.posSize[o + 1];
-                const ww = this.posSize[o + 2], hh = this.posSize[o + 3];
+                const xw = positions[o + 0], yw = positions[o + 1];
+                const ww = positions[o + 2], hh = positions[o + 3];
                 const c  = toLocalCss(xw + 0.5 * ww, yw + 0.5 * hh);
                 arr[k++] = selC.x; arr[k++] = selC.y;
                 arr[k++] = c.x;    arr[k++] = c.y;
@@ -10435,7 +10868,7 @@ try {
                const anchorIdNum = Number(anchorId);
                let movingAnchor = false;
                try {
-                 const isMeasureAnchor = !!(this._measureTriIdToIndex && this._measureTriIdToIndex.get && this._measureTriIdToIndex.get(anchorIdNum) != null && this._measureTriIdToIndex.get(anchorIdNum) >= 0);
+                 const isMeasureAnchor = !!(this._measureTriIdToIndex && this._measureTriIdToIndex.get && this._measureTriIdToIndex.get(anchorIdNum) != null && (this._measureTriIdToIndex.get(anchorIdNum) ?? -1) >= 0);
                  const anchorHasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, anchorIdNum));
                  // Only treat the anchor as moving in the shader for MEASURE anchors without a preview-baked position.
                  // For normal notes, the anchor's CPU posSize is already updated during preview, so shader offset would double-apply.
@@ -10443,14 +10876,14 @@ try {
                } catch {}
 
               // Helpers to append endpoints and parallel GPU pFlags lists ([p0Drag, p1Drag])
-              const appendNoteIdxEndpoints = (indices, list, flagsList) => {
+              const appendNoteIdxEndpoints = (indices: number[] | null, list: LinkWriter, flagsList: LinkWriter) => {
                 if (!indices || !indices.length) return;
                 for (let i = 0; i < indices.length; i++) {
                   const idx = indices[i];
                   if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
                   const o = idx * 4;
-                  let xw = this.posSize[o + 0], yw = this.posSize[o + 1];
-                  let ww = this.posSize[o + 2], hh = this.posSize[o + 3];
+                  let xw = positions[o + 0], yw = positions[o + 1];
+                  let ww = positions[o + 2], hh = positions[o + 3];
                   // Do not apply CPU drag offsets here; the link-line shader applies u_dragCssX via per-endpoint flags.
                   const c  = toLocalCss(xw + 0.5 * ww, yw + 0.5 * hh);
                   list.push(selC.x, selC.y, c.x, c.y);
@@ -10460,7 +10893,7 @@ try {
                   flagsList.push(movingAnchor ? 1.0 : 0.0, targetMoving ? 1.0 : 0.0);
                 }
               };
-              const appendMeasureIdEndpoints = (ids, list, flagsList) => {
+              const appendMeasureIdEndpoints = (ids: number[] | null, list: LinkWriter, flagsList: LinkWriter) => {
                 if (!ids || !ids.length) return;
                 if (!this.measureTriPosSize || (!this._measureTriIdToIndex && !this._measureTriIds)) return;
                 for (let i = 0; i < ids.length; i++) {
@@ -10485,7 +10918,7 @@ try {
                   flagsList.push(movingAnchor ? 1.0 : 0.0, targetMoving ? 1.0 : 0.0);
                 }
               };
-              const appendBaseEndpointIf = (flag, list, flagsList) => {
+              const appendBaseEndpointIf = (flag: boolean, list: LinkWriter, flagsList: LinkWriter) => {
                 if (!flag) return;
                 // Use cached CSS center if available; fallback to world->CSS
                 let bx = null, by = null;
@@ -10512,7 +10945,7 @@ try {
               const depsFlagsByProp = { frequency: this._linkWriter('df:f'), startTime: this._linkWriter('df:s'), duration: this._linkWriter('df:d') };
 
               // Helper to check if an ID is a measure note (used by both parent chains and children trees)
-              const isMeasureNoteId = (id) => {
+              const isMeasureNoteId = (id: number) => {
                 try {
                   const n = mref?.getNoteById?.(Number(id));
                   return isMeasureNote(n);
@@ -10520,7 +10953,7 @@ try {
               };
 
               // Helper to get center point for a note/measure/baseNote (used by both parent chains and children trees)
-              const getCenterForId = (id) => {
+              const getCenterForId = (id: number) => {
                 const numId = Number(id);
                 if (numId === 0) {
                   // baseNote
@@ -10550,8 +10983,8 @@ try {
                 const idx = this._noteIdToIndex.get(numId);
                 if (idx == null || idx < 0 || idx >= this.instanceCount) return null;
                 const o = idx * 4;
-                const xw = this.posSize[o + 0], yw = this.posSize[o + 1];
-                const ww = this.posSize[o + 2], hh = this.posSize[o + 3];
+                const xw = positions[o + 0], yw = positions[o + 1];
+                const ww = positions[o + 2], hh = positions[o + 3];
                 return toLocalCss(xw + 0.5 * ww, yw + 0.5 * hh);
               };
 
@@ -10584,7 +11017,7 @@ try {
                 // We draw connected segments: selected → parent1 → parent2 → ... → baseNote
                 // During drag, for startTime we use the prospective parent and then continue its chain
 
-                for (const prop of ['frequency', 'startTime', 'duration']) {
+                for (const prop of ['frequency', 'startTime', 'duration'] as const) {
                   let chain;
 
                   // During drag, use prospective parent for startTime chain
@@ -10626,7 +11059,7 @@ try {
               } else {
                 // Fallback: use old logic, put everything in startTime
                 const buildFromStartString = () => {
-                  const out = { noteIds: [], measureIds: [], hasBase: false, parsed: false };
+                  const out: { noteIds: number[]; measureIds: number[]; hasBase: boolean; parsed: boolean } = { noteIds: [], measureIds: [], hasBase: false, parsed: false };
                   try {
                     const mod = this._moduleRef || null;
                     if (!mod || typeof mod.getNoteById !== 'function') return out;
@@ -10638,7 +11071,7 @@ try {
 
                     out.hasBase = /\bbase\./.test(s);
 
-                    const seen = new Set();
+                    const seen = new Set<number>();
                     // Note refs: [N].t, [N].d
                     const dslRe = /\[(\d+)\]\./g;
                     let dm;
@@ -10667,12 +11100,12 @@ try {
                 if (liveParsed.parsed) {
                   const idxs = liveParsed.noteIds
                     .map(id => this._noteIdToIndex.get(Number(id)))
-                    .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
+                    .filter((ii): ii is number => ii != null && ii >= 0 && ii < this.instanceCount);
                   appendNoteIdxEndpoints(idxs, depsList, depsFlags);
                   appendMeasureIdEndpoints(liveParsed.measureIds, depsList, depsFlags);
                   appendBaseEndpointIf(liveParsed.hasBase, depsList, depsFlags);
                 } else if (mref && typeof mref.getDirectDependencies === 'function') {
-                  const isMeasureNoteId = (id) => {
+                  const isMeasureNoteId = (id: number) => {
                     try {
                       const n = mref.getNoteById(Number(id));
                       return isMeasureNote(n);
@@ -10690,7 +11123,7 @@ try {
                   }
                   const idxs = noteIds
                     .map(id => this._noteIdToIndex.get(Number(id)))
-                    .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
+                    .filter((ii): ii is number => ii != null && ii >= 0 && ii < this.instanceCount);
                   appendNoteIdxEndpoints(idxs, depsList, depsFlags);
                   appendMeasureIdEndpoints(measureIds, depsList, depsFlags);
                   appendBaseEndpointIf(hasBase, depsList, depsFlags);
@@ -10706,9 +11139,9 @@ try {
               }
 
               // Store property-colored deps arrays
-              var depsArrByProp = {};
-              var depsFlagsArrByProp = {};
-              for (const prop of ['frequency', 'startTime', 'duration']) {
+              var depsArrByProp: Partial<ByRelation<Float32Array<ArrayBuffer> | null>> | undefined = {};
+              var depsFlagsArrByProp: Partial<ByRelation<Float32Array<ArrayBuffer> | null>> | undefined = {};
+              for (const prop of ['frequency', 'startTime', 'duration'] as const) {
                 depsArrByProp[prop] = depsListByProp[prop].view();
                 depsFlagsArrByProp[prop] = depsFlagsByProp[prop].view();
               }
@@ -10728,15 +11161,15 @@ try {
                 // so any real change to the module still invalidates it.
                 const allTrees = this._selectionTrees(mref, Number(anchorId));
 
-                for (const prop of ['frequency', 'startTime', 'duration']) {
-                  const edges = allTrees.edgesByProperty[prop];
+                for (const prop of ['frequency', 'startTime', 'duration'] as const) {
+                  const edges = allTrees?.edgesByProperty[prop] || [];
                   if (!edges?.length) continue;
 
                   // At overview scales many siblings end in the same pixel.
                   // One segment represents those coincident paths; the full tree
                   // and its per-note rings still retain every relationship.
                   const siblings = edges.length > 2048 && !this._dragActive &&
-                    (this.xScalePxPerWU < 1 || this.currentXScaleFactor < 1) ? new Map() : null;
+                    (this.xScalePxPerWU < 1 || this.currentXScaleFactor < 1) ? new Map<number, Set<number>>() : null;
                   let lastParent = null, parentCenter = null;
                   for (const edge of edges) {
                     // During drag, only include edges where child is in the moving set
@@ -10770,7 +11203,7 @@ try {
                 }
               } else if (mref && typeof mref.getChildrenTreeByProperty === 'function') {
                 // Fallback to individual calls for backwards compatibility
-                for (const prop of ['frequency', 'startTime', 'duration']) {
+                for (const prop of ['frequency', 'startTime', 'duration'] as const) {
                   const tree = mref.getChildrenTreeByProperty(Number(anchorId), prop);
                   if (!tree?.edges?.length) continue;
 
@@ -10792,14 +11225,14 @@ try {
                 const propDeps = mref.getDependentsByProperty(Number(anchorId));
 
                 // Helper to check if an ID is a measure note
-                const isMeasureNoteIdRdeps = (id) => {
+                const isMeasureNoteIdRdeps = (id: number) => {
                   try {
                     const n = mref.getNoteById(Number(id));
                     return isMeasureNote(n);
                   } catch { return false; }
                 };
 
-                for (const prop of ['frequency', 'startTime', 'duration']) {
+                for (const prop of ['frequency', 'startTime', 'duration'] as const) {
                   const propIds = propDeps[prop] || [];
                   const filteredIds = movingSet ? propIds.filter(id => movingSet.has(Number(id))) : propIds;
 
@@ -10819,7 +11252,7 @@ try {
                   // Add note endpoints
                   const propIdxs = noteIdsRdeps
                     .map(id => this._noteIdToIndex.get(Number(id)))
-                    .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
+                    .filter((ii): ii is number => ii != null && ii >= 0 && ii < this.instanceCount);
                   appendNoteIdxEndpoints(propIdxs, rdepsListByProp[prop], rdepsFlagsByProp[prop]);
 
                   // Add measure endpoints
@@ -10827,7 +11260,7 @@ try {
                 }
               } else if (mref && typeof mref.getDependentNotes === 'function') {
                 // Fallback: put all in startTime (teal) for backwards compatibility
-                const isMeasureNoteIdFallback = (id) => {
+                const isMeasureNoteIdFallback = (id: number) => {
                   try {
                     const n = mref.getNoteById(Number(id));
                     return isMeasureNote(n);
@@ -10847,7 +11280,7 @@ try {
                 }
                 const idxsR = noteIds
                   .map(id => this._noteIdToIndex.get(Number(id)))
-                  .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
+                  .filter((ii): ii is number => ii != null && ii >= 0 && ii < this.instanceCount);
                 appendNoteIdxEndpoints(idxsR, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
                 appendMeasureIdEndpoints(measureIds, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
                 appendBaseEndpointIf(hasBase, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
@@ -10867,9 +11300,9 @@ try {
               }
 
               // Store property-colored arrays
-              var rdepsArrByProp = {};
-              var rdepsFlagsArrByProp = {};
-              for (const prop of ['frequency', 'startTime', 'duration']) {
+              var rdepsArrByProp: Partial<ByRelation<Float32Array<ArrayBuffer> | null>> | undefined = {};
+              var rdepsFlagsArrByProp: Partial<ByRelation<Float32Array<ArrayBuffer> | null>> | undefined = {};
+              for (const prop of ['frequency', 'startTime', 'duration'] as const) {
                 rdepsArrByProp[prop] = rdepsListByProp[prop].view();
                 rdepsFlagsArrByProp[prop] = rdepsFlagsByProp[prop].view();
               }
@@ -10884,9 +11317,9 @@ try {
             // garbage per frame and the main source of the GC hitches when dragging a hub note.
             // Only these two counts were ever read from them, and only as a "is there anything
             // to draw" gate, so they are summed from the real buffers instead.
-            const countOf = (byProp) => {
+            const countOf = (byProp: Partial<ByRelation<Float32Array<ArrayBuffer> | null>> | undefined) => {
               let n = 0;
-              for (const prop of ['frequency', 'startTime', 'duration']) {
+              for (const prop of ['frequency', 'startTime', 'duration'] as const) {
                 const a = byProp && byProp[prop];
                 if (a && a.length) n += Math.floor(a.length / 4);
               }
@@ -10898,7 +11331,7 @@ try {
             gl.bindVertexArray(this.linkLineVAO);
 
             // Upload property-colored rdeps buffers
-            for (const prop of ['frequency', 'startTime', 'duration']) {
+            for (const prop of ['frequency', 'startTime', 'duration'] as const) {
               const propArr = rdepsArrByProp?.[prop];
               const propFlags = rdepsFlagsArrByProp?.[prop];
               const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
@@ -10908,7 +11341,7 @@ try {
 
               if (count > 0 && this._linkBuffersByProperty?.[prop]) {
                 gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].endpoints);
-                gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
+                gl.bufferData(gl.ARRAY_BUFFER, propArr!, gl.DYNAMIC_DRAW);
                 if (propFlags) {
                   gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].flags);
                   gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
@@ -10917,7 +11350,7 @@ try {
             }
 
             // Upload property-colored deps buffers
-            for (const prop of ['frequency', 'startTime', 'duration']) {
+            for (const prop of ['frequency', 'startTime', 'duration'] as const) {
               const propArr = depsArrByProp?.[prop];
               const propFlags = depsFlagsArrByProp?.[prop];
               const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
@@ -10927,7 +11360,7 @@ try {
 
               if (count > 0 && this._linkDepsBuffersByProperty?.[prop]) {
                 gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].endpoints);
-                gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
+                gl.bufferData(gl.ARRAY_BUFFER, propArr!, gl.DYNAMIC_DRAW);
                 if (propFlags) {
                   gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].flags);
                   gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
@@ -10956,7 +11389,7 @@ try {
             const uTh  = U ? U.u_thickness : gl.getUniformLocation(this.linkLineProgram, 'u_thickness');
             const uCol = U ? U.u_color     : gl.getUniformLocation(this.linkLineProgram, 'u_color');
             if (uVP)  gl.uniform2f(uVP, vpW, vpH);
-            gl.uniform2f(U.u_pan, tx - (this._linkBasis?.tx ?? tx), ty - (this._linkBasis?.ty ?? ty));
+            gl.uniform2f(U?.u_pan ?? gl.getUniformLocation(this.linkLineProgram, 'u_pan'), tx - (this._linkBasis?.tx ?? tx), ty - (this._linkBasis?.ty ?? ty));
             // Fixed 2px thickness for link lines (selected or dragging)
             if (uTh)  gl.uniform1f(uTh, 2.0);
             // Set drag delta uniform (CSS px); endpoints move via GPU flags
@@ -10983,7 +11416,7 @@ try {
             const lFq = this._depFrequencyRgba();
             const lSt = this._depStartTimeRgba();
             const lDu = this._depDurationRgba();
-            const lineA = (c, a) => [c[0], c[1], c[2], a];
+            const lineA = (c: number[], a: number) => [c[0], c[1], c[2], a];
 
             // Deps colors (brighter, thicker - these are what the selected note depends on)
             const DEPS_LINE_COLORS_NORMAL = {
@@ -11010,7 +11443,7 @@ try {
 
             if (uTh) gl.uniform1f(uTh, 4.0);
 
-            for (const prop of ['startTime', 'frequency', 'duration']) {
+            for (const prop of ['startTime', 'frequency', 'duration'] as const) {
               const count = this._linkDepsCountByProperty?.[prop] || 0;
               if (count > 0 && this._linkDepsBuffersByProperty?.[prop]) {
                 const color = DEPS_LINE_COLORS[prop];
@@ -11057,7 +11490,7 @@ try {
 
             if (uTh) gl.uniform1f(uTh, 2.0);
 
-            for (const prop of ['startTime', 'frequency', 'duration']) {
+            for (const prop of ['startTime', 'frequency', 'duration'] as const) {
               const count = this._linkCountByProperty?.[prop] || 0;
               if (count > 0 && this._linkBuffersByProperty?.[prop]) {
                 const color = RDEPS_LINE_COLORS[prop];
@@ -11089,10 +11522,10 @@ try {
         if (this.drawDragOverlays && st && st.noteId != null && this._noteIdToIndex) {
           const idx = this._noteIdToIndex.get(Number(st.noteId));
           __isNoteValid = (idx != null && idx >= 0 && idx < this.instanceCount);
-          if (__isNoteValid) {
+          if (__isNoteValid && idx != null) {
             const base = idx * 4;
-            const xw = this.posSize[base + 0], yw = this.posSize[base + 1];
-            const ww = this.posSize[base + 2], hh = this.posSize[base + 3];
+            const xw = positions[base + 0], yw = positions[base + 1];
+            const ww = positions[base + 2], hh = positions[base + 3];
 
             // 1) Ghost fill (rounded rect interior), world-space via selectionFillProgram
             if (this.drawDragGhosts && this.selectionFillProgram) {
@@ -11182,14 +11615,14 @@ try {
                 if (!this._singlePosSizeBuffer) { this._singlePosSizeBuffer = gl.createBuffer(); }
                 gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
 
-                for (let ii = 0; ii < this._relRdepsIdx.length; ii++) {
+                for (let ii = 0; this._relRdepsIdx && ii < this._relRdepsIdx.length; ii++) {
                   const idxDep = this._relRdepsIdx[ii];
                   if (idxDep == null || idxDep < 0 || idxDep >= this.instanceCount) continue;
                   const oDep = idxDep * 4;
-                  const xwDep = this.posSize[oDep + 0];
-                  const ywDep = this.posSize[oDep + 1];
-                  const wwDep = this.posSize[oDep + 2];
-                  const hhDep = this.posSize[oDep + 3];
+                  const xwDep = positions[oDep + 0];
+                  const ywDep = positions[oDep + 1];
+                  const wwDep = positions[oDep + 2];
+                  const hhDep = positions[oDep + 3];
                   // Move dependents with dx on move; shift with ddur on resize preview
                   let shiftX = 0.0;
                   if (stDO.type === 'move') shiftX = dxWU;
@@ -11226,7 +11659,8 @@ try {
 
             // 2) Snap guides (vertical 2px at start; for resize also at end) — selection-colored
             if (this.solidCssProgram && this.octaveLineVAO && this.octaveLinePosSizeBuffer) {
-              const drawSnapAtWorldX = (xWorld, rgba) => {
+              const drawSnapAtWorldX = (xWorld: number, rgba: number[]) => {
+                if (!this.solidCssProgram) return;
                 // world x -> page CSS -> canvas-local
                 const sx = this.matrix[0] * xWorld + this.matrix[6];
                 const localX = (this.canvasOffset?.x != null) ? (sx - this.canvasOffset.x) : sx;
@@ -11287,7 +11721,8 @@ try {
         // Fallback: measure triangle drag (no note instance). Draw origin and current bars.
         if (!__isNoteValid && st) {
           if (this.solidCssProgram && this.octaveLineVAO && this.octaveLinePosSizeBuffer) {
-            const drawSnapAtWorldX = (xWorld, rgba) => {
+            const drawSnapAtWorldX = (xWorld: number, rgba: number[]) => {
+                if (!this.solidCssProgram) return;
               const sx = this.matrix[0] * xWorld + this.matrix[6];
               const localX = (this.canvasOffset?.x != null) ? (sx - this.canvasOffset.x) : sx;
               const widthPx = 2.0;
@@ -11602,7 +12037,7 @@ try {
       if (!css || !css.length) return [];
       const px = clientX - (this.canvasOffset?.x ?? 0);
       const py = clientY - (this.canvasOffset?.y ?? 0);
-      const hits = [];
+      const hits: SceneHit[] = [];
       for (const r of css) {
         if (px >= r.x0 - 2 && Math.abs(py - r.y) <= 4) {
           hits.push({ type: 'reference', id: r.id });

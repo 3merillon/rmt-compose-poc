@@ -103,7 +103,9 @@ export const defaultRendererConfig = {
  * - Arrays are replaced (last write wins), primitives are overwritten
  * - Objects are merged recursively
  */
-export type RendererConfig = typeof defaultRendererConfig;
+export type RendererConfig = typeof defaultRendererConfig & {
+  selection: { multiRingThicknessPxAtZoom1?: number };
+};
 export type RendererConfigPatch = { [K in keyof RendererConfig]?: Partial<RendererConfig[K]> };
 
 export function normalizeRendererConfig(partial?: RendererConfigPatch | null): RendererConfig {
