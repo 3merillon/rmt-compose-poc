@@ -16,7 +16,7 @@ import type { AppEvents } from '../utils/event-bus.ts';
 type DropMode = 'start' | 'end';
 type ModuleData = InputScore & { filename?: string };
 type ModuleMeta = Partial<LibraryItem>;
-interface LibraryTile extends HTMLDivElement {
+export interface LibraryTile extends HTMLDivElement {
     moduleMeta?: ModuleMeta;
     moduleData?: ModuleData;
     _suppressClickUntil?: number;
@@ -59,7 +59,7 @@ function isStoredModule(value: unknown): value is StoredModule {
         && ['isUploaded', 'hasData', 'loadFailed'].every(key => value[key] === undefined || typeof value[key] === 'boolean');
 }
 
-function isLibraryLayout(value: unknown): value is LibraryLayout {
+export function isLibraryLayout(value: unknown): value is LibraryLayout {
     return isRecord(value) && Array.isArray(value.categories)
         && value.categories.every((cat: unknown) => isRecord(cat) && typeof cat.name === 'string'
             && (cat.label === undefined || typeof cat.label === 'string')
