@@ -7,70 +7,58 @@
   "notes": [
     {
       "id": 1,
-      "startTime": "base.t",
-      "frequency": "(3/2) * base.f",
-      "color": "rgba(150,150,150,0.5)"
+      "startTime": "(base.t)",
+      "duration": "base.d * 2",
+      "frequency": "(3/4) * base.f",
+      "color": "rgba(128,128,128,0.7)"
     },
     {
       "id": 2,
       "startTime": "[1].t",
-      "duration": "base.d * 2",
-      "frequency": "(1/2) * [1].f",
-      "color": "rgba(128,128,128,0.7)"
+      "duration": "[1].d",
+      "frequency": "(5/4) * [1].f",
+      "color": "rgba(0,200,80,0.7)"
     },
     {
       "id": 3,
-      "startTime": "[2].t",
-      "duration": "[2].d",
-      "frequency": "(5/8) * [1].f",
-      "color": "rgba(0,200,80,0.7)"
+      "startTime": "[1].t",
+      "duration": "[1].d",
+      "frequency": "(3/4) * [1].f",
+      "color": "rgba(220,60,60,0.7)"
     },
     {
       "id": 4,
-      "startTime": "[2].t",
-      "duration": "[2].d",
-      "frequency": "(3/8) * [1].f",
-      "color": "rgba(220,60,60,0.7)"
-    },
-    {
-      "id": 5,
-      "startTime": "[2].t",
-      "duration": "[2].d",
-      "frequency": "(7/8) * [1].f",
+      "startTime": "[1].t",
+      "duration": "[1].d",
+      "frequency": "(7/4) * [1].f",
       "color": "rgba(70,120,230,0.7)"
     },
     {
-      "id": 6,
-      "startTime": "[2].t + [2].d",
-      "frequency": "(2/3) * [1].f",
-      "color": "rgba(150,150,150,0.5)"
-    },
-    {
-      "id": 7,
-      "startTime": "[6].t",
+      "id": 5,
+      "startTime": "([1].t + [1].d)",
       "duration": "base.d * 2",
-      "frequency": "(1/2) * [6].f",
+      "frequency": "(2/3) * [1].f",
       "color": "rgba(128,128,128,0.7)"
     },
     {
-      "id": 8,
-      "startTime": "[7].t",
-      "duration": "[7].d",
-      "frequency": "(5/4) * [6].f",
+      "id": 6,
+      "startTime": "[5].t",
+      "duration": "[5].d",
+      "frequency": "(5/2) * [5].f",
       "color": "rgba(0,200,80,0.7)"
     },
     {
-      "id": 9,
-      "startTime": "[7].t",
-      "duration": "[7].d",
-      "frequency": "(3/4) * [6].f",
+      "id": 7,
+      "startTime": "[5].t",
+      "duration": "[5].d",
+      "frequency": "(3/2) * [5].f",
       "color": "rgba(220,60,60,0.7)"
     },
     {
-      "id": 10,
-      "startTime": "[7].t",
-      "duration": "[7].d",
-      "frequency": "[6].f",
+      "id": 8,
+      "startTime": "[5].t",
+      "duration": "[5].d",
+      "frequency": "2 * [5].f",
       "color": "rgba(128,128,128,0.7)"
     }
   ]

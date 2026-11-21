@@ -16,4 +16,4 @@ Play the chord. Transpose its root and hear all three pitches follow. Undo and d
 
 Choose **+ → Save Module** to download your example. Press a section’s dashed **+** tile to upload it to the library. You can also [copy a selection](/user-guide/notes/selection). Drop the tile onto a pitched note. Use **End** to hear the chord as its answer or **Start** to hear the two together. The host’s BaseNote supplies the time unit. [Drop targets and timing](/user-guide/modules/loading-modules#where-you-can-drop)
 
-For longer examples, try a silent harmonic root for each chord as in [the shipped progressions](/tutorials/workflows/canon-and-cadences). For JSON fields and an example you can save as a file, see [Module format](/user-guide/modules/module-format).
+To build a progression, give the next chord’s sounding root a frequency relative to the first root. Link the new chord’s other tones to its own root. You can then retune an entire phrase by editing its first root. [Hear this in a shipped cadence](/tutorials/workflows/canon-and-cadences). For JSON fields and an example you can save as a file, see [Module format](/user-guide/modules/module-format).

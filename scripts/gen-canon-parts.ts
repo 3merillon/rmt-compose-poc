@@ -34,14 +34,18 @@ for (const note of score.notes.filter(note => note.frequency)) {
   }
 }
 
-async function publish(name: string, notes: CanonNote[], baseNote: ScoreFields) {
-  const ids = new Map(notes.map((note, index) => [note.id, index + 1]));
+async function publish(name: string, source: CanonNote[], baseNote: ScoreFields) {
+  // Number before omitting bar markers to preserve the published sounding-note IDs.
+  const notes = source
+    .map((note, index) => ({ note, id: index + 1 }))
+    .filter(({ note }) => !note.measure && note.frequency && note.duration);
+  const ids = new Map(notes.map(({ note, id }) => [note.id, id]));
   const remap = (expression: string) => expression.replace(/\[(\d+)\]/g, (_, old) => {
     assert(ids.has(+old), `missing reference to ${old} in ${name}`);
     return `[${ids.get(+old)}]`;
   });
-  const projected = notes.map(note => {
-    const copy = { ...note, id: ids.get(note.id)! };
+  const projected = notes.map(({ note, id }) => {
+    const copy = { ...note, id };
     if (note.frequency) {
       // A standalone part can still refer forward or backward within its own
       // line. Skip intervening pitches that belonged to the omitted voices.
@@ -63,11 +67,11 @@ async function publish(name: string, notes: CanonNote[], baseNote: ScoreFields) 
   const data = { baseNote, notes: projected };
   const loaded = await Module.loadFromJSON(data);
   loaded.evaluateModule();
-  for (const note of notes) {
-    const copy = loaded.getNoteById(ids.get(note.id)!);
+  for (const { note, id } of notes) {
+    const copy = loaded.getNoteById(id);
     const source = module.getNoteById(note.id);
     assert(copy && source);
-    for (const key of (note.frequency ? ['startTime', 'duration', 'frequency'] as const : ['startTime', 'duration'] as const)) {
+    for (const key of ['startTime', 'duration', 'frequency'] as const) {
       assert(equals(copy.getExactVariable(key), source.getExactVariable(key)),
         `${name}: note ${note.id} changed its ${key}`);
     }

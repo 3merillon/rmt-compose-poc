@@ -7,9 +7,9 @@
  *
  *  - A single chord: the BaseNote is the root. Every tone hangs from base.f; the
  *    other tones start with the root tone and last as long as it does.
- *  - A progression: each chord's root is a key change (a frequency and a start,
- *    no sound), a ratio of the previous root, starting when the previous chord
- *    ends. The root tone and the other tones hang from their root.
+ *  - A progression: fold the older silent key changes into the first sounding
+ *    tone of each chord. Preserve the voiced octaves, chord attacks and the
+ *    sequence of root-to-root pitch and timing relationships.
  *  - A melody: the BaseNote is the tonic; each note begins when the one before
  *    it ends ([p].t + [p].d), plus a rest when there is one. Pitches as written.
  *
@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import assert from 'node:assert/strict';
 import { readLibraryScore } from './library-score.ts';
+import { rewriteNoteReferences } from '../src/dsl/remap-note-ids.ts';
 import type { ExactValue } from '../src/value/exact.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 const dir = join(here, '..', 'public', 'modules');
@@ -28,7 +29,6 @@ const dry = process.argv.includes('--dry-run');
 const { Module } = await import('../src/module.ts');
 const X = await import('../src/value/exact.ts');
 
-const ROOT_COLOR = 'rgba(150,150,150,0.5)';
 function tidy(s: string): string;
 function tidy(s: string | undefined): string | undefined;
 function tidy(s: string | undefined) { return (typeof s === 'string' ? s.replace(/\((-?\d+)\/1\)/g, '$1') : s); }
@@ -56,49 +56,56 @@ for (const f of list('chords')) {
 // ── progressions ──────────────────────────────────────────────────────────
 for (const f of list('progressions')) {
   const m = read(f);
-  const old = m.notes;
-  const byId = new Map(old.map((n) => [n.id, n]));
-  // The chord roots: the first note, then each note that starts after a root
-  const roots: number[] = [];
-  for (const n of old) {
-    if (n === old[0]) { roots.push(n.id); continue; }
-    const mm = /^\[(\d+)\]\.t \+ /.exec(n.startTime || '');
-    if (mm && roots.includes(Number(mm[1]))) roots.push(n.id);
+  if (m.notes.every(n => n.duration && n.frequency)) {
+    console.log(f + ': already uses sounding tones');
+    continue;
   }
-  const already = old.some((n) => !n.duration); // written with key changes already (a sample)
-  if (already) { console.log(`${f}: already written with key changes`); continue; }
+  const model = await Module.loadFromJSON(m);
+  const tones = m.notes.filter(n => n.duration);
+  const newIds = new Map(tones.map((n, i) => [n.id, i + 1]));
+  function remapTime(source: string) {
+    const mapped = rewriteNoteReferences(source, id => {
+      if (id === 0) return 0;
+      const replacement = newIds.get(id);
+      assert(replacement !== undefined, f + ': unexpected reference to silent note ' + id);
+      return replacement;
+    });
+    assert(mapped !== null);
+    return mapped;
+  }
+
   const notes: typeof m.notes = [];
-  let id = 0;
-  const keyOf = new Map<number, number>(), toneOf = new Map<number, number>();
-  const ref = (s: string) => s.replace(/\[(\d+)\]\.(f|t)\b/g, (x, k, p) => (keyOf.has(Number(k)) ? `[${keyOf.get(Number(k))}].${p}` : x));
-  for (const r of roots) {
-    const R = byId.get(r);
-    assert(R?.frequency);
-    const k = ++id, t = ++id;
-    keyOf.set(r, k); toneOf.set(r, t);
-    // the root's start: base.t, or the previous chord's end when it begins there
-    let start = R.startTime;
-    const mm = /^\[(\d+)\]\.t \+ (.+)$/.exec(start);
-    if (mm) {
-      const prev = byId.get(Number(mm[1]));
-      assert(prev);
-      start = (mm[2] === prev.duration) ? `[${toneOf.get(prev.id)}].t + [${toneOf.get(prev.id)}].d` : `[${keyOf.get(prev.id)}].t + ${mm[2]}`;
+  let root = model.baseNote;
+  let rootRef = 'base';
+  let key: typeof m.notes[number] | undefined;
+  for (const n of m.notes) {
+    if (!n.duration) {
+      assert(!key && n.frequency, f + ': expected one pitched key before each chord');
+      key = n;
+      continue;
     }
-    notes.push({ id: k, startTime: start, frequency: tidy(ref(R.frequency)), color: ROOT_COLOR });
-    notes.push({ id: t, startTime: `[${k}].t`, duration: tidy(R.duration), frequency: `[${k}].f`, ...(R.color ? { color: R.color } : {}), ...(R.instrument ? { instrument: R.instrument } : {}) });
-    for (const n of old) {
-      if (roots.includes(n.id) || n.startTime !== `[${r}].t`) continue;
-      assert(n.frequency);
-      notes.push({
-        ...n,
-        id: ++id,
-        startTime: `[${t}].t`,
-        duration: n.duration === R.duration ? `[${t}].d` : tidy(n.duration),
-        frequency: tidy(n.frequency.replace(new RegExp(`\\[${r}\\]\\.f`, 'g'), `[${k}].f`)),
-      });
+    const note = model.getNoteById(n.id);
+    const pitch = note?.getExactVariable('frequency');
+    const rootPitch = root.getExactVariable('frequency');
+    assert(note && pitch && rootPitch, f + ': expected a pitched chord tone');
+    const ratio = X.div(pitch, rootPitch);
+    const frequency = X.isRational(ratio) && ratio.equals(1)
+      ? rootRef + '.f'
+      : valueText(ratio) + ' * ' + rootRef + '.f';
+    const id = newIds.get(n.id)!;
+    let startTime: string;
+    if (key) {
+      assert.equal(n.startTime, '[' + key.id + '].t', f + ': expected the chord onset to read its key');
+      startTime = '(' + remapTime(key.startTime) + ')';
+      root = note;
+      rootRef = '[' + id + ']';
+      key = undefined;
+    } else {
+      startTime = remapTime(n.startTime);
     }
+    notes.push({ ...n, id, startTime, duration: remapTime(n.duration), frequency });
   }
-  if (notes.filter((n) => n.duration).length !== old.length) throw new Error(`${f}: ${old.length} notes in, ${notes.filter((n) => n.duration).length} sounding out`);
+  assert(!key, f + ': missing sounding root after final key');
   m.notes = notes;
   write(f, m);
 }
@@ -149,6 +156,6 @@ for (const f of list('melodies')) {
 }
 
 function valueText(v: ExactValue) {
-  if (!X.isRational(v)) throw new Error('a melody time that is not rational');
+  if (!X.isRational(v)) throw new Error('expected an exact rational library value');
   return v.d === 1n ? `${v.s * v.n}` : `(${v.s * v.n}/${v.d})`;
 }

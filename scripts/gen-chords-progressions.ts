@@ -4,12 +4,11 @@
  *
  * THE SUBTREE RULE (RMT-native relational harmony):
  *   - Standalone chords take their pitches from base.
- *   - In a progression the roots are silent key changes. Their frequencies
- *     form a chain, and their starts follow the preceding sounding chord.
- *   - A sounding tone takes its pitch class from its key and its octave from
- *     the voicing written for the phrase. Moving the key carries every tone.
+ *   - In a progression the first sounding tone of each chord carries its root.
+ *     Its pitch follows the previous sounding root and its start follows the
+ *     previous chord's end. The other voices take their pitches from this root.
  *
- * The generator checks each key's exact ratio to base. The library regression
+ * The generator checks each harmonic root's exact ratio to base. The library regression
  * compares every sounding note with the recorded pitch, onset and duration.
  *
  * Usage:  node scripts/gen-chords-progressions.mjs
@@ -50,7 +49,7 @@ const toneColor = (nd: Pair) => TONE_COLOR[`${nd[0]}/${nd[1]}`] || 'rgba(180,180
 // ---- chord shapes: ratios [num,den] relative to the chord root (first = root) ----
 type Pair = [number, number];
 interface Chord { shapeKey: keyof typeof SHAPES; root: Pair; beats: number; octaves?: number[] }
-interface Tone { id: number; startTime: string; duration?: string; frequency: string; color: string }
+interface Tone { id: number; startTime: string; duration: string; frequency: string; color: string }
 
 const SHAPES = {
   major:  [[1, 1], [5, 4], [3, 2]],
@@ -77,7 +76,7 @@ function colonRatio(shape: Pair[]) {
 }
 
 function frequency([n, d]: Pair, ref: string, octave = 0) {
-  const ratio = F(n * 2 ** Math.max(octave, 0), d * 2 ** Math.max(-octave, 0));
+  const ratio = F(BigInt(n) << BigInt(Math.max(octave, 0)), BigInt(d) << BigInt(Math.max(-octave, 0)));
   if (ratio.n === ratio.d) return `${ref}.f`;
   const factor = ratio.d === 1n ? String(ratio.n) : `(${fstr(ratio)})`;
   return `${factor} * ${ref}.f`;
@@ -86,31 +85,34 @@ function frequency([n, d]: Pair, ref: string, octave = 0) {
 function buildChords(chords: Chord[]) {
   const notes: Tone[] = [];
   const rootRatios = [];
-  let key = 'base';
-  let start = 'base.t';
+  const progression = chords.length > 1;
+  let previousRoot = 'base';
+  let previousOctave = 0;
+  // A grouped placement keeps the chord's independent attacks, including
+  // after a drop at a target's End. A bare [p].t + [p].d joins p's player.
+  let start = progression ? '(base.t)' : 'base.t';
   let rootRatio = F(1);
   for (const { shapeKey, root, beats, octaves } of chords) {
     const shape = SHAPES[shapeKey];
     rootRatio = mul(rootRatio, F(...root));
     rootRatios.push(rootRatio);
-    if (chords.length > 1) {
-      if (octaves?.length !== shape.length) throw new Error(`Missing voicing for ${shapeKey}`);
-      const id = notes.length + 1;
-      notes.push({ id, startTime: start, frequency: frequency(root, key), color: 'rgba(150,150,150,0.5)' });
-      key = `[${id}]`;
-      start = `${key}.t`;
-    }
+    if (progression && octaves?.length !== shape.length) throw new Error(`Missing voicing for ${shapeKey}`);
+    const rootOctave = octaves?.[0] ?? 0;
     const firstTone = `[${notes.length + 1}]`;
     shape.forEach((tone, i) => {
       notes.push({
         id: notes.length + 1,
         startTime: i === 0 ? start : `${firstTone}.t`,
         duration: i === 0 ? `base.d * ${beats}` : `${firstTone}.d`,
-        frequency: frequency(tone, key, octaves?.[i]),
+        frequency: i === 0
+          ? frequency(root, previousRoot, rootOctave - previousOctave)
+          : frequency(tone, progression ? firstTone : 'base', (octaves?.[i] ?? 0) - rootOctave),
         color: toneColor(tone),
       });
     });
-    start = `${firstTone}.t + ${firstTone}.d`;
+    start = `(${firstTone}.t + ${firstTone}.d)`;
+    previousRoot = firstTone;
+    previousOctave = rootOctave;
   }
   return { notes, rootRatios };
 }

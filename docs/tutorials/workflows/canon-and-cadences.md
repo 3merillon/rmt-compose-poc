@@ -29,7 +29,7 @@ Loop the complete canon to hear the next entry a whole tone higher. Its BaseNote
 
 ## Hear octave placement in a cadence
 
-Select the BaseNote, choose **Clean Slate**, then **Yes, Clean Slate**. Open the module bar and drag **Progressions → V7 – I** onto the BaseNote circle. Press **Play** and listen for the lowest voice stepping down. Each chord has a durationless pitch anchor representing its harmonic root. The sounding notes refer to that root and can sit in another octave. The dominant uses the harmonic seventh. Here are its voices ordered by sounding pitch, with both columns measured against the tonic.
+Select the BaseNote, choose **Clean Slate**, then **Yes, Clean Slate**. Open the module bar and drag **Progressions → V7 – I** onto the BaseNote circle. Press **Play** and listen for the lowest voice stepping down. Each chord takes its pitch from a sounding root. In the first chord, the fifth sits below the root and the harmonic seventh sits at the top. Read the voices from low to high, with both columns measured against the tonic.
 
 | Voice | V7 | I | Motion |
 |---|---|---|---|
@@ -38,7 +38,7 @@ Select the BaseNote, choose **Clean Slate**, then **Yes, Clean Slate**. Open the
 | Next voice | 15/16 | 1 | Up to the tonic |
 | Top voice | 21/16 | 5/4 | Down to the third |
 
-To trace the bass, inspect the first chord’s fifth. Its ratio to the dominant root is `3/8`, a fifth displaced down two octaves. Multiplying that by the dominant’s `3/2` gives the sounding `9/16`. The harmonic root still moves from V to I even though the bass starts on scale degree two.
+To trace the bass, inspect the first chord’s fifth. Its frequency is `(3/4) * [1].f`, a perfect fifth voiced one octave down. The sounding dominant root is at `3/4` of the tonic, so the bass begins at `3/4 × 3/4 = 9/16`. It resolves to `1/2` when the tonic chord enters.
 
 Undo the drop before trying another progression. Try **ii – V – I** for the same resolution with a preparation. Compare **I – IV – V – I**, **I – vi – IV – V**, and the four cadences **Authentic**, **Plagal**, **Deceptive**, and **Half**. Each of the eight files places individual chord tones by octave. Listen for common tones first, then follow the bass across the chord change.
 

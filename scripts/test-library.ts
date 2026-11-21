@@ -12,6 +12,10 @@
  *   node scripts/test-library.mjs            compare
  *   node scripts/test-library.mjs --record   write the oracle from the library as it is
  */
+import assert from 'node:assert/strict';
+import Fraction from 'fraction.js';
+import { isLibraryManifest } from '../src/library/manifest.ts';
+import type { Module as ScoreModule } from '../src/module.ts';
 import type { Note } from '../src/note.ts';
 import type { ExpressionName } from '../src/model-types.ts';
 import { readOracle, librarySounds } from './fixtures/read-oracle.ts';
@@ -38,15 +42,78 @@ const walk = (d: string, o: string[] = []) => {
   return o;
 };
 
-async function sounds(file: string) {
+const manifest: unknown = JSON.parse(readFileSync(join(modulesDir, 'library.json'), 'utf8'));
+assert.ok(isLibraryManifest(manifest), 'Expected the shipped top-bar library manifest');
+const shipped = new Map(manifest.sections.flatMap(section =>
+  section.items.map(item => [item.file, section.id] as const)));
+
+async function assertEditableProgression(mod: ScoreModule, notes: Note[], label: string) {
+  const pitch = (note: Note) => {
+    const value = note.getExactVariable('frequency');
+    assert.ok(X.isRational(value), `${label}: expected an exact fraction for note ${note.id}`);
+    return value;
+  };
+  const written = notes.map(note => ({
+    note,
+    pitch: pitch(note),
+    start: note.getVariable('startTime')!,
+    duration: note.getVariable('duration')!,
+  }));
+  // The first written voice at each onset is the harmonic root, including in
+  // inversions that put another chord member in the bass.
+  const roots = new Map<string, Note>();
+  for (const { start, note } of written) {
+    const onset = start.toFraction();
+    if (!roots.has(onset)) roots.set(onset, note);
+  }
+  assert.ok(roots.size > 1, `${label}: expected a progression`);
+  const raised = new Fraction(81, 80);
+  for (const root of roots.values()) {
+    const onset = root.getVariable('startTime')!;
+    const original = root.getExpressionSource('frequency');
+    assert.ok(original, `${label}: expected a written frequency for root ${root.id}`);
+    root.setVariable('frequencyString', `(81/80) * (${original})`);
+    mod.evaluateModule();
+    for (const voice of written) {
+      const expected = voice.start.compare(onset) >= 0 ? voice.pitch.mul(raised) : voice.pitch;
+      const context = `${label}: edit root ${root.id}, check voice ${voice.note.id}`;
+      assert.equal(pitch(voice.note).toFraction(), expected.toFraction(), context);
+      assert.equal(X.toText(voice.note.getExactVariable('startTime')), X.toText(voice.start), context);
+      assert.equal(X.toText(voice.note.getExactVariable('duration')), X.toText(voice.duration), context);
+    }
+    root.setVariable('frequencyString', original);
+    mod.evaluateModule();
+  }
+  const reopened = await Module.loadFromJSON(mod.createModuleJSON());
+  reopened.evaluateModule();
+  for (const note of notes) {
+    const attack = { head: note.id, prev: null };
+    assert.deepEqual(mod.findPlayer(note), attack, `${label}: independent attack on note ${note.id}`);
+    assert.deepEqual(reopened.findPlayer(reopened.notes[note.id]), attack, `${label}: reopened attack on note ${note.id}`);
+  }
+}
+
+async function sounds(file: string, checkTile?: { key: string; section: string }) {
   const quiet = console.info; console.info = () => {};
   const mod = await Module.loadFromJSON(JSON.parse(readFileSync(file, 'utf8')));
   mod.evaluateModule();
   console.info = quiet;
   const notes = [], bars = [];
   const t = (n: Note, k: ExpressionName) => X.toText(n.getExactVariable(k));
-  for (const n of Object.values(mod.notes)) {
-    if (n.id === 0) continue;
+  const material = Object.values(mod.notes).filter(n => n.id !== 0);
+  if (checkTile) {
+    assert.ok(material.length > 0, `${checkTile.key}: empty top-bar tile`);
+    for (const n of material) {
+      const context: string = `${checkTile.key}: tile note ${n.id}`;
+      assert.equal(noteKind(n), 'note', context);
+      assert.ok(X.toNumber(n.getExactVariable('frequency')) > 0, context);
+      assert.ok(X.toNumber(n.getExactVariable('duration')) > 0, context);
+      const amplitude = mod.findAmplitude(n);
+      assert.ok(amplitude.s > 0n && amplitude.n > 0n, context);
+    }
+    if (checkTile.section === 'progressions') await assertEditableProgression(mod, material, checkTile.key);
+  }
+  for (const n of material) {
     if (n.properties?.measure) { bars.push(`${t(n, 'startTime')} | ${t(n, 'duration')}`); continue; }
     if (noteKind(n) !== 'note') continue;
     notes.push(`${t(n, 'startTime')} | ${t(n, 'duration')} | ${t(n, 'frequency')}`);
@@ -70,7 +137,8 @@ for (const f of files) {
   const key = relative(modulesDir, f).replace(/\\/g, '/');
   const want = oracle[key];
   if (!want) { failures++; console.error(`  ✗ ${key}: not in the oracle (a new module? record it deliberately)`); continue; }
-  const got = await sounds(f);
+  const section = shipped.get(key);
+  const got = await sounds(f, section ? { key, section } : undefined);
   const eq = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
   if (eq(got.notes, want.notes) && eq(got.bars, want.bars)) { same++; notesChecked += got.notes.length; continue; }
   failures++;
@@ -78,7 +146,11 @@ for (const f of files) {
   const extra = got.notes.filter((x) => !want.notes.includes(x)).slice(0, 2);
   console.error(`  ✗ ${key}: plays something else (${got.notes.length} notes, was ${want.notes.length}; missing ${missing.join(' ; ')}; new ${extra.join(' ; ')})`);
 }
-if (failures === 0) console.log(`  ✓ ${same} modules, ${notesChecked} sounding notes and their bars exactly as recorded`);
+for (const key of shipped.keys()) assert.ok(oracle[key], `${key}: missing shipped tile in the oracle`);
+if (failures === 0) {
+  console.log(`  ✓ ${same} modules, ${notesChecked} sounding notes and their bars exactly as recorded`);
+  console.log(`  ✓ Every entry in the ${shipped.size} shipped tiles sounds. Progressions retain exact voicings and independent attacks.`);
+}
 for (const k of Object.keys(oracle)) if (!files.some((f) => relative(modulesDir, f).replace(/\\/g, '/') === k)) { failures++; console.error(`  ✗ ${k}: in the oracle but no longer in the library`); }
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\nAll library checks passed');

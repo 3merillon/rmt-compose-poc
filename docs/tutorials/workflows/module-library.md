@@ -226,12 +226,10 @@ module by `npm test`, and it is what lets a module be dropped onto both a note a
 
 This is the design decision the shipped catalog is built on, and it is worth copying.
 
-A chord is not three independent pitches. It is a **root plus relationships**: note 1 is `base.f`,
-and every chord tone is `(s/n) * [1].f`. A progression chains the roots — each later root is
-expressed from the *previous* root, and only the first root ever touches `base`.
-
-The payoff: **octave-shifting the first root transposes the entire progression.** Every chord, every
-tone, follows, because everything downstream is defined relative to it.
+In **I – IV – V – I**, the first sounding root takes its pitch from `base.f`. The other voices
+in that chord take their pitches from its root. Each later root follows the previous one.
+Raise the first root an octave to transpose the whole progression, or raise the IV root
+to hear just the last three chords move.
 
 Compare a scale, which the Scale Systems modules build as a chain — each note is the previous note's
 frequency times one step:

@@ -22,7 +22,7 @@ Choose from **81 shipped modules**. An interval adds one pitch, a progression ad
 | **Scale Systems** | 6 | 12-, 19-, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
 | **Custom** | 3 | Where copied selections land, and the obvious home for your uploads |
 
-They live in the [module bar](/user-guide/interface/module-bar) under the top bar. Drag one out and drop it on a note.
+Drag a tile from the [module bar](/user-guide/interface/module-bar) onto a note. Every built-in tile adds only sounding notes. Modules you upload or copy keep any rests, bars or pitch references you included.
 
 ## How the catalog is built
 
@@ -32,7 +32,7 @@ Open a module file on its own to use its saved BaseNote pitch and time unit. Dro
 |---|---|
 | Single interval | **Perfect 5th** contains one note at `(3/2) * base.f`, lasting `base.d`. Drop it onto another fifth to hear two stacked fifths. |
 | Chord | **Major** has three simultaneous pitches, all written against `base.f`. The third and fifth copy the first tone’s start and duration. Retune the drop target to move all three together. |
-| Progression | In **ii – V – I**, silent key changes carry the harmonic roots. The V root reads `(4/3) * [1].f`, and the I root reads `(2/3) * [5].f` in the source file. Sounding notes choose their own octaves around those roots. |
+| Progression | In **ii – V – I**, each chord follows its sounding root. In the module file, the V root (note 4) reads `(4/3) * [1].f`, and the I root (note 8) reads `(2/3) * [4].f`. |
 | Melody | Pitch can be a scale degree against the tonic while time follows a preceding note’s end. Lengthen the first note of **Ode to Joy** and listen to the later entrances move. |
 | Scale | In **12-TET** each successive pitch multiplies the previous one by `2^(1/12)`. Twelve steps reach the octave exactly. **Mixed-Base** ends with a fresh `base.f` reference. |
 | Canon | A pitch can refer across voices or forward in score time, while its onset and duration follow another line. [Trace bar 5 and a cadence](/tutorials/workflows/canon-and-cadences). |
@@ -138,9 +138,9 @@ Two of these deserve a note:
 
 ## Progressions and cadences — 8 modules
 
-Both live in the **Progressions** section. Every root is expressed as a move from the previous root, so the roots you see below are what the chain resolves to — not what is written in the file.
+Both live in the **Progressions** section. Each sounding root takes its pitch from the previous root. The table gives the harmonic roots relative to the tonic before octave placement.
 
-| Module | Chords | Roots resolve to | Chord lengths |
+| Module | Chords | Harmonic roots | Chord lengths |
 |---|---|---|---|
 | V7 – I | Harmonic 7th → Major (with octave) | 3/2 → 1/1 | 2 + 2 |
 | ii – V – I | Minor → Harmonic 7th → Major (with octave) | 9/8 → 3/2 → 1/1 | 2 + 2 + 4 |
@@ -153,7 +153,7 @@ Both live in the **Progressions** section. Every root is expressed as a move fro
 
 Read the last column as successive chord lengths in units of `base.d`. In **ii – V – I** the tonic lasts as long as the first two chords together.
 
-Transpose the first silent root to move all the sounding pitches together.
+Transpose the first chord’s sounding root to move the whole progression. Transpose a later root to move that chord and the ones that follow.
 
 ## Melodies — 7 modules
 
@@ -209,7 +209,9 @@ Listen for the gap between successive notes narrowing as the pitches climb. And 
 
 ## Custom — 3 modules
 
-**Custom** includes the eight-bar canon per tonos that opens the app (153 notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The answering bass enters one bar later. Of its 58 notes, 57 are exact fifths above the notes they answer. In bar 5, open the green A (library note 127, startup note 81). It takes its frequency from the following red E by a factor of 2/3. The held F takes its pitch from that A by a factor of 8/5. **Copy to Modules** also puts selections in Custom. Uploaded files go into whichever section’s **+** tile you choose.
+**Custom** includes the eight-bar canon per tonos that opens the app (153 sounding notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The full canon tile carries all three voices. Its measure markers belong to the startup score only.
+
+The answering bass enters one bar later. Of its 58 notes, 57 are exact fifths above the notes they answer. In bar 5, open the green A (library note 127, startup note 81). It takes its frequency from the following red E by a factor of 2/3. The held F takes its pitch from that A by a factor of 8/5. **Copy to Modules** also puts selections in Custom. Uploaded files go into whichever section’s **+** tile you choose.
 
 ## Where to go next
 
