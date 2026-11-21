@@ -19,7 +19,7 @@ import type { Token, TokenKind } from './lexer.ts';
  * are refused with a message saying what to write instead.
  */
 
-import { TokenType, PropertyMap, RetiredTimeFunctions, RetiredTimeProperties, isPropertyName, getCanonicalPropertyName } from './constants.ts';
+import { TokenType, RetiredTimeFunctions, RetiredTimeProperties, getCanonicalPropertyName } from './constants.ts';
 import { DSLParseError, ErrorMessages } from './errors.ts';
 import { decimalStringToBigFraction } from '../utils/fraction-num.ts';
 import { MAX_NOTE_ID } from '../binary-note.ts';

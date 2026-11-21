@@ -95,7 +95,7 @@ export const RetiredTimeProperties = ['tempo', 'bpm', 'beatsPerMeasure', 'ml', '
  * @returns {boolean}
  */
 export function isPropertyName(name: string): name is keyof typeof PropertyMap {
-  return name in PropertyMap;
+  return Object.hasOwn(PropertyMap, name);
 }
 
 
@@ -114,7 +114,7 @@ export function getCanonicalPropertyName(name: string) {
  * @returns {string} - Short name (or canonical if no short exists)
  */
 export function getShortPropertyName(canonicalName: string) {
-  return PropertyShortNames[canonicalName] || canonicalName;
+  return Object.hasOwn(PropertyShortNames, canonicalName) ? PropertyShortNames[canonicalName]! : canonicalName;
 }
 
 /**

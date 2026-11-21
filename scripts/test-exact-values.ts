@@ -7,6 +7,7 @@
  * 2. The evaluator: twelve steps of 2^(1/12) are exactly 2, dependents read
  *    exact values, TET modules stay irrational, a division by zero is approximate.
  */
+import { validateDSL } from '../src/dsl/index.ts';
 import { DSLError } from '../src/dsl/errors.ts';
 import { required } from './fixtures/required.ts';
 import type { ExactValue } from '../src/value/exact.ts';
@@ -27,6 +28,10 @@ const check = (cond: unknown, m: string) => (cond ? ok(m) : bad(m));
 const F = (n: number | bigint, d: number | bigint = 1) => new Fraction(n, d);
 const txt = X.toText;
 const quiet = console.info; console.info = () => {};
+
+for (const name of ['constructor', 'toString', '__proto__']) {
+  check(!validateDSL('base.' + name).valid, 'Only musical property names can follow base: ' + name);
+}
 
 console.log('\nExact values: the algebra');
 {
