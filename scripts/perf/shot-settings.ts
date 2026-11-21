@@ -515,6 +515,11 @@ console.log('\n== desktop 1280x820');
     return null;
   }, kind);
 
+  // A current measure has duration and editing controls in addition to its start.
+  // Give it enough height to fit naturally while the full note still overflows.
+  const originalViewport = page.viewportSize()!;
+  await page.setViewportSize({width: 1600, height: 1050});
+  await page.waitForTimeout(200);
   const measurePt = await findKind('measure');
   const basePt = await findKind('base');
   if (!measurePt || !basePt) throw new Error(`no measure/base point found (measure=${JSON.stringify(measurePt)}, base=${JSON.stringify(basePt)})`);
@@ -531,7 +536,22 @@ console.log('\n== desktop 1280x820');
     await page.waitForTimeout(200);
   }
 
-  await clickNote(page, behind[0]);
+  const visibleNote = await page.evaluate(() => {
+    const renderer = window.__rmtRenderer!;
+    const workspace = window.__rmtWorkspace!;
+    const right = Math.max(...[...document.querySelectorAll('#note-widget, .rmt-set-panel')]
+      .map(panel => panel.getBoundingClientRect().right));
+    if (!renderer.posSize) return null;
+    for (const [id, index] of renderer._noteIdToIndex) {
+      const i = index * 4;
+      const x = renderer.matrix[0] * (renderer.posSize[i] + renderer.posSize[i + 2] / 2) + renderer.matrix[6];
+      const y = renderer.matrix[4] * (renderer.posSize[i + 1] + renderer.posSize[i + 3] / 2) + renderer.matrix[7];
+      if (x > right + 8 && workspace.pickAt(x, y, 0)?.id === id && document.elementFromPoint(x, y)?.closest('.myspaceapp')) return {x, y};
+    }
+    return null;
+  });
+  if (!visibleNote) throw new Error('No visible note body clear of both panels');
+  await clickNote(page, visibleNote);
   const asNote = await widgetFit();
   await page.mouse.click(measurePt.x, measurePt.y);
   await page.waitForTimeout(400);
@@ -539,7 +559,7 @@ console.log('\n== desktop 1280x820');
   await page.mouse.click(basePt.x, basePt.y);
   await page.waitForTimeout(400);
   const asBase = await widgetFit();
-  await clickNote(page, behind[0]);
+  await clickNote(page, visibleNote);
   const asNoteAgain = await widgetFit();
   console.log(`  widget dragged: note=${JSON.stringify(asNote)}\n                  measure=${JSON.stringify(asMeasure)}\n                  base=${JSON.stringify(asBase)}`);
 
@@ -558,7 +578,7 @@ console.log('\n== desktop 1280x820');
   // ...and the same in the UNDRAGGED, bottom-anchored mode, where the widget is a card
   // capped at 300px and grows UPWARD. Clearing the inline top restores that mode.
   await page.evaluate(() => { const w = document.getElementById('note-widget')!; w.style.top = ''; w.style.left = ''; });
-  await clickNote(page, behind[0]);
+  await clickNote(page, visibleNote);
   const cardNote = await widgetFit();
   await page.mouse.click(measurePt.x, measurePt.y);
   await page.waitForTimeout(400);
@@ -572,6 +592,9 @@ console.log('\n== desktop 1280x820');
     !cardNote.dragged && cardNote.h === 300 && cardNote.scrolls && cardNote.dead <= 1 &&
     cardMeasure.h === 300 && cardMeasure.scrolls && cardMeasure.dead <= 1,
     `note h=${cardNote.h}px dead=${cardNote.dead}px, measure h=${cardMeasure.h}px dead=${cardMeasure.dead}px`);
+
+  await page.setViewportSize(originalViewport);
+  await page.waitForTimeout(200);
 
   // --- 4b. the "+" main menu is a PEER of the panels, not a popup trapped under them
   //
