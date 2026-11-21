@@ -58,7 +58,7 @@ You rarely need to type a ratio at all. The module library — the bar under the
 
 Each tile draws its ratio as a stacked fraction, with the interval's size in cents underneath. The cents caption is controlled by **Show cents** in **Settings → Library** (on by default).
 
-To find one fast, click the **magnifier** in the library toolbar and type into **Search name, ratio, tag…**. It matches the display name, the ratio, the family, the cents value and the tags — so `3/2`, `fifth`, `septimal` and `comma` all work, and matches surface even inside collapsed sections.
+To find one fast, click the **magnifier** in the library toolbar and enter a query. It matches the display name, the ratio, the family, the cents value and the tags — so `3/2`, `fifth`, `septimal` and `comma` all work, and matches surface even inside collapsed sections.
 
 ::: warning A module must land on a note
 Choose **Start** to stack the interval on its target or **End** to hear the two in sequence. Drag the tile onto an existing note or onto the BaseNote circle. Dropping it on empty canvas is rejected with *"Drop onto a note or the BaseNote circle to import a module."*, and dropping it on a silence is rejected with *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."*

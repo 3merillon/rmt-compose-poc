@@ -227,6 +227,21 @@ console.log('\n== mobile 390x844 (touch) — module bar scrollbar');
 
   await page.screenshot({ path: join(OUT, '01-mobile-bar.png') });
   await page.locator('.second-top-bar').screenshot({ path: join(OUT, '02-mobile-bar-crop.png') });
+  await page.setViewportSize({ width: 320, height: 700 });
+  const field = page.getByRole('textbox', { name: 'Search modules by name, ratio, cents, family or tag' });
+  await page.evaluate(() => document.fonts.ready.then(() => true));
+  const hintFits = await field.evaluate((input: HTMLInputElement) => {
+    const style = getComputedStyle(input);
+    const canvas = document.createElement('canvas').getContext('2d')!;
+    canvas.font = style.fontSize + ' ' + style.fontFamily;
+    const room = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return canvas.measureText(input.placeholder).width <= room;
+  });
+  check('the full hint fits at 320px with the loaded font', hintFits);
+  await field.fill('3/2');
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.waitForFunction(() => document.querySelector<HTMLInputElement>('.library-search-input')?.placeholder.includes('ratio'));
+  check('widening the toolbar restores the longer hint and keeps the active query', await field.inputValue() === '3/2');
   await ctx.close();
 }
 

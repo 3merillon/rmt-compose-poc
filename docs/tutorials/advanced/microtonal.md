@@ -31,8 +31,8 @@ frequency times one step. Lifting one note carries every note after it. Drag the
 note and the whole scale re-roots onto that note.
 
 ::: tip Find things by ratio, not by scrolling
-The magnifier at the left of the module bar's toolbar opens a search field
-(`Search name, ratio, tag…`). It matches the module name, its **ratio**, its **cents**, its
+The magnifier at the left of the module bar's toolbar opens a search field.
+It matches the module name, its **ratio**, its **cents**, its
 **family** (`3-limit`, `7-limit`, `comma`, …) and its **tags** — so typing `7/4`, `septimal` or
 `comma` narrows 81 modules to the handful you want. Matches surface even inside collapsed
 sections. Closing the field always clears the query.

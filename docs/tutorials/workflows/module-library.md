@@ -42,8 +42,8 @@ cents caption (`3 / 2`, `702¢`); a chord shows its name with the colon ratio un
 | scale | cyan |
 
 ::: tip Search, don't scroll
-Click the **magnifier** at the left of the library toolbar to unfold the search field
-(`Search name, ratio, tag…`). It matches name, **ratio**, **cents**, **family** and **tags** — so
+Click the **magnifier** at the left of the library toolbar to unfold the search field.
+It matches name, **ratio**, **cents**, **family** and **tags** — so
 `3/2`, `septimal` and `comma` all work as queries. Matches appear even inside collapsed sections.
 Closing the field (magnifier again, `Escape`, or blurring it while empty) always clears the query.
 :::

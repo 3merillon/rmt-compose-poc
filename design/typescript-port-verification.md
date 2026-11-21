@@ -105,9 +105,11 @@ The nine revised tiles were rendered against the released JavaScript scores in E
 
 The tool corrections cover vibraphone source counting, failing incomplete visual comparisons, identifying the real application entry in capture reports, and measuring inspector shrink at a height that fits the measure controls.
 
-## Remaining discrepancies
+## Mobile search follow-up
 
-At a 390 px viewport, the module-library search field has 166 px available for a placeholder needing 188 px including padding. The touch module-bar suite records 13/14 on both revisions. The captures match byte for byte, SHA-256 `aab124cfaea4af3628fb763200fe6aa7a6669991e4ffbc55da6b091a28a8531f`. The release layout is preserved.
+The original release and port both clipped the library search hint at 390 px (13/14 touch module-bar checks). The follow-up uses `e.g. 3/2` at widths up to 440 px. In Chromium the hint measures 63 px and has 70 px of text space at 320 px and 140 px at 390 px. All 16 checks pass, including the check that widening the toolbar restores the longer hint and retains the current query.
+
+## Verification environment
 
 Full captures, fixture hashes, phase timings and logs were kept outside release assets in `%TEMP%\rmt-ts-port-evidence-03b1d49`. The generated 5K, 20K and 100K fixture links were removed after the probes. Both production roots were built independently of those files. The tracked files under `public/` and `docs/public/` matched the release at `c60377a`. The subsequent library revision changes nine score files under `public/modules/`. Desktop and touch replay on the Node 20 dev server also reproduced the download and history hashes above.
 

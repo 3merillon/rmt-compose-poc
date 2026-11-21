@@ -1,6 +1,6 @@
 # Module bar
 
-Pull the small tab below the top bar downward to see the library. Each coloured tile is a module. Click a section label to collapse or expand it. Use the magnifier to search by name, ratio, cents, family or tag. Clear the search to bring the other tiles back into view.
+Pull the small tab below the top bar downward to see the library. Each coloured tile is a module. Click a section label to collapse or expand it. Use the magnifier to search by name, ratio, cents, family or tag. On narrow screens the hint shows an example query, `e.g. 3/2`. Clear the search to bring the other tiles back into view.
 
 ![The open library with its toolbar and sections of module tiles](/img/module-bar.png)
 

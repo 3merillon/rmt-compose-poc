@@ -496,7 +496,13 @@ const menuAPI = (function() {
         // that resets the value WITHOUT firing `input`, which would leave the library
         // filtered against a query the field no longer shows. Escape is handled below.
         input.type = 'text';
-        input.placeholder = 'Search name, ratio, tag…';
+        input.setAttribute('aria-label', 'Search modules by name, ratio, cents, family or tag');
+        const narrowToolbar = window.matchMedia('(max-width: 440px)');
+        const updateSearchHint = () => {
+            input.placeholder = narrowToolbar.matches ? 'e.g. 3/2' : 'Search name, ratio, tag…';
+        };
+        updateSearchHint();
+        narrowToolbar.addEventListener('change', updateSearchHint);
         input.className = 'library-search-input';
         input.value = currentSearchQuery;
         input.tabIndex = -1;

@@ -155,7 +155,7 @@ A run of [measure bars](#measure-bar) where each one starts where the previous e
 One composition: a `baseNote` plus a flat array of notes, saved as `module.json`. See the [module schema](/reference/module-schema).
 
 ### Module bar
-The horizontal library strip under the top bar. It holds the categorized module icons you drag onto the workspace, a collapsible magnifier **search** field (`Search name, ratio, tag…`), and a footer with **Save UI**, **Load UI**, **Add Category** and **Reload Defaults**. **Undo** and **Redo** sit at the right end of its toolbar row — the same history as `Ctrl/Cmd+Z` / `Ctrl/Cmd+Y` and the top bar's **+** menu — with the [drop-mode](#drop-mode) buttons (⇤ / ⇥) just to their left. See [Module Bar](/user-guide/interface/module-bar).
+The horizontal library strip under the top bar. It holds the categorized module icons you drag onto the workspace, a collapsible magnifier **search** field, and a footer with **Save UI**, **Load UI**, **Add Category** and **Reload Defaults**. **Undo** and **Redo** sit at the right end of its toolbar row — the same history as `Ctrl/Cmd+Z` / `Ctrl/Cmd+Y` and the top bar's **+** menu — with the [drop-mode](#drop-mode) buttons (⇤ / ⇥) just to their left. See [Module Bar](/user-guide/interface/module-bar).
 
 ### Multisample
 An instrument built from recorded audio rather than an oscillator. `piano` and `violin` are multisampled: the player picks the recorded **zone** nearest the target pitch and shifts its playback rate to land on the exact frequency. Both are CC0, from VSCO2 Community Edition.
