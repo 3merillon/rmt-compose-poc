@@ -126,32 +126,26 @@ See [Transposing with Arrows](/user-guide/notes/transposing).
 
 A measure bar is a note too — a silent one with a start time and a duration, flagged `measure` — and it takes part in the dependency graph. It is drawn as a dashed vertical line with a triangle, never as a rest rectangle.
 
-**You select and drag a measure bar by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Dragging a triangle changes the length of the **previous** bar; the dragged bar keeps its own length, and the bars after it follow because each starts where the one before ends.
+**You select and drag a measure bar by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Dragging a single selected triangle changes the length of the **previous** bar; the dragged bar keeps its own length, and the bars after it follow because each starts where the one before ends.
 
 Other notes attach to a bar with `[N].t` and `[N].d` in their expressions. See [Working with Measures](/tutorials/intermediate/measures).
 
 ## Multi-note selection
 
-You can hold several notes at once and act on the whole set.
+Select notes, silences and measure triangles together. A rectangle catches any note body or measure triangle it overlaps. Dashed bar lines and the BaseNote stay outside the group.
 
-![A rubber-band marquee dragged across the workspace, with the notes it crosses picking up heavy white outlines](/img/multi-select-marquee.png)
+![A rubber-band marquee across the workspace with selected notes outlined in white](/img/multi-select-marquee.png)
 
-| Gesture (mouse) | Gesture (touch) | Result |
+| Action | Mouse | Touch |
 |---|---|---|
-| **Shift + drag** on empty canvas | **Long-press** empty canvas (500 ms, hold still), then drag | Rubber-band **marquee**. |
-| **Shift + click** a note | **Long-press** a note (500 ms) | Toggle that note in or out of the selection. |
-| Drag a note that is already in the selection | Same | **Group drag** — the whole set moves in time as one undoable edit. |
-| Plain click on empty canvas | Plain tap | Clear the selection. |
+| Draw a selection rectangle | Hold **Shift** and drag from anywhere on the canvas, including a note or triangle. | Hold still for half a second, then drag. Starting on a note or triangle also toggles it when the hold fires. |
+| Add or remove one item | **Shift + click** a note or triangle. | Long-press the first item, then tap notes or triangles to toggle them. |
+| Move the group in time | Drag a selected note body or measure triangle. | Drag a selected note body or measure triangle. |
+| Clear the selection | Click empty canvas. | Tap empty canvas. |
 
-Notes on the rules that catch people out:
+A new rectangle adds to an active group. On touch, a one-item group stays open so you can keep adding with taps. On desktop, a single remaining item opens its own widget. Shift-clicking empty background leaves the selection in place.
 
-- The marquee selects by **overlap**, not containment.
-- The **BaseNote and measure bars are never** part of a multi-selection.
-- With a selection already live, a marquee **adds** to it. With nothing selected, it **replaces**.
-- Shift-clicking empty background does nothing — it will not throw your selection away.
-- A **plain click on a note that is in the selection drops the group** and selects just that note.
-
-With two or more notes selected, the **group widget** appears: it changes a variable, the instrument or the colour of every selected note, and offers **Copy to Modules** and **Delete all**. The note widget's **SELECT** section selects a note with everything related to it. Full detail: [Multi-Note Selection](/user-guide/notes/selection).
+The **group widget** shows separate counts for notes and measures. **Duration**, **Copy to Modules** and **Delete all** apply to both. Pitch, envelope, instrument and colour edits apply to notes. [Selection & Group Editing](/user-guide/notes/selection)
 
 ## Dependency highlights
 

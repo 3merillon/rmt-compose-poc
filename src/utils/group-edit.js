@@ -27,7 +27,10 @@ import { linePredecessor } from '../players.js';
 import { VAR, FIRST_INTERPRETATION_VAR } from '../binary-note.js';
 import { getVariableRefs } from '../variable-deps.js';
 import { isMeasureNote } from '../note.js';
-import { multiplyExpressionByFraction } from './simplify.js';
+import { multiplyExpressionByFraction, simplifyStartTime } from './simplify.js';
+import { BinaryEvaluator, recordValue } from '../binary-evaluator.js';
+import * as X from '../value/exact.js';
+import { timeUnitsExpr } from './value-expr.js';
 import { validateExpression } from '../modals/validation.js';
 
 const ALL_VARS = [VAR.START_TIME, VAR.DURATION, VAR.FREQUENCY, VAR.AMPLITUDE, VAR.ATTACK, VAR.RELEASE];
@@ -125,7 +128,7 @@ export function relatedNoteIds(module, startId, direction, which = 'all') {
  */
 export function followersFor(module, ids, varName) {
   const v = GROUP_VARS[varName];
-  const selected = new Set([...ids].map(Number));
+  const selected = new Set(editable(module, ids, varName).map(note => Number(note.id)));
   const out = new Set();
   for (const id of selected) {
     const queue = [id];
@@ -149,14 +152,79 @@ export function followersFor(module, ids, varName) {
   return out;
 }
 
-/** Notes a group edit can act on: not the BaseNote, not measure bars. */
-function editable(module, ids) {
+/** Bars share the duration of ordinary notes but have no playback properties. */
+function editable(module, ids, varName) {
   const out = [];
-  for (const raw of ids) {
-    const note = module.getNoteById(Number(raw));
-    if (note && Number(note.id) !== 0 && !isMeasureNote(note)) out.push(note);
+  for (const raw of new Set(Array.from(ids, Number))) {
+    const note = module.getNoteById(raw);
+    if (note && Number(note.id) !== 0 && (varName === 'duration' || !isMeasureNote(note))) out.push(note);
   }
   return out;
+}
+
+/**
+ * Move a timed selection containing bars. Pin every selected start to its target
+ * in a private evaluation, so even an indirect or nonlinear dependency contributes
+ * exactly what it would after the move. Add only the residual to each expression.
+ */
+export function translateGroupStarts(module, ids, deltaSec) {
+  const timed = Array.from(new Set(ids), id => module.getNoteById(id))
+    .filter(n => n && n.id !== 0 && n.hasExpression('startTime'));
+  if (!timed.length) return [];
+  const zero = new Fraction(0);
+  const baseStart = module.baseNote.getExactVariable('startTime');
+  let shift = new Fraction(deltaSec);
+  const targets = new Map();
+  for (const note of timed) {
+    const start = note.getExactVariable('startTime');
+    const minShift = X.sub(baseStart, start);
+    if (X.compare(shift, minShift) < 0) shift = minShift;
+    targets.set(note.id, start);
+  }
+  if (X.compare(shift, zero) === 0) return [];
+  for (const [id, start] of targets) targets.set(id, X.add(start, shift));
+
+  // Re-evaluate the combined ancestor graph once. Missing expressions are left
+  // alone by evaluateVariables, so dependents read the pinned starts below.
+  const evaluation = new BinaryEvaluator(module);
+  const projected = new Map();
+  const inputs = [];
+  const records = [];
+  const ancestors = new Set([0, ...targets.keys()]);
+  for (const id of ancestors) {
+    const note = module.getNoteById(id);
+    if (!note) continue;
+    for (const parent of module.getDirectDependencies(id)) ancestors.add(parent);
+    const record = { exact: null };
+    let input = note;
+    if (targets.has(id)) {
+      const target = targets.get(id);
+      record.startTime = X.shadow(target);
+      if (!X.isRational(target)) record.exact = { startTime: target };
+      input = { id, expressions: { ...note.expressions, startTime: null } };
+    }
+    projected.set(id, record);
+    inputs.push(input);
+    records.push(record);
+  }
+  evaluation.evaluateVariables(inputs, records, projected);
+
+  const unit = recordValue(projected.get(0), VAR.DURATION);
+  const writes = [];
+  for (const note of timed) {
+    const result = { exact: null };
+    evaluation.evaluateVariable(note, VAR.START_TIME, result, projected);
+    const expected = recordValue(result, VAR.START_TIME);
+    const residual = X.sub(targets.get(note.id), expected);
+    const sign = X.compare(residual, zero);
+    if (!sign) continue;
+    const offset = timeUnitsExpr(sign < 0 ? X.neg(residual) : residual, unit);
+    const old = note.getExpressionSource('startTime');
+    const next = simplifyStartTime(`(${old}) ${sign < 0 ? '-' : '+'} ${offset}`, module);
+    writes.push({ noteId: note.id, varName: 'startTime', expr: next });
+  }
+  module.batchSetExpressions(writes);
+  return writes.map(write => write.noteId);
 }
 
 /** "3/4", "0.75", "2" as an exact positive Fraction; null when it is not a plain number. */
@@ -184,7 +252,7 @@ export function scaleGroup(module, ids, varName, factorText) {
   const ratio = parseRatio(factorText);
   const factorExpr = ratio ? ratioText(ratio) : `(${String(factorText).trim()})`;
   if (!ratio) validateExpression(module, 0, factorExpr, 'frequency'); // a constant expression, or refuse
-  const notes = editable(module, ids);
+  const notes = editable(module, ids, varName);
   const followers = followersFor(module, notes.map((n) => n.id), varName);
   const changed = [], followed = [], skipped = [];
   const writes = [];
@@ -225,7 +293,7 @@ export function setGroup(module, ids, varName, exprText) {
   const text = String(exprText ?? '').trim();
   const changed = [], skipped = [];
   const writes = [];
-  for (const note of editable(module, ids)) {
+  for (const note of editable(module, ids, varName)) {
     const id = Number(note.id);
     try { writes.push([note, validateExpression(module, id, text, varName)]); }
     catch (e) { skipped.push({ id, reason: e.message }); }

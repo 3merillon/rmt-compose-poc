@@ -12,6 +12,8 @@
  * schema grows, bump SETTINGS_VERSION and add a migration in `migrate()`.
  */
 
+import { DEFAULT_DETAIL_CUTOFF, MAX_MODULE_NOTES } from '../limits.js';
+
 export const SETTINGS_VERSION = 1;
 
 // Outer rails for the workspace scale factors AND for the user-editable limits
@@ -88,6 +90,8 @@ export function defaultSettings() {
       // Draw each note's release past its end: what rings after the note-off.
       // Display only; off by default.
       showTails: false,
+      detailCutoff: DEFAULT_DETAIL_CUTOFF,
+      neverReduceDetail: false,
     },
     arrows: {
       enabled: true,
@@ -216,6 +220,8 @@ export function validateSettings(raw, prev) {
   d.appearance.envelopes = ['own', 'all', 'none'].includes(a.envelopes)
     ? a.envelopes
     : (a.showEnvelopes === true ? 'all' : d.appearance.envelopes);
+  if (isPosInt(a.detailCutoff)) d.appearance.detailCutoff = Math.min(a.detailCutoff, MAX_MODULE_NOTES);
+  d.appearance.neverReduceDetail = asBool(a.neverReduceDetail, false);
   d.appearance.showTails = asBool(a.showTails, d.appearance.showTails);
 
   const ar = src.arrows || {};

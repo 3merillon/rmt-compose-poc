@@ -25,7 +25,7 @@ import * as groupEdit from './utils/group-edit.js';
 import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
 import { themeManager } from './theme/theme-manager.js';
-import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
+import { showGroupWidget, hideGroupWidget, selectionLabel } from './modals/group-widget.js';
 import { registerPanel, raisePanel } from './utils/panel-stack.js';
 import { toNumber } from './utils/fraction-num.js';
 import { planMidi, encodeMidi } from './midi/midi-export.js';
@@ -116,6 +116,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // reads selection state, and a `let` declared further down would be in its TDZ
     // (which the bootstrap's try/catch would swallow, leaving the highlight dead).
     const multiSelection = new Set();
+    let touchMultiSelect = false;
 
     // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
     let __rmtScalingXActive = false;
@@ -335,7 +336,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         scaleControlsContainer.id = 'scale-controls';
         scaleControlsContainer.className = 'scale-controls';
 
-        const toggleButton = document.createElement('div');
+        scaleControlsContainer.inert = true;
+        const toggleButton = document.createElement('button');
+        toggleButton.type = 'button';
+        toggleButton.setAttribute('aria-controls', scaleControlsContainer.id);
+        toggleButton.setAttribute('aria-expanded', 'false');
+        toggleButton.setAttribute('aria-label', 'Scale controls');
         toggleButton.className = 'scale-controls-toggle';
         toggleButton.id = 'scale-controls-toggle';
         toggleButton.title = 'Scale Controls';
@@ -346,15 +352,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         const lim = settingsStore.get('scale.limits') || {};
         scaleControlsContainer.innerHTML = `
           <div class="y-scale-slider-container">
-            <input type="range" id="y-scale-slider" min="${lim.yMin}" max="${lim.yMax}" step="${scaleStep(lim.yMin, lim.yMax)}" value="${yScaleFactor}">
+            <input type="range" id="y-scale-slider" aria-label="Vertical pitch scale" min="${lim.yMin}" max="${lim.yMax}" step="${scaleStep(lim.yMin, lim.yMax)}" value="${yScaleFactor}">
           </div>
           <div class="x-scale-slider-container">
-            <input type="range" id="x-scale-slider" min="${lim.xMin}" max="${lim.xMax}" step="${scaleStep(lim.xMin, lim.xMax)}" value="${xScaleFactor}">
+            <input type="range" id="x-scale-slider" aria-label="Horizontal time scale" min="${lim.xMin}" max="${lim.xMax}" step="${scaleStep(lim.xMin, lim.xMax)}" value="${xScaleFactor}">
           </div>
         `;
 
-        document.body.appendChild(scaleControlsContainer);
-        document.body.appendChild(toggleButton);
+        document.body.append(toggleButton, scaleControlsContainer);
 
         const xScaleSlider = document.getElementById('x-scale-slider');
         const yScaleSlider = document.getElementById('y-scale-slider');
@@ -372,7 +377,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const v = parseFloat(e.target.value);
                 if (isFinite(v)) settingsStore.set('scale.y', v);
             },
-            toggle: () => { toggleScaleControls(); },
+            toggle: () => { setScaleControlsVisible(scaleControlsContainer.inert); },
         };
 
         xScaleSlider.addEventListener('input', handlers.xInput);
@@ -394,17 +399,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         };
     };
     
-    function toggleScaleControls() {
-        const scaleControls = document.getElementById('scale-controls');
+    function setScaleControlsVisible(visible) {
+        const panel = document.getElementById('scale-controls');
         const toggle = document.getElementById('scale-controls-toggle');
-        
-        if (scaleControls.classList.contains('visible')) {
-            scaleControls.classList.remove('visible');
-            toggle.classList.remove('active');
-        } else {
-            scaleControls.classList.add('visible');
-            toggle.classList.add('active');
-        }
+        panel.inert = !visible;
+        panel.classList.toggle('visible', visible);
+        toggle.classList.toggle('active', visible);
+        toggle.setAttribute('aria-expanded', String(visible));
     }
     // Auto-close scale controls when clicking (not dragging/zooming) outside
     (function setupScaleControlsAutoClose(){
@@ -421,8 +422,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     if (!cont.classList.contains('visible')) return;
                     const t = e.target;
                     if (cont.contains(t) || togg.contains(t)) return;
-                    cont.classList.remove('visible');
-                    togg.classList.remove('active');
+                    setScaleControlsVisible(false);
                 } catch {}
             };
             // Use click so zoom/drag gestures (mousedown/mousemove) do not close the panel
@@ -728,7 +728,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         const keep = [];
         directDependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
-            if (depNote && !depNote.properties.instrument) keep.push([depNote, myModule.findInstrument(depNote, instrumentMemo)]);
+            if (depNote && !isMeasureNote(depNote) && !depNote.properties.instrument) keep.push([depNote, myModule.findInstrument(depNote, instrumentMemo)]);
         });
         for (const [depNote, inst] of keep) depNote.setVariable('instrument', inst);
         
@@ -773,6 +773,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         try { eventBus.emit('player:requestPause'); } catch {}
 
+        const description = selectionLabel(ids.length, selectedMeasureCount(ids));
         for (const id of ids) {
             try {
                 liberateAndRemoveNoteGL(id);
@@ -787,7 +788,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         createMeasureBars();
         clearSelection();          // drops both the single selection and the group
         invalidateModuleEndTimeCache();
-        try { captureSnapshot(`Delete ${ids.length} Notes`); } catch {}
+        try { captureSnapshot(`Delete ${description}`); } catch {}
     }
 
     function hasMeasurePoints() {
@@ -1109,15 +1110,18 @@ document.addEventListener('DOMContentLoaded', async function() {
                         // under the pointer in or out of the selection. This MUST run before
                         // the stack-cycling block below — cycling would fight the toggle,
                         // advancing the stack index on every shift-click.
-                        if (event.shiftKey && !isLocked) {
+                        const touchClick = event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents
+                          || (!event.pointerType && containerEl.__rmtDownType === 'touch');
+                        if ((event.shiftKey || (touchClick && (touchMultiSelect || multiSelection.size))) && !isLocked) {
                           try {
-                            // Notes only — shift-clicking a measure bar or the base note
-                            // does nothing (they are not group-selectable).
                             const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
                               ? glWorkspace.pickAt(event.clientX, event.clientY, 3)
                               : null;
-                            if (hit && hit.type === 'note' && hit.id != null) {
+                            if (hit && (hit.type === 'note' || hit.type === 'measure')) {
+                              if (touchClick) touchMultiSelect = true;
                               toggleMultiSelectId(Number(hit.id));
+                            } else if (!event.shiftKey) {
+                              clearSelection();
                             }
                             // Shift on empty background is a no-op: it must NOT clear the
                             // group (the user is mid-refinement, and a stray miss would
@@ -1270,6 +1274,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     containerEl.__rmtWsPointerSuppressionHandlers = true;
                     containerEl.addEventListener('pointerdown', (ev) => {
                       try {
+                        containerEl.__rmtDownType = ev.pointerType;
                         containerEl.__rmtDownX = ev.clientX;
                         containerEl.__rmtDownY = ev.clientY;
                       } catch {}
@@ -1522,11 +1527,10 @@ if (canvasEl) {
             const mapping = {};
             mapping[0] = targetNote.id;
             
-            const currentIds = Object.keys(myModule.notes).map(id => Number(id));
-            let maxId = currentIds.length > 0 ? Math.max(...currentIds) : 0;
-            
+            let maxId = 0;
+            for (const id in myModule.notes) maxId = Math.max(maxId, Number(id));
             myModule.nextId = maxId + 1;
-            
+
             let newId = myModule.nextId;
             for (const id in importedModule.notes) {
                 if (Number(id) === 0) continue;
@@ -1544,99 +1548,34 @@ if (canvasEl) {
             // workspace's time unit: base.d stays base.d, so its pace does not depend on
             // the length of the note it is dropped on.
             const __dslProps = Object.keys(PropertyMap).sort((a, b) => b.length - a.length).join('|');
-            const __dslBaseRefRe = () => new RegExp(`\\bbase\\.(${__dslProps})\\b`, 'g');
-            const __dslIdRefRe = () => new RegExp(`\\[(\\d+)\\]\\.(${__dslProps})\\b`, 'g');
-            const __isFrequencyProp = (prop) => PropertyMap[prop] === 'frequency';
-            const __isDurationProp = (prop) => PropertyMap[prop] === 'duration';
-            // Interpretation variables: a measure bar has no loudness or envelope either,
-            // so on a bar these stay with the BaseNote.
-            const __interpretationVars = ['amplitude', 'attack', 'release'];
-            const __isInterpretationProp = (prop) => __interpretationVars.includes(PropertyMap[prop]);
+            const refPattern = new RegExp(`(?:\\bbase|\\[\\s*(\\d+)\\s*\\])\\s*\\.\\s*(${__dslProps})\\b`, 'g');
+            const dropAtEnd = menuBar?.getModuleDropMode?.() === 'end' && targetNote.id !== 0;
 
-            // Ensure imported expressions anchor to the actual drop target (requirement)
-            // When dropping onto a measure bar: startTime anchors to measure, frequency anchors to BaseNote
-            function updateExpression(expr, exprType = null) {
-                if (typeof expr !== 'string') return expr;
-                // Cache key includes expression type for measure bar drops (frequency vs startTime behave differently)
-                const cacheKey = targetIsMeasure ? `${exprType}:${expr}` : expr;
-                const cached = exprRemapCache.get(cacheKey);
-                if (cached) return cached;
-
-                // base.t, base.d, base.f, base.a, ... and [id].prop references
-                const hasDslBase = __dslBaseRefRe().test(expr);
-                const hasDslIds = /\[\d+\]\./.test(expr);
-
-                // IMPORTANT: ID remaps MUST run before base→target remaps.
-                // Otherwise base.t → [targetId].t gets re-remapped by the ID
-                // remap when targetId collides with a source note ID.
-
-                // Remap DSL [oldId].prop references using the mapping table
-                if (hasDslIds) {
-                    expr = expr.replace(__dslIdRefRe(), function(match, idStr, prop) {
-                        const oldRef = parseInt(idStr, 10);
-                        if (mapping.hasOwnProperty(oldRef)) {
-                            const newId = mapping[oldRef];
-                            // The time unit stays the workspace's: [0].d is base.d
-                            if (oldRef === 0 && __isDurationProp(prop)) {
-                                return `base.${prop}`;
-                            }
-                            // Measure bar drop: frequency refs to base note stay as base.f
-                            if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && __isFrequencyProp(prop)) {
-                                return `base.${prop}`;
-                            }
-                            // ...and so do amplitude, attack and release refs
-                            if (targetIsMeasure && oldRef === 0 && __isInterpretationProp(prop)) {
-                                return `base.${prop}`;
-                            }
-                            return `[${newId}].${prop}`;
-                        }
-                        return match;
-                    });
-
-                    // Second pass: fix frequency references pointing to measure bar
-                    if (targetIsMeasure && exprType === 'frequency') {
-                        const measureId = targetNote.id;
-                        expr = expr.replace(new RegExp(`\\[${measureId}\\]\\.(f|freq|frequency)\\b`, 'g'), 'base.$1');
+            function updateExpression(source, variable) {
+                const key = `${variable}:${source}`;
+                if (exprRemapCache.has(key)) return exprRemapCache.get(key);
+                // One pass over the source: a target id may also have been an id
+                // in the imported phrase. Never remap a replacement a second time.
+                const result = source.replace(refPattern, (match, oldId, prop) => {
+                    if (oldId != null && Number(oldId) !== 0) {
+                        const newId = mapping[Number(oldId)];
+                        return newId === undefined ? match : `[${newId}].${prop}`;
                     }
-                }
-
-                // Remap DSL base references (base.t, base.f, ...) to the target note.
-                // base.d, the time unit, stays the workspace's. (Runs after ID remaps so
-                // [targetId] refs won't be re-remapped.)
-                if (targetNote.id !== 0 && hasDslBase) {
-                    const anchorId = targetNote.id;
-
-                    if (targetIsMeasure) {
-                        // A bar gives a start only: no frequency, loudness or envelope
-                        expr = expr.replace(__dslBaseRefRe(), function(match, prop) {
-                            if (__isDurationProp(prop) || __isFrequencyProp(prop) || __isInterpretationProp(prop)) {
-                                return `base.${prop}`;
-                            }
-                            return `[${anchorId}].${prop}`;
-                        });
-                    } else {
-                        expr = expr.replace(__dslBaseRefRe(), function(match, prop) {
-                            if (__isDurationProp(prop)) return `base.${prop}`;
-                            return `[${anchorId}].${prop}`;
-                        });
+                    const property = PropertyMap[prop];
+                    if (targetNote.id === 0 || property === 'duration' ||
+                        (targetIsMeasure && property !== 'startTime')) return `base.${prop}`;
+                    const anchor = `[${targetNote.id}].${prop}`;
+                    if (dropAtEnd && variable === 'startTime' && property === 'startTime') {
+                        const end = `${anchor} + [${targetNote.id}].d`;
+                        // Keep a bare end anchor recognizable as a chain link.
+                        return source.trim() === match ? end : `(${end})`;
                     }
-                }
-
-                // Check drop mode - if 'end', add target's duration to startTime expressions.
-                // Every start that hangs from the target's start moves by the target's
-                // duration (whatever else it reads, e.g. a base.d offset).
-                const dropMode = menuBar?.getModuleDropMode?.() || 'start';
-                if (dropMode === 'end' && exprType === 'startTime' && targetNote.id !== 0) {
-                    const anchorId = targetNote.id;
-                    if (expr.includes(`[${anchorId}].t`)) {
-                        expr = expr + ` + [${anchorId}].d`;
-                    }
-                }
-
-                exprRemapCache.set(cacheKey, expr);
-                return expr;
+                    return anchor;
+                });
+                exprRemapCache.set(key, result);
+                return result;
             }
-        
+
             // Non-chunked import: map and insert all notes in a single pass
             const allIds = Object.keys(importedModule.notes).filter(k => Number(k) !== 0);
             for (const id of allIds) {
@@ -1657,23 +1596,11 @@ if (canvasEl) {
                     }
                 }
 
-                for (const key in impNote.variables) {
-                    const val = impNote.variables[key];
-                    if (typeof val === 'string' && key.endsWith("String")) {
-                        const originalString = val;
-                        // References that need remapping
-                        const needsRemap = __dslBaseRefRe().test(originalString) ||
-                                           (/\[\d+\]\./.test(originalString));
-                        const baseKey = key.slice(0, -6);
-
-                        // Pass expression type for measure bar drops (frequency needs special handling)
-                        const expr = needsRemap ? updateExpression(originalString, baseKey) : originalString;
-
-                        // Set expression via *String property - Note class handles binary compilation
-                        impNote.setVariable(key, expr);
-                    } else if (key === 'color') {
-                        impNote.variables.color = impNote.variables.color;
-                    }
+                for (const key of EXPRESSION_VARS) {
+                    if (!impNote.hasExpression(key)) continue;
+                    const source = impNote.getExpressionSource(key);
+                    const remapped = updateExpression(source, key);
+                    if (remapped !== source) impNote.setVariable(key + 'String', remapped);
                 }
                 impNote.module = myModule;
                 myModule.notes[impNote.id] = impNote;
@@ -1683,131 +1610,15 @@ if (canvasEl) {
             // Incremental import path with targeted dirty marking and timings
             const importedIds = Object.keys(mapping).filter(k => Number(k) !== 0).map(k => mapping[k]);
 
-            // Normalize imported measure chains to ensure correct parentage and chaining after a module drop.
-            // This prevents cross-chain contamination where dragging a dropped measure would affect unrelated measures.
-            // When dropping onto a measure bar: integrate the first imported measure into the target measure bar's chain.
-            (function __normalizeImportedMeasureChains(){
-              try {
-                const importedSet = new Set(importedIds.map(Number));
-                const isMeasure = isMeasureNote;
-                // Collect imported measures
-                const measures = importedIds
-                  .map(id => myModule.getNoteById(Number(id)))
-                  .filter(n => isMeasure(n));
-                if (!measures.length) return;
-
-                // Build graph within the imported set: measure -> dependent measures (by startTimeString reference)
-                const depMap = new Map(); // id -> dependent ids[]
-                const indeg = new Map();  // id -> incoming count
-                measures.forEach(n => { depMap.set(n.id, []); indeg.set(n.id, 0); });
-
-                const refsMeasure = (raw, id) => {
-                  try {
-                    if (!raw) return false;
-                    return new RegExp(`\\[${id}\\]\\.`).test(raw);
-                  } catch { return false; }
-                };
-
-                measures.forEach(m => {
-                  const raw = (m.variables && m.variables.startTimeString) ? m.variables.startTimeString : '';
-                  for (const other of measures) {
-                    if (other.id === m.id) continue;
-                    if (refsMeasure(raw, other.id)) {
-                      depMap.get(other.id).push(m.id);
-                      indeg.set(m.id, (indeg.get(m.id) || 0) + 1);
-                    }
-                  }
-                });
-
-                // Roots = imported measures that do NOT reference another imported measure in their startTime
-                const roots = measures.filter(m => (indeg.get(m.id) || 0) === 0);
-
-                // Linearize each root's chain forward by earliest evaluated start
-                const visitChain = (root) => {
-                  const chain = [root.id];
-                  let cur = root.id;
-                  const pickNext = () => {
-                    const list = depMap.get(cur) || [];
-                    if (!list.length) return null;
-                    let best = null, bestStart = Infinity;
-                    list.forEach(cid => {
-                      try {
-                        const n = myModule.getNoteById(Number(cid));
-                        const s = toNumber(n.getVariable('startTime'), 0);
-                        if (s < bestStart) { bestStart = s; best = cid; }
-                      } catch {}
-                    });
-                    return best;
-                  };
-                  let next = pickNext();
-                  while (next != null) {
-                    chain.push(Number(next));
-                    cur = Number(next);
-                    next = pickNext();
-                  }
-                  return chain;
-                };
-
-                const chains = [];
-                roots.forEach(r => { chains.push(visitChain(r)); });
-
-                // Canonicalize each imported chain:
-                // - First element keeps its existing parent anchor (non-measure note or BaseNote).
-                //   We only fix parentId to match that anchor if possible.
-                // - Subsequent measures are anchored to previous measure END: `[prev].t + [prev].d`.
-                // - Special case: if dropping onto a measure bar, integrate the first imported measure
-                //   into the target measure bar's chain (start after the target measure ends).
-                chains.forEach(chain => {
-                  if (!Array.isArray(chain) || chain.length === 0) return;
-
-                  // First measure in the imported chain: fix parentId to match anchor in startTimeString
-                  const first = myModule.getNoteById(Number(chain[0]));
-                  const raw0 = (first && first.variables && first.variables.startTimeString) ? first.variables.startTimeString : '';
-                  // The note its start hangs from
-                  const ref0 = startParentIdFromRaw(raw0);
-                  const m0 = (ref0 > 0) ? [null, String(ref0)] : null;
-                  let parentIdForPID = 0;
-
-                  // Special handling when dropping onto a measure bar:
-                  // Create a separate measure chain that starts at the target measure bar's startTime
-                  // This preserves the dropped module's internal timing while anchoring to the drop point
-                  if (targetIsMeasure) {
-                    const targetMeasureId = targetNote.id;
-                    first.setVariable('startTimeString', `[${targetMeasureId}].t`);
-                    parentIdForPID = targetMeasureId;
-                  } else if (m0) {
-                    const pid = parseInt(m0[1], 10);
-                    const pn = myModule.getNoteById(pid);
-                    if (pn && !isMeasure(pn)) {
-                      parentIdForPID = pid;
-                    } else {
-                      parentIdForPID = 0;
-                    }
-                  } else if (/\bbase\./.test(raw0)) {
-                    parentIdForPID = 0;
-                  } else if (targetNote && typeof targetNote.id === 'number') {
-                    parentIdForPID = targetNote.id;
-                  }
-                  try { first.parentId = parentIdForPID; } catch {}
-
-                  // Subsequent measures: start = prev end (`[prev].t + [prev].d`), and parentId = prev.id.
-                  // Each keeps its own duration. These remain a separate chain (not integrated into
-                  // the target measure bar's chain).
-                  // Note: We don't call markNoteDirty here - the batch marking below handles all imported notes
-                  for (let i = 1; i < chain.length; i++) {
-                    const prevId = Number(chain[i - 1]);
-                    const curId  = Number(chain[i]);
-                    const curNote = myModule.getNoteById(curId);
-                    if (!curNote) continue;
-                    // Written in the exact chain-link form (not simplified): chain detection reads it
-                    curNote.setVariable('startTimeString', __measureChainLinkExpr(prevId));
-                    try { curNote.parentId = prevId; } catch {}
-                  }
-                });
-              } catch (e) {
-                console.warn('normalizeImportedMeasureChains failed', e);
-              }
-            })();
+            // A bar's start expression defines its chain. Preserve offsets, branches
+            // and starts anchored to ordinary notes, including on measure targets.
+            for (const id of importedIds) {
+                const bar = myModule.notes[id];
+                if (isMeasureNote(bar)) {
+                    const parent = startParentIdFromRaw(bar.variables.startTimeString);
+                    bar.parentId = parent >= 0 ? parent : targetNote.id;
+                }
+            }
 
             // Use batch marking to register dependencies before evaluation
             // This ensures imported notes have their dependencies registered in the graph
@@ -1926,6 +1737,7 @@ if (canvasEl) {
     }
       
     function clearSelection() {
+        touchMultiSelect = false;
         modals.clearSelection();
         currentSelectedNote = null;
         // A plain click clears the group too — "clear" means clear.
@@ -1953,13 +1765,16 @@ if (canvasEl) {
     let groupBeforeRestore = null;
     try {
         eventBus.on('history:requestRestore', () => {
-            groupBeforeRestore = multiSelection.size >= 2 ? [...multiSelection] : null;
+            groupBeforeRestore = multiSelection.size ? { ids: [...multiSelection], touch: touchMultiSelect } : null;
             try { clearSelection(); } catch (e) {}
         });
         eventBus.on('history:restored', () => {
-            const ids = groupBeforeRestore;
+            const group = groupBeforeRestore;
             groupBeforeRestore = null;
-            if (ids) { try { setMultiSelectionIds(ids); } catch (e) {} }
+            if (group) {
+                touchMultiSelect = group.touch;
+                setMultiSelectionIds(group.ids);
+            }
         });
     } catch (e) {}
 
@@ -3087,21 +2902,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         else showNoteVariables(note, anchor);
     }
 
-    // The single selection and the group are ONE selection with two presentations, not
-    // two independent things. This is the only place that decides which you get:
-    //
-    //   >= 2 notes -> group widget; the note widget is dismissed, because with a group
-    //                 live there is no "current" note for it to describe.
-    //      1 note  -> NOT a group. Normalized back to an ordinary single selection
-    //                 (orange ring + note widget), no matter how you got there — a
-    //                 lone shift-click or a marquee that happened to catch one note.
-    //      0 notes -> neither.
-    //
-    // Every mutation of `multiSelection` ends here.
+    // A one-item desktop selection opens the individual editor. A touch hold
+    // keeps the group widget open at one item so subsequent taps can add to it.
     function syncMultiSelection() {
-        // Normalize FIRST, so a one-note group never reaches the renderer as a group
-        // (it would draw a white group ring on top of the orange selection ring).
-        if (multiSelection.size === 1) {
+        if (multiSelection.size === 1 && !touchMultiSelect) {
             const only = myModule.getNoteById([...multiSelection][0]);
             multiSelection.clear();
             try { glWorkspace?.renderer?.syncMultiSelection(multiSelection); } catch {}
@@ -3117,7 +2921,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         try { glWorkspace?.renderer?.syncMultiSelection(multiSelection); } catch {}
         try { glWorkspace?.requestRender?.(); } catch {}
 
-        if (multiSelection.size >= 2) {
+        if (multiSelection.size > 0) {
             // modals.clearSelection() (not our own clearSelection()) — we want the note
             // widget gone without recursing back into the group state we are setting up.
             try { modals.clearSelection(); } catch {}
@@ -3126,6 +2930,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             try {
                 showGroupWidget({
                     count: multiSelection.size,
+                    measureCount: selectedMeasureCount(multiSelection),
                     onCopyToModules: () => copySelectionToModules(),
                     onDeleteAll: () => deleteMultiSelection(),
                     onGroupEdit: (edit) => applyGroupEdit(edit),
@@ -3134,6 +2939,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 });
             } catch {}
         } else {
+            touchMultiSelect = false;
             try { hideGroupWidget(); } catch {}
         }
     }
@@ -3144,24 +2950,27 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         syncMultiSelection();
     }
 
-    // Is this id eligible for the group? Notes only.
-    //
-    // The base note is excluded for the obvious reason (it must never be group-deletable).
-    // MEASURE BARS are excluded because a measure's startTime IS its link in the measure
-    // chain: a group move can't re-anchor it (that reflows the grid under the whole score)
-    // and can't leave it behind either (the group tears on drop). Supporting them halfway
-    // was worse than not supporting them, so they are out of multi-select entirely — they
-    // are still selectable, movable and deletable on their own, as before.
     function isGroupSelectable(id) {
-        const n = Number(id);
-        if (!Number.isFinite(n) || n === 0) return false;
-        const note = myModule.getNoteById(n);
-        return !!note && !__isMeasureNoteGL(note);
+        return Number.isInteger(Number(id)) && Number(id) > 0 && !!myModule.getNoteById(Number(id));
+    }
+
+    function selectedMeasureCount(ids) {
+        let count = 0;
+        if (ids instanceof Set) {
+            const barIds = myModule.getTimingSummary().measureIds;
+            if (barIds.size < ids.size) {
+                for (const id of barIds) if (ids.has(id)) count++;
+                return count;
+            }
+        }
+        for (const id of ids) if (isMeasureNote(myModule.getNoteById(id))) count++;
+        return count;
     }
 
     // ids: iterable of note ids. additive => union with the existing set.
     function setMultiSelectionIds(ids, additive = false) {
         if (!additive) multiSelection.clear();
+        else if (currentSelectedNote && isGroupSelectable(currentSelectedNote.id)) multiSelection.add(currentSelectedNote.id);
         for (const raw of (ids || [])) {
             if (isGroupSelectable(raw)) multiSelection.add(Number(raw));
         }
@@ -3175,7 +2984,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             syncMultiSelection();
             return;
         }
-        if (!isGroupSelectable(n)) return;     // measures / base can never join
+        if (!isGroupSelectable(n)) return;
+        if (!touchMultiSelect && multiSelection.size === 0 && Number(currentSelectedNote?.id) === n) {
+            clearSelection();
+            return;
+        }
 
         // Shift-clicking a note while ANOTHER note is already normally selected has to
         // promote that note into the group first — otherwise "click one, shift-click a
@@ -3205,8 +3018,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     function __startChainTouchesSetGL(note, ids) {
         let cur = __parseParentFromStartTimeStringGL(note);
         const seen = new Set();
-        let guard = 0;
-        while (cur && guard++ < 256) {
+        while (cur) {
             const cid = Number(cur.id);
             if (ids.has(cid)) return true;
             if (cid === 0 || seen.has(cid)) return false;     // reached base, or a cycle
@@ -3264,7 +3076,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const S = new Set([...(ids || [])].map(Number).filter((id) => Number.isFinite(id) && id !== 0));
         const notes = [...S]
             .map((id) => myModule.getNoteById(id))
-            .filter((n) => n && !__isMeasureNoteGL(n));
+            .filter(Boolean);
         if (!notes.length) return null;
 
         const startOf = (n) => toNumber(n.getVariable('startTime'), 0);
@@ -3305,6 +3117,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const outNotes = [];
         for (const n of notes) {
             const e = { id: idMap.get(Number(n.id)) };
+            if (isMeasureNote(n)) e.measure = true;
             const sRaw = n.variables?.startTimeString || '';
             const dRaw = n.variables?.durationString || '';
             const fRaw = n.variables?.frequencyString || '';
@@ -3396,7 +3209,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             const data = buildModuleFromSelection(multiSelection);
             if (!data) return;
             const n = data.notes.length;
-            const name = menuBar.addCustomModule(`Selection (${n} note${n === 1 ? '' : 's'})`, data);
+            const name = menuBar.addCustomModule(`Selection (${selectionLabel(n, selectedMeasureCount(multiSelection))})`, data);
             if (name) {
                 try { menuBar.notify(`Copied to Custom modules as "${name}"`, 'success'); } catch {}
             }
@@ -3453,6 +3266,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             return;
         }
 
+        const changed = selectionLabel(r.changed.length, selectedMeasureCount(r.changed));
         if (r.changed.length) {
             for (const id of r.changed) {
                 try { myModule.markNoteDirty(id); } catch {}
@@ -3468,12 +3282,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 : op === 'instrumentOnePlayer' ? `Instrument ${text || 'inherited'} (one player)`
                 : op === 'color' ? 'Colour'
                 : `${varName} ${GROUP_OP_WORD[op]}${op === 'inherit' ? '' : ' ' + String(text).trim()}`;
-            try { captureSnapshot(`${what} on ${r.changed.length} Notes`, r.changed); } catch {}
+            try { captureSnapshot(`${what} on ${changed}`, r.changed); } catch {}
         }
 
-        const parts = [`${r.changed.length} note${r.changed.length === 1 ? '' : 's'} changed`];
+        const parts = [`${changed} changed`];
         if (op === 'instrumentOnePlayer' && text && r.players) parts.push(`${r.players} player${r.players === 1 ? '' : 's'}`);
-        if (r.followed.length) parts.push(`${r.followed.length} follow${r.followed.length === 1 ? 's' : ''} a selected note`);
+        if (r.followed.length) parts.push(`${r.followed.length} follow${r.followed.length === 1 ? 's' : ''} a selected item`);
         if (r.skipped.length) {
             const reasons = [...new Set(r.skipped.map((s) => s.reason))];
             parts.push(`${r.skipped.length} skipped (${reasons.slice(0, 2).join('; ')})`);
@@ -3494,9 +3308,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         for (const raw of ids) {
             const n = myModule.getNoteById(Number(raw));
             if (!n || Number(n.id) === 0) continue;
-            // Backstop: measures cannot enter the selection (see isGroupSelectable), but
-            // if one ever did, re-anchoring it would reflow the measure grid.
-            if (__isMeasureNoteGL(n)) continue;
+            if (!n.hasExpression('startTime')) continue;
             if (__startChainTouchesSetGL(n, ids)) riders.push(n);
             else movers.push(n);
         }
@@ -3959,6 +3771,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // you shift-clicked. (Plain clicks survive this handler only by accident:
                 // it clears, and the click handler immediately re-selects.)
                 !event.shiftKey &&
+                !(multiSelection.size && glWorkspace?.containerEl?.contains(event.target)) &&
                 !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
@@ -4024,6 +3837,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // you shift-clicked. (Plain clicks survive this handler only by accident:
                 // it clears, and the click handler immediately re-selects.)
                 !event.shiftKey &&
+                !(multiSelection.size && glWorkspace?.containerEl?.contains(event.target)) &&
                 !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
@@ -5193,9 +5007,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
       // Long-press on a note (touch): the same refinement a shift-click does on desktop —
       // toggle that note in or out of the group.
-      eventBus.on('workspace:multiSelectToggle', ({ id }) => {
+      eventBus.on('workspace:multiSelectToggle', ({ id, touch }) => {
         try {
           if (isLocked) return;
+          if (touch) touchMultiSelect = true;
           toggleMultiSelectId(Number(id));
         } catch (e) {
           console.warn('workspace:multiSelectToggle failed', e);
@@ -5205,9 +5020,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       // Marquee released: the workspace hands us the ids it crossed. This is the ONLY
       // writer of the authoritative selection for a marquee — the live highlight during
       // the drag was just a renderer-side preview.
-      eventBus.on('workspace:marqueeCommit', ({ ids, additive }) => {
+      eventBus.on('workspace:marqueeCommit', ({ ids, additive, touch }) => {
         try {
           if (isLocked) return;
+          if (touch) touchMultiSelect = true;
           setMultiSelectionIds(Array.isArray(ids) ? ids : [], !!additive);
         } catch (e) {
           console.warn('workspace:marqueeCommit failed', e);
@@ -5217,16 +5033,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       // GROUP move. `ids` = the live multi-selection, `deltaSec` = the time delta the
       // drag resolved to. Lands as ONE undo entry.
       //
-      // THE RULE — see classifyGroupMoveGL(): apply the delta ONLY to MOVERS (selected
-      // notes with no selected note anywhere in their startTime ancestor chain). RIDERS
-      // (anchored transitively to another selected note) are left completely untouched:
-      // their anchor's move already displaces them by exactly the same delta, because
-      // every link is `[parent].t + offset` and we never rewrite the offsets. Touching
-      // a rider would double-move it.
-      //
-      // Notes OUTSIDE the selection are likewise never rewritten — they follow their
-      // anchors, exactly as they do for a single-note drag. That is the app's semantics,
-      // not an oversight.
+      // A group with measures keeps its timing links and offsets each start by
+      // whatever its dependencies do not already contribute to the translation.
+      // A notes-only group uses the existing move and re-anchor behavior.
       eventBus.on('workspace:groupMoveCommit', ({ ids, deltaSec }) => {
         try {
           if (!Array.isArray(ids) || !ids.length) return;
@@ -5237,31 +5046,34 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const S = new Set(ids.map(Number).filter((v) => Number.isFinite(v) && v !== 0));
           if (!S.size) return;
 
-          const { movers } = classifyGroupMoveGL(S);
-          if (!movers.length) return;
+          const barCount = selectedMeasureCount(S);
+          if (barCount) {
+            if (!groupEdit.translateGroupStarts(myModule, S, deltaSec).length) return;
+          } else {
+            const { movers } = classifyGroupMoveGL(S);
+            if (!movers.length) return;
 
-          // Snapshot every mover's CURRENT start before mutating anything. A mover's
-          // ancestors are static by construction (no selected note in its chain), so
-          // these reads are order-independent — but taking them up front keeps the
-          // batch deterministic regardless of commit order.
-          const baseStart = toNumber(myModule.baseNote.getVariable('startTime'), 0);
-          const plan = movers.map((n) => ({
-            n,
-            newStart: toNumber(n.getVariable('startTime'), 0) + deltaSec
-          }));
+            // Snapshot every mover's CURRENT start before mutating anything. A mover's
+            // ancestors are static by construction (no selected note in its chain), so
+            // these reads are order-independent — but taking them up front keeps the
+            // batch deterministic regardless of commit order.
+            const baseStart = toNumber(myModule.baseNote.getVariable('startTime'), 0);
+            const plan = movers.map((n) => ({
+              n,
+              newStart: toNumber(n.getVariable('startTime'), 0) + deltaSec
+            }));
 
-          // Never drag the group before the base note: clamp the whole batch by the
-          // same amount so its internal spacing survives.
-          let clamp = 0;
-          for (const p of plan) clamp = Math.max(clamp, baseStart - p.newStart);
-          if (clamp > 0) for (const p of plan) p.newStart += clamp;
+            // Never drag the group before the base note: clamp the whole batch by the
+            // same amount so its internal spacing survives.
+            let clamp = 0;
+            for (const p of plan) clamp = Math.max(clamp, baseStart - p.newStart);
+            if (clamp > 0) for (const p of plan) p.newStart += clamp;
 
-          for (const p of plan) commitNoteStartGL(p.n, p.newStart);
-
-          // Same repair pass the single-note move runs, once per mover.
-          for (const p of plan) {
-            try { retargetDependentStartAndDurationOnTemporalViolationGL(p.n); } catch {}
-            try { retargetDependentFrequencyOnTemporalViolationGL(p.n); } catch {}
+            for (const p of plan) commitNoteStartGL(p.n, p.newStart);
+            for (const p of plan) {
+              try { retargetDependentStartAndDurationOnTemporalViolationGL(p.n); } catch {}
+              try { retargetDependentFrequencyOnTemporalViolationGL(p.n); } catch {}
+            }
           }
 
           evaluatedNotes = myModule.evaluateModule();
@@ -5269,7 +5081,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           updateVisualNotes(evaluatedNotes, true);
           createMeasureBars();
           invalidateModuleEndTimeCache();
-          try { captureSnapshot(`Move ${S.size} Notes`, true); } catch {}
+          try { captureSnapshot(`Move ${selectionLabel(S.size, barCount)}`, true); } catch {}
           try { syncRendererSelection(); } catch {}
           try { syncMultiSelection(); } catch {}
           refreshNoteWidgetForSelection();

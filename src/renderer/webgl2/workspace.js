@@ -40,6 +40,13 @@ export function startParentIdFromRaw(raw) {
   return -1;
 }
 
+// Set iteration visits newly added IDs. Shared downstream chains are traversed once.
+function expandStartTimeDependents(graph, moving) {
+  for (const id of moving) {
+    for (const dependent of graph.getStartTimeDependents(id)) moving.add(dependent);
+  }
+}
+
 /**
  * A measure chain link starts exactly where the bar before it ends: `[P].t + [P].d`.
  * Any other start (an offset, another note, the BaseNote) begins a chain of its own.
@@ -217,9 +224,15 @@ export class Workspace {
           locked = !!(lb && lb.classList && lb.classList.contains('locked'));
         } catch {}
         if (locked) return;
+        // A fresh contact is independent of the compatibility click from the last release.
+        if (e.isPrimary && e.button === 0) {
+          this.containerEl.__rmtSuppressClickUntil = 0;
+          if (this._postDropClick) document.removeEventListener('click', this._postDropClick, true);
+        }
 
         // Disable multi-touch while dragging/resizing to avoid erratic placement
         if (e.pointerType === 'touch') {
+          if (this._touchActiveCount >= 2) return;
           if (this._interaction && this._interaction.active) {
             // A second finger during a pending marquee means the user actually wants to
             // pinch-zoom. Give the gesture up rather than fight the camera for it.
@@ -234,38 +247,28 @@ export class Workspace {
         }
 
         // ── Multi-select entry ──────────────────────────────────────────────────
-        // Long-press IS the touch equivalent of shift: on empty background it rubber-bands
-        // a marquee, on a note it toggles that note in or out of the selection. Group drag
-        // is NOT handled here — a note already in the group falls through to the normal
-        // move gesture below, which is then decorated as a group drag, so it inherits all
-        // the existing snapping and clamping for free.
-        if (e.shiftKey || e.pointerType === 'touch') {
+        if ((e.shiftKey && e.button === 0) || e.pointerType === 'touch') {
           const hit = this._pickAny(e.clientX, e.clientY);
-
-          if (!hit) {
-            if (e.pointerType !== 'touch' && e.shiftKey) {
-              this._beginMarquee(e, this._multiSelIds().size > 0);
-              return;
-            }
-            if (e.pointerType === 'touch') {
-              this._armLongPress(e, { kind: 'marquee', additive: this._multiSelIds().size > 0 });
-            }
-          } else if (e.pointerType === 'touch' && hit.type === 'note') {
-            this._armLongPress(e, { kind: 'toggle', noteId: Number(hit.id) });
+          const id = hit && (hit.type === 'note' || hit.type === 'measure') ? Number(hit.id) : null;
+          if (e.pointerType !== 'touch') {
+            // Shift owns this gesture even over an octave control or a resize handle.
+            this._beginMarquee(e, this._multiSelIds().size > 0, id);
+            return;
           }
-          // Deliberately FALL THROUGH in both touch cases. Until the timer fires this is
-          // still an ordinary pan (on background) or a pending note drag (on a note);
-          // travel, a second finger, or an early release all cancel it. So pan, pinch-zoom
-          // and note dragging are untouched, and we never take a gesture on speculation.
+          if (!hit || id != null) {
+            this._armLongPress(e, { kind: id == null ? 'marquee' : 'toggle', noteId: id,
+              additive: this._multiSelIds().size > 0 });
+          }
         }
 
         if (!this.renderer || typeof this.renderer.hitTestSubRegion !== 'function') return;
         const subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY);
 
-        // If no note subregion hit, allow measure-triangle dragging via mixed pick
-        if (!subHit || !subHit.id) {
+        // A triangle is painted above any note underneath it.
+        const triangle = subHit?.id ? this.renderer.pickTrianglesAt?.(e.clientX, e.clientY, true)?.[0] : null;
+        if (triangle || !subHit || !subHit.id) {
           try {
-            let mixedTop = this.pickAt(e.clientX, e.clientY, 3);
+            let mixedTop = triangle || this.pickAt(e.clientX, e.clientY, 3);
             // If a different measure is currently selected and also under the pointer, prefer it.
             // pickAt returns the top-most triangle, but the user may have stack-clicked to select a lower one.
             if (mixedTop && mixedTop.type === 'measure' && this.renderer?._lastSelectedNoteId != null) {
@@ -286,135 +289,6 @@ export class Workspace {
               const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
               const pointerOffsetWorld = pointerWX0 - startWorldX;
 
-              // INTERACTION CACHE (measure): Capture linear chain and index at pointerdown.
-              // - cachedMeasureChain: Array<{id,startSec}> from earliest ancestor -> last dependent
-              // - cachedMeasureIndex: index of active measure within chain
-              // - cachedMeasureMovingIds: closure of downstream measures + normal-note dependents (computed below)
-              // These caches are reused on every preview frame and invalidated in _endInteraction.
-              // Cache measure chain once at pointerdown to avoid O(n^2) rebuilds per frame
-              const chain0 = this._collectMeasureChainFor(Number(measureId)) || [];
-              let cidx0 = chain0.findIndex(m => Number(m.id) === Number(measureId));
-              if (cidx0 < 0) cidx0 = 0;
-
-              // Build moving-set cache for measure drag: downstream measures + all normal notes whose startTime depends on them
-              // OPTIMIZED: Uses DependencyGraph.getAllStartTimeDependents() for O(d) instead of O(N×M) regex scanning
-              const moveSet0 = new Set();
-              try {
-                const mod = this._module;
-                const depGraph = mod._dependencyGraph;
-
-                // 1) Seed measures: downstream along the linear chain (including the anchor)
-                const seedMeasures = new Set();
-                for (let j = cidx0; j < chain0.length; j++) {
-                  const mid = Number(chain0[j].id);
-                  seedMeasures.add(mid);
-                  moveSet0.add(mid);
-                }
-                if (!seedMeasures.size) {
-                  seedMeasures.add(Number(measureId));
-                  moveSet0.add(Number(measureId));
-                }
-
-                // 2) & 3) Use DependencyGraph to get ALL transitive startTime dependents efficiently
-                // Include ALL dependent measures (both chain links AND anchors) for preview
-                // Anchors depend on this measure so they should move in preview
-                // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
-                if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
-                  // Get all transitive startTime dependents of each seed measure
-                  for (const seedId of seedMeasures) {
-                    const allDeps = depGraph.getAllStartTimeDependents(seedId);
-                    for (const depId of allDeps) {
-                      moveSet0.add(Number(depId));
-                    }
-                  }
-                } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
-                  // Fallback to old behavior
-                  for (const seedId of seedMeasures) {
-                    const allDeps = depGraph.getAllDependents(seedId);
-                    for (const depId of allDeps) {
-                      moveSet0.add(Number(depId));
-                    }
-                  }
-                } else {
-                  // Fallback to original O(N×M) implementation if DependencyGraph not available
-                  // Include ALL dependent measures (both chain links AND anchors) for preview
-                  const isMeasure = isMeasureNote;
-
-                  // Expand to ALL transitive dependent measures (including anchors)
-                  const measureClosure = (seedSet) => {
-                    const out = new Set(seedSet);
-                    if (!mod || !mod.notes) return out;
-                    let changed = true;
-                    while (changed) {
-                      changed = false;
-                      for (const idStr in mod.notes) {
-                        const nn = mod.getNoteById(Number(idStr));
-                        if (!isMeasure(nn)) continue;
-                        const nid = Number(nn.id);
-                        if (out.has(nid)) continue;
-                        const sts = nn.variables?.startTimeString || '';
-                        // Include ANY measure that references a seed (both chain links and anchors)
-                        for (const sid of out) {
-                          if (sts.includes(`[${sid}]`)) {
-                            out.add(nid);
-                            changed = true;
-                            break;
-                          }
-                        }
-                      }
-                    }
-                    return out;
-                  };
-
-                  const allMeasuresToMove = measureClosure(seedMeasures);
-                  for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
-
-                  // Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
-                  if (mod && mod.notes) {
-                    const notesObj = mod.notes || {};
-                    const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-                    const getStartTimeStr = (nid) => {
-                      try {
-                        const n = mod.getNoteById(Number(nid));
-                        return n && n.variables && typeof n.variables.startTimeString === 'string'
-                          ? n.variables.startTimeString
-                          : null;
-                      } catch { return null; }
-                    };
-                    const refersStartOf = (nid, refId) => {
-                      const s = getStartTimeStr(nid);
-                      if (!s) return false;
-                      // [refId].t, [refId].d
-                      if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`)) return true;
-                      return false;
-                    };
-                    const closureStartRefs = (seedSet) => {
-                      const affected = new Set(seedSet);
-                      let changed = true;
-                      while (changed) {
-                        changed = false;
-                        for (const nid of allIds) {
-                          if (affected.has(nid)) continue;
-                          for (const refId of affected) {
-                            if (refersStartOf(nid, refId)) {
-                              affected.add(nid);
-                              changed = true;
-                              break;
-                            }
-                          }
-                        }
-                      }
-                      return affected;
-                    };
-
-                    const closure = closureStartRefs(allMeasuresToMove);
-                    for (const did of closure) {
-                      moveSet0.add(Number(did));
-                    }
-                  }
-                }
-              } catch {}
-
               this._interaction = {
                 active: true,
                 type: 'measure',
@@ -431,10 +305,7 @@ export class Workspace {
                 origDurationSec: 0,
                 baselineStartSec: null,
                 lastPreview: { startSec: origStartSec, durationSec: 0 },
-                // Per-interaction cached chain/index + dependency closure for GPU preview
-                cachedMeasureChain: chain0,
-                cachedMeasureIndex: cidx0,
-                cachedMeasureMovingIds: moveSet0
+                prepareMeasureDrag: true
               };
 
               // Keep existing selection during measure drag (match normal note behavior)
@@ -808,6 +679,12 @@ export class Workspace {
           }
         } catch {}
 
+        if (this._interaction.prepareMeasureDrag) {
+          const start = this._interaction.startClient;
+          if (Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4) return;
+          this._prepareMeasureDrag(this._interaction);
+          this._interaction.prepareMeasureDrag = false;
+        }
         if (this._interaction.prepareNoteDrag) {
           const start = this._interaction.startClient;
           if (e.clientX === start.x && e.clientY === start.y) return;
@@ -828,9 +705,11 @@ export class Workspace {
           }
 
           st.lastClient = { x: e.clientX, y: e.clientY };
+          if (!st.marqueeDragged && Math.hypot(e.clientX - st.startClient.x, e.clientY - st.startClient.y) <= 4) return;
+          st.marqueeDragged = true;
           const rect = {
             x0: st.startClient.x, y0: st.startClient.y,
-            x1: e.clientX,        y1: e.clientY, additive: st.marqueeAdditive
+            x1: e.clientX,        y1: e.clientY, additive: st.marqueeAdditive, seedId: st.seedId
           };
           try { this.renderer?.setMarqueeRect?.(rect); } catch {}
           try { if (e.cancelable) e.preventDefault(); } catch {}
@@ -877,47 +756,6 @@ export class Workspace {
           const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
           const pointerOffsetWorld = pointerWX0 - startWorldX;
 
-          // PERFORMANCE: Build baseline set and compute dependents ONCE during promotion
-          // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n²) string matching
-          const baseline = new Map();
-          baseline.set(Number(noteId), origStartSec);
-          let affectedIds = new Set();
-
-          try {
-            const mod = this._module;
-            const anchorId = Number(noteId);
-            const depGraph = mod && mod._dependencyGraph;
-
-            // Use startTime-specific DependencyGraph for fast transitive dependent lookup
-            // This ensures we only move notes whose startTime actually depends on the dragged note
-            if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
-              affectedIds = depGraph.getAllStartTimeDependents(anchorId);
-            } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
-              // Fallback to old behavior
-              affectedIds = depGraph.getAllDependents(anchorId);
-            }
-            affectedIds.delete(anchorId);
-            for (const did of affectedIds) {
-              let s0 = 0;
-              try {
-                const n = mod.getNoteById(Number(did));
-                s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
-              } catch {
-                try {
-                  const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
-                    ? this.renderer._noteIdToIndex.get(Number(did))
-                    : null;
-                  if (idx != null && idx >= 0 && this.renderer.posSize) {
-                    const base = idx * 4;
-                    const xwLocal = this.renderer.posSize[base + 0];
-                    s0 = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
-                  }
-                } catch {}
-              }
-              baseline.set(Number(did), Math.max(0, s0 || 0));
-            }
-          } catch {}
-
           // Switch to a real move interaction and gate camera input
           this._interaction.type = 'move';
           this._interaction.startWorldX = startWorldX;
@@ -925,20 +763,7 @@ export class Workspace {
           this._interaction.pointerOffsetWorld = pointerOffsetWorld;
           this._interaction.origStartSec = origStartSec;
           this._interaction.origDurationSec = origDurationSec;
-          this._interaction.baselineStartSec = baseline;
-          this._interaction.cachedDependents = affectedIds;
-          // Initialize caches
-          this._interaction.cachedParentChain = null;
-          this._interaction.cachedAncestorChain = null;
-          // Group drags must re-decorate AFTER the rebuild above: it just clobbered
-          // cachedDependents with the grabbed note's own dependents, which detaches the
-          // glyph atlas (fraction labels, octave arrows) from the rest of the selection.
-          // Desktop decorates after building the full state (see the pointerdown path);
-          // promotion has to do the same or the two drag caches disagree.
-          this._decorateAsGroupDrag(this._interaction);
-
-          // Seed per-interaction parent/ancestor caches for note drags (move/resize) on promotion
-          this._seedParentCaches(Number(noteId));
+          this._prepareNoteDrag(this._interaction, true);
 
           try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
           // Fall through to normal move-preview path below
@@ -981,7 +806,7 @@ export class Workspace {
         let startSec = this._interaction.origStartSec;
         let durationSec = this._interaction.origDurationSec;
 
-        if (type === 'move') {
+        if (type === 'move' || (type === 'measure' && this._interaction.groupMode)) {
           let next = this._interaction.origStartSec + dxSec;
           // Snap and clamp to base start
           next = snapSixteenth(next);
@@ -1176,7 +1001,7 @@ export class Workspace {
         // here — before the preview and before lastPreview, which the commit reads — so
         // the ghost stops where the drop will actually land instead of sliding past the
         // base note and snapping back.
-        if (type === 'move' && this._interaction.groupMode
+        if (this._interaction.groupMode
             && Number.isFinite(this._interaction.groupMinDeltaSec)) {
           const minStart = (this._interaction.origStartSec || 0) + this._interaction.groupMinDeltaSec;
           if (startSec < minStart) startSec = minStart;
@@ -1322,14 +1147,14 @@ export class Workspace {
             let chain = (this._interaction && Array.isArray(this._interaction.cachedMeasureChain))
               ? this._interaction.cachedMeasureChain
               : null;
-            if (!chain || !chain.length) {
+            if (!this._interaction.groupMode && (!chain || !chain.length)) {
               chain = this._collectMeasureChainFor(Number(noteId)) || [];
               if (this._interaction) this._interaction.cachedMeasureChain = chain;
             }
             let cidx = (this._interaction && typeof this._interaction.cachedMeasureIndex === 'number')
               ? this._interaction.cachedMeasureIndex
               : -1;
-            if (cidx < 0) {
+            if (!this._interaction.groupMode && cidx < 0) {
               cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
               if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
             }
@@ -1368,7 +1193,9 @@ export class Workspace {
                   // Use DependencyGraph for transitive startTime dependents (fast path)
                   // Include ALL startTime dependents (both chain links AND anchors) for preview
                   // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
-                  if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+                  if (depGraph?.getStartTimeDependents) {
+                    expandStartTimeDependents(depGraph, moveIds);
+                  } else if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
                     for (const seedId of seedMeasures) {
                       const allDeps = depGraph.getAllStartTimeDependents(seedId);
                       for (const depId of allDeps) {
@@ -1459,7 +1286,7 @@ export class Workspace {
             
             // Only include dependents that will actually move this frame
             if (Math.abs(shift) > EPS) {
-              movingIds = Array.from(depIdsSet);
+              movingIds = this._interaction.cachedOverlayIds ??= Array.from(depIdsSet);
             }
           }
         } catch {}
@@ -1487,7 +1314,7 @@ export class Workspace {
         } catch {}
         // Live parent remapping visualization: derive candidate that mirrors commit-time logic
         try {
-          if (this.renderer?.setProspectiveParentId && (type === 'move' || type === 'resize')) {
+          if (!this._interaction.groupMode && this.renderer?.setProspectiveParentId && (type === 'move' || type === 'resize')) {
             const cand = this._resolveProspectiveParentCandidate(Number(noteId), startSec, e.clientX, e.clientY);
             this.renderer.setProspectiveParentId(cand);
           }
@@ -1543,6 +1370,7 @@ export class Workspace {
             try { document.removeEventListener('click', suppressOnce, true); } catch {}
           };
           // Capture phase to intercept before app handlers
+          this._postDropClick = suppressOnce;
           document.addEventListener('click', suppressOnce, true);
           // Safety removal in case no click fires
           setTimeout(() => { try { document.removeEventListener('click', suppressOnce, true); } catch {} }, 50);
@@ -1558,7 +1386,7 @@ export class Workspace {
 
       // A click on a note/touch tap never published a preview. No geometry,
       // selection or dependent positions need to be restored on release.
-      if (st.prepareNoteDrag || st.type === 'movePending') {
+      if (st.prepareNoteDrag || st.prepareMeasureDrag || st.type === 'movePending') {
         this._interaction = { active: false };
         this._interactionEdgeCache = null;
         return;
@@ -1622,13 +1450,18 @@ export class Workspace {
               try { if (this._lastSyncArgs) this.sync(this._lastSyncArgs); } catch {}
             }
           } else if (st.type === 'marquee') {
-            // Hand the result to player.js, which owns the authoritative selection.
-            // Emitted even when empty: a shift-drag across nothing should clear.
-            eventBus.emit('workspace:marqueeCommit', {
-              ids: this.renderer.pickRectIds(st.startClient.x, st.startClient.y, st.lastClient.x, st.lastClient.y),
-              additive: !!st.marqueeAdditive
-            });
-          } else if (st.type === 'move' && st.groupMode) {
+            const dragged = st.marqueeDragged || Math.hypot(st.lastClient.x - st.startClient.x, st.lastClient.y - st.startClient.y) > 4;
+            if (!dragged && st.tapId != null) {
+              if (!st.heldItem) eventBus.emit('workspace:multiSelectToggle', { id: st.tapId });
+            } else {
+              const ids = this.renderer.pickRectIds(st.startClient.x, st.startClient.y, st.lastClient.x, st.lastClient.y);
+              if (st.seedId != null && !ids.includes(st.seedId)) ids.push(st.seedId);
+              eventBus.emit('workspace:marqueeCommit', {
+                ids,
+                additive: !!st.marqueeAdditive, touch: st.touch
+              });
+            }
+          } else if (st.groupMode) {
             // GROUP move: the grabbed note's resolved start gives the delta; player.js
             // decides which selected notes actually get it applied (movers vs riders).
             const startSec = (st.lastPreview?.startSec != null) ? st.lastPreview.startSec : st.origStartSec;
@@ -1696,6 +1529,10 @@ export class Workspace {
     };
 
     try {
+      this._onContextMenu = (event) => {
+        if (this._lp || this._interaction?.touch) event.preventDefault();
+      };
+      this.containerEl.addEventListener('contextmenu', this._onContextMenu);
       this.containerEl.addEventListener('pointermove', this._onPointerMove, { passive: true });
       this.containerEl.addEventListener('pointerleave', this._onPointerLeave, { passive: true });
       this.containerEl.addEventListener('pointerdown', this._onPointerDown, { passive: true, capture: true });
@@ -1706,6 +1543,10 @@ export class Workspace {
       this._onGlobalTouchDown = (ev) => {
         if (ev && ev.pointerType === 'touch') {
           this._touchActiveCount = (this._touchActiveCount || 0) + 1;
+          if (this._touchActiveCount >= 2) {
+            this._cancelLongPress();
+            if (this._interaction?.type === 'marquee') this._endInteraction(false);
+          }
           // If a second touch arrives while a move is pending, cancel the pending move
           // so the user can pinch-zoom instead of starting a drag.
           try {
@@ -1740,6 +1581,8 @@ export class Workspace {
       if (this.containerEl && this._onPointerDown) {
         this.containerEl.removeEventListener('pointerdown', this._onPointerDown, true);
       }
+      this.containerEl?.removeEventListener('contextmenu', this._onContextMenu);
+      this._cancelLongPress();
       // Detach any doc listeners
       if (this._onDocPointerMove) document.removeEventListener('pointermove', this._onDocPointerMove, true);
       if (this._onDocPointerUp) document.removeEventListener('pointerup', this._onDocPointerUp, true);
@@ -1841,7 +1684,7 @@ export class Workspace {
   //
   // Gesture arbitration, in priority order:
   //
-  //   MOUSE   shift + drag on empty space ....... marquee
+  //   MOUSE   shift + drag anywhere ............. marquee
   //           drag a note that is in the group .. group drag
   //           anything else ..................... unchanged (single note, pan, zoom)
   //
@@ -1896,7 +1739,7 @@ export class Workspace {
     document.addEventListener('pointercancel', this._onDocPointerCancel, true);
   }
 
-  _beginMarquee(e, additive = false) {
+  _beginMarquee(e, additive = false, tapId = null, heldItem = false) {
     this._cancelLongPress();
 
     // Take the camera out of the gesture for its duration, or we rubber-band and pan at
@@ -1904,6 +1747,8 @@ export class Workspace {
     try { this.camera?.setInputEnabled?.(false); } catch {}
     try { this.camera?.setSingleFingerPanEnabled?.(false); } catch {}
 
+    const selected = this.renderer?._lastSelectedNoteId;
+    const seedId = !this._multiSelIds().size && Number(selected) > 0 ? Number(selected) : null;
     this._interaction = {
       active: true,
       type: 'marquee',
@@ -1913,13 +1758,14 @@ export class Workspace {
       pointerId: e.pointerId,
       startClient: { x: e.clientX, y: e.clientY },
       lastClient:  { x: e.clientX, y: e.clientY },
-      marqueeAdditive: !!additive,
+      marqueeAdditive: !!additive || seedId != null,
+      seedId,
+      tapId, heldItem, marqueeDragged: false, touch: e.pointerType === 'touch',
       lastPreview: { startSec: 0, durationSec: 0 }
     };
 
     this._attachDocInteractionListeners();
 
-    try { this.renderer?.setMarqueeRect?.({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, additive }); } catch {}
     try { this.containerEl.style.cursor = 'crosshair'; } catch {}
     // NO preventDefault here. We are called from the pointerdown listener, which is
     // registered { passive: true } — the call would be ignored and would log
@@ -1969,13 +1815,14 @@ export class Workspace {
             // are in the middle of building.
             try { this._endInteraction(false); } catch {}
             this._suppressTapAfterLongPress();
-            eventBus.emit('workspace:multiSelectToggle', { id: Number(opts.noteId) });
+            eventBus.emit('workspace:multiSelectToggle', { id: Number(opts.noteId), touch: true });
+            this._beginMarquee({ clientX: startX, clientY: startY, pointerId: pid, pointerType: 'touch' }, true, Number(opts.noteId), true);
             return;
           }
 
           // Marquee: nothing should be interacting yet (we pressed empty background).
           if (this._interaction && this._interaction.active) return;
-          const synthetic = { clientX: startX, clientY: startY, pointerId: pid, preventDefault() {} };
+          const synthetic = { clientX: startX, clientY: startY, pointerId: pid, pointerType: 'touch', preventDefault() {} };
           this._beginMarquee(synthetic, !!opts.additive);
         } catch { cancel(); }
       }, Workspace.MARQUEE_LONG_PRESS_MS)
@@ -2031,9 +1878,9 @@ export class Workspace {
   // preview — only _endInteraction's commit differs.
   _decorateAsGroupDrag(st) {
     try {
-      if (!st || (st.type !== 'move' && st.type !== 'movePending')) return;
+      if (!st || !['move', 'movePending', 'measure'].includes(st.type)) return;
       const sel = this._multiSelIds();
-      if (sel.size < 1 || !sel.has(Number(st.noteId))) return;
+      if (!sel.has(Number(st.noteId)) || (st.type === 'measure' && sel.size === 1)) return;
 
       st.groupMode = true;
       st.groupIds = [...sel];
@@ -2046,7 +1893,9 @@ export class Workspace {
       const moving = new Set(st.groupIds.map(Number));
       try {
         const graph = this._module?._dependencyGraph;
-        if (graph?.getAllStartTimeDependents) {
+        if (graph?.getStartTimeDependents) {
+          expandStartTimeDependents(graph, moving);
+        } else if (graph?.getAllStartTimeDependents) {
           for (const id of st.groupIds) {
             for (const d of (graph.getAllStartTimeDependents(Number(id)) || [])) {
               moving.add(Number(d));
@@ -2066,6 +1915,7 @@ export class Workspace {
       // dependents, which may or may not overlap the group.
       // setDragOverlay's set omits the anchor, matching how the single-note path builds it.
       st.cachedAffectedIds = moving;
+      if (st.type === 'measure') st.cachedMeasureMovingIds = moving;
       const deps = new Set(moving);
       deps.delete(Number(st.noteId));
       st.cachedDependents = deps;
@@ -2232,11 +2082,153 @@ export class Workspace {
 
   // Build the baseline only on the first movement. Pointerdown also starts a
   // plain selection; on a heavily referenced note that click needs no drag graph.
-  _prepareNoteDrag(st) {
+  _prepareMeasureDrag(st) {
+    this._decorateAsGroupDrag(st);
+    if (st.groupMode) return;
+    const measureId = st.noteId;
+    const chain0 = this._collectMeasureChainFor(Number(measureId)) || [];
+    let cidx0 = chain0.findIndex(m => Number(m.id) === Number(measureId));
+    if (cidx0 < 0) cidx0 = 0;
+
+    // Build moving-set cache for measure drag: downstream measures + all normal notes whose startTime depends on them
+    // OPTIMIZED: Uses DependencyGraph.getAllStartTimeDependents() for O(d) instead of O(N×M) regex scanning
+    const moveSet0 = new Set();
+    try {
+      const mod = this._module;
+      const depGraph = mod._dependencyGraph;
+
+      // 1) Seed measures: downstream along the linear chain (including the anchor)
+      const seedMeasures = new Set();
+      for (let j = cidx0; j < chain0.length; j++) {
+        const mid = Number(chain0[j].id);
+        seedMeasures.add(mid);
+        moveSet0.add(mid);
+      }
+      if (!seedMeasures.size) {
+        seedMeasures.add(Number(measureId));
+        moveSet0.add(Number(measureId));
+      }
+
+      // 2) & 3) Use DependencyGraph to get ALL transitive startTime dependents efficiently
+      // Include ALL dependent measures (both chain links AND anchors) for preview
+      // Anchors depend on this measure so they should move in preview
+      // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
+      if (depGraph?.getStartTimeDependents) {
+        expandStartTimeDependents(depGraph, moveSet0);
+      } else if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+        // Get all transitive startTime dependents of each seed measure
+        for (const seedId of seedMeasures) {
+          const allDeps = depGraph.getAllStartTimeDependents(seedId);
+          for (const depId of allDeps) {
+            moveSet0.add(Number(depId));
+          }
+        }
+      } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
+        // Fallback to old behavior
+        for (const seedId of seedMeasures) {
+          const allDeps = depGraph.getAllDependents(seedId);
+          for (const depId of allDeps) {
+            moveSet0.add(Number(depId));
+          }
+        }
+      } else {
+        // Fallback to original O(N×M) implementation if DependencyGraph not available
+        // Include ALL dependent measures (both chain links AND anchors) for preview
+        const isMeasure = isMeasureNote;
+
+        // Expand to ALL transitive dependent measures (including anchors)
+        const measureClosure = (seedSet) => {
+          const out = new Set(seedSet);
+          if (!mod || !mod.notes) return out;
+          let changed = true;
+          while (changed) {
+            changed = false;
+            for (const idStr in mod.notes) {
+              const nn = mod.getNoteById(Number(idStr));
+              if (!isMeasure(nn)) continue;
+              const nid = Number(nn.id);
+              if (out.has(nid)) continue;
+              const sts = nn.variables?.startTimeString || '';
+              // Include ANY measure that references a seed (both chain links and anchors)
+              for (const sid of out) {
+                if (sts.includes(`[${sid}]`)) {
+                  out.add(nid);
+                  changed = true;
+                  break;
+                }
+              }
+            }
+          }
+          return out;
+        };
+
+        const allMeasuresToMove = measureClosure(seedMeasures);
+        for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
+
+        // Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
+        if (mod && mod.notes) {
+          const notesObj = mod.notes || {};
+          const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
+          const getStartTimeStr = (nid) => {
+            try {
+              const n = mod.getNoteById(Number(nid));
+              return n && n.variables && typeof n.variables.startTimeString === 'string'
+                ? n.variables.startTimeString
+                : null;
+            } catch { return null; }
+          };
+          const refersStartOf = (nid, refId) => {
+            const s = getStartTimeStr(nid);
+            if (!s) return false;
+            // [refId].t, [refId].d
+            if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`)) return true;
+            return false;
+          };
+          const closureStartRefs = (seedSet) => {
+            const affected = new Set(seedSet);
+            let changed = true;
+            while (changed) {
+              changed = false;
+              for (const nid of allIds) {
+                if (affected.has(nid)) continue;
+                for (const refId of affected) {
+                  if (refersStartOf(nid, refId)) {
+                    affected.add(nid);
+                    changed = true;
+                    break;
+                  }
+                }
+              }
+            }
+            return affected;
+          };
+
+          const closure = closureStartRefs(allMeasuresToMove);
+          for (const did of closure) {
+            moveSet0.add(Number(did));
+          }
+        }
+      }
+    } catch {}
+    st.cachedMeasureChain = chain0;
+    st.cachedMeasureIndex = cidx0;
+    st.cachedMeasureMovingIds = moveSet0;
+  }
+
+  _prepareNoteDrag(st, touch = false) {
     const mod = this._module;
     const id = st.noteId, graph = mod?._dependencyGraph;
+    this._decorateAsGroupDrag(st);
+    if (st.groupMode && this.renderer?.setDragOffsetPreview) {
+      st.baselineStartSec = new Map([[id, st.origStartSec]]);
+      return;
+    }
     let dependents;
-    if (st.type === 'move') {
+    if (st.groupMode) {
+      dependents = st.cachedDependents;
+    } else if (touch) {
+      dependents = graph?.getAllStartTimeDependents?.(id) ?? graph?.getAllDependents?.(id);
+    } else if (st.type === 'move') {
       dependents = graph?.getAllStartTimeOnStartTimeDependents?.(id) ??
         graph?.getAllStartTimeDependents?.(id) ?? graph?.getAllDependents?.(id);
     } else {
@@ -2256,7 +2248,6 @@ export class Workspace {
       }
       st.baselineStartSec.set(Number(did), Math.max(0, startSec || 0));
     }
-    this._decorateAsGroupDrag(st);
     this._seedParentCaches(id);
   }
 

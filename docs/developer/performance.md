@@ -374,10 +374,11 @@ rectangle test handles partially visible groups and the vertical bounds.
 
 ### Playback with the entire score visible
 
-The overview still draws every visible note body. At high density the renderer skips controls
-that cannot fit inside their note. When too many controls occupy the view it gives priority to
-the selected and hovered notes. Panning reuses the visible controls until the camera leaves
-their cached bounds. Large groups also reuse their ring geometry between frames.
+The overview draws every visible note body. When more than 1,536 notes intersect the viewport,
+the default detail setting shows controls and labels only for the selected and hovered notes.
+Settings → Appearance lets the user change the count or choose Never. The renderer prunes
+offscreen blocks in both axes and stops counting as soon as the cutoff is exceeded. Large groups
+reuse their ring geometry between frames.
 
 The playback benchmark fits 500,000 notes on a 1280 × 800 viewport, presses Play, and records
 frame intervals and Web Audio scheduling lead. On Edge with an RTX 3080, the previous tracking

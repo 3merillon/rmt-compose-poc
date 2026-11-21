@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+// Run against the dev server: node scripts/perf/check-measure-module-drops.mjs [url]
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+
+const browser = await chromium.launch({ channel: process.env.RMT_BROWSER_CHANNEL || undefined });
+try {
+  const page = await browser.newPage();
+  await page.goto((process.argv[2] || 'http://localhost:3000') + '/?perf=1');
+  await page.waitForFunction(() => window.__rmtRenderer?.instanceCount > 0);
+  const targets = await page.evaluate(() => {
+    const notes = Object.values(window.__rmtWorkspace._module.notes);
+    return [0, notes.find(n => n.id && n.hasExpression('frequency')).id, notes.find(n => n.properties.measure).id];
+  });
+  const phrase = {
+    baseNote: { frequency: '220', startTime: '0', duration: '1' },
+    notes: [
+      { id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f' },
+      { id: 2, startTime: 'base.t + base.d * 2', duration: 'base.d * 4', measure: true },
+      { id: 3, startTime: '[2].t + [2].d / 2', duration: '[2].d', measure: true },
+      { id: 4, startTime: '[2].t + [2].d * 2', duration: '[1].d', measure: true },
+    ],
+  };
+  async function drop(target, data) {
+    const prior = await page.evaluate(async ({ target, data }) => {
+      const mod = window.__rmtWorkspace._module;
+      const max = Math.max(...Object.keys(mod.notes).map(Number));
+      const { eventBus } = await import('/src/utils/event-bus.js');
+      eventBus.emit('player:importModuleAtTarget', { targetNoteId: target, moduleData: data });
+      return max;
+    }, { target, data });
+    await page.waitForFunction(max => window.__rmtWorkspace._module.notes[max + 4], prior);
+    return prior + 1;
+  }
+  const first = await drop(0, phrase);
+  await page.evaluate(async first => {
+    const { eventBus } = await import('/src/utils/event-bus.js');
+    eventBus.emit('workspace:marqueeCommit', { ids: [first, first + 1, first + 2, first + 3] });
+  }, first);
+  await page.click('#group-widget [data-action="copy-to-modules"]');
+  const copy = await page.locator('.icon[data-name="Selection (1 note and 3 measures)"]').evaluate(el => el.moduleData);
+  assert.deepEqual(copy.notes.map(n => !!n.measure), [false, true, true, true]);
+  for (const end of [false, true]) {
+    await page.evaluate(end => document.querySelector(end ? '.library-drop-end-btn' : '.library-drop-start-btn').click(), end);
+    for (const target of targets) {
+      const first = await drop(target, copy);
+      const got = await page.evaluate(({ target, first, end }) => {
+        const mod = window.__rmtWorkspace._module;
+        const anchor = mod.getNoteById(target);
+        const val = (n, key) => Number(n.getVariable(key).valueOf());
+        const t0 = val(anchor, 'startTime') + (end && target !== 0 ? val(anchor, 'duration') : 0);
+        const unit = val(mod.baseNote, 'duration');
+        const notes = [0, 1, 2, 3].map(i => mod.getNoteById(first + i));
+        return {
+          offsets: notes.map(n => (val(n, 'startTime') - t0) / unit),
+          durations: notes.map(n => val(n, 'duration') / unit),
+          parents: notes.slice(1).map(n => n.parentId),
+          flags: notes.map(n => !!n.properties.measure),
+          pitchRatio: val(notes[0], 'frequency') / val(anchor.properties.measure ? mod.baseNote : anchor, 'frequency'),
+        };
+      }, { target, first, end });
+      assert.deepEqual(got.offsets.map(n => Math.round(n * 1e8) / 1e8), [0, 2, 4, 10]);
+      assert.deepEqual(got.durations, [1, 4, 4, 1]);
+      assert.deepEqual(got.parents, [target, first + 1, first + 1]);
+      assert.deepEqual(got.flags, [false, true, true, true]);
+      assert.equal(got.pitchRatio, 1);
+    }
+  }
+  console.log('Mixed note/measure copy passed all six start/end and note/measure/BaseNote drops.');
+} finally {
+  await browser.close();
+}

@@ -22,6 +22,7 @@
  * reloads).
  */
 
+import { MAX_MODULE_NOTES } from '../limits.js';
 import { settingsStore } from './settings-store.js';
 import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.js';
 import { THEME_PRESETS, getPreset } from '../theme/presets.js';
@@ -285,6 +286,40 @@ function buildAppearanceTab(container) {
   container.appendChild(row('Note height', slider('appearance.note.heightWU', 8, 60, 1, (v) => `${v} wu`), 'Bar thickness in world units.'));
   container.appendChild(row('Border thickness', slider('appearance.note.borderPxAtZoom1', 0, 6, 0.5, (v) => `${v} px`)));
   container.appendChild(row('Corner radius', slider('appearance.note.roundedCornerPxAtZoom1', 0, 20, 1, (v) => `${v} px`)));
+  const cutoff = el('input', 'rmt-set-number');
+  cutoff.id = 'rmt-detail-cutoff';
+  cutoff.type = 'number';
+  cutoff.inputMode = 'numeric';
+  cutoff.min = '1';
+  cutoff.max = String(MAX_MODULE_NOTES);
+  cutoff.step = '1';
+  cutoff.required = true;
+  cutoff.addEventListener('change', () => {
+    if (cutoff.reportValidity()) settingsStore.set('appearance.detailCutoff', cutoff.valueAsNumber);
+  });
+  const never = toggle('appearance.neverReduceDetail');
+  never.id = 'rmt-never-reduce-detail';
+  const controls = el('div', 'rmt-set-range');
+  const neverLabel = el('label', '', 'Never');
+  neverLabel.htmlFor = never.id;
+  controls.append(cutoff, never, neverLabel);
+  const detailRow = row('Reduce detail above', controls,
+    'Visible notes. Above this count, only the selected or hovered note keeps its controls and labels.');
+  detailRow.firstElementChild.htmlFor = cutoff.id;
+  detailRow.lastElementChild.id = 'rmt-detail-cutoff-hint';
+  cutoff.setAttribute('aria-describedby', detailRow.lastElementChild.id);
+  const warning = el('div', 'rmt-detail-warning',
+    'Choosing Never can slow down panning, zooming and playback when many notes are visible.');
+  warning.id = 'rmt-never-detail-warning';
+  never.setAttribute('aria-describedby', detailRow.lastElementChild.id + ' ' + warning.id);
+  detailRow.appendChild(warning);
+  const syncCutoff = () => {
+    cutoff.disabled = settingsStore.get('appearance.neverReduceDetail');
+    if (document.activeElement !== cutoff) cutoff.value = settingsStore.get('appearance.detailCutoff');
+  };
+  syncCutoff();
+  addSync(null, syncCutoff);
+  container.appendChild(detailRow);
   container.appendChild(row('Envelope inside notes', select('appearance.envelopes', [
     ['own', 'Notes that set attack or release'],
     ['all', 'Every note'],
@@ -972,6 +1007,8 @@ const SETTINGS_CSS = `
 .rmt-set-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 0;
   border-bottom:1px dotted rgba(var(--rmt-accent-rgb,255,168,0),0.25);}
 .rmt-set-label{flex:1 1 140px;font-size:13px;color:var(--rmt-text-primary,#fff);}
+.rmt-detail-warning{flex-basis:100%;min-width:0;font-size:0.875rem;line-height:1.45;
+  color:var(--rmt-text-primary,#fff);}
 .rmt-set-hint{flex:1 1 100%;font-size:11px;color:var(--rmt-text-secondary,#888);margin-top:-2px;}
 .rmt-set-subhead{margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;
   color:var(--rmt-accent,#ffa800);opacity:.85;}

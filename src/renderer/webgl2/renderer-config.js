@@ -9,6 +9,8 @@
  * - *WU values are world units (pre-transform)
  */
 
+import { DEFAULT_DETAIL_CUTOFF } from '../../limits.js';
+
 export const defaultRendererConfig = {
   // Time/frequency mapping
   scales: {
@@ -33,6 +35,7 @@ export const defaultRendererConfig = {
     // "Envelope inside notes"): 'own' = the notes that set an attack or a release,
     // 'all', 'none'. And whether each note's release is drawn past its end.
     envelopeMode: 'own',
+    detailCutoff: DEFAULT_DETAIL_CUTOFF,
     showTails: false
   },
 

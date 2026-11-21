@@ -102,6 +102,18 @@ const pointOfNote = (page, id) => page.evaluate((id) => {
   return { x: m[0] * cx + m[3] * cy + m[6], y: m[1] * cx + m[4] * cy + m[7] };
 }, id);
 
+// Return reachable note bodies, including after camera motion and widget placement.
+const reachable = (page, ids) => page.evaluate(ids => {
+  const R = window.__rmtRenderer, W = window.__rmtWorkspace, m = R.matrix;
+  return ids.filter(id => {
+    const i = R._noteIdToIndex?.get(Number(id));
+    if (i == null) return false;
+    const o = i * 4, cx = R.posSize[o] + R.posSize[o+2]/2, cy = R.posSize[o+1] + R.posSize[o+3]/2;
+    const x = m[0]*cx + m[3]*cy + m[6], y = m[1]*cx + m[4]*cy + m[7];
+    return Number(W.pickAt(x,y,3)?.id) === id && document.elementFromPoint(x,y)?.closest('.myspaceapp');
+  });
+}, ids);
+
 const selection = (page) => page.evaluate(() => (window.__rmtRenderer.getMultiSelection?.() || []).slice().sort((a, b) => a - b));
 
 const starts = (page, ids) => page.evaluate((ids) => {
@@ -344,7 +356,7 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
 
   // --- shift-click REMOVES a selected note
   await parkGroupWidget(page);          // keep the panel off the notes we are about to click
-  const victim = sel1[0];
+  const [victim] = await reachable(page, sel1);
   const p = await pointOfNote(page, victim);
   await warm(page, p.x, p.y);
   await page.keyboard.down('Shift');
@@ -369,7 +381,7 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
   await shoot(page, '04-shift-click-added-back');
 
   // --- GROUP DRAG: grab a selected note, drag, and prove every selected note moved
-  const dragId = sel3[Math.floor(sel3.length / 2)];
+  const [dragId] = await reachable(page, sel3);
   const dp = await pointOfNote(page, dragId);
   const beforeDrag = await starts(page, sel3);
   const uBefore = await undoDepth(page);
@@ -409,7 +421,8 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
   await shoot(page, '07-plain-click-cleared');
 
   // --- REGRESSION: single-note select + move still work
-  const solo = await pointOfNote(page, sel1[1]);
+  const [soloId] = await reachable(page, sel1);
+  const solo = await pointOfNote(page, soloId);
   await warm(page, solo.x, solo.y);
   await page.mouse.click(solo.x, solo.y);
   await page.waitForTimeout(300);
@@ -417,13 +430,13 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
     document.getElementById('note-widget').classList.contains('visible'));
   check('REGRESSION: single-note click still opens the note widget', noteWidgetUp);
 
-  const t0 = (await starts(page, [sel1[1]]))[sel1[1]].t;
+  const t0 = (await starts(page, [soloId]))[soloId].t;
   await page.mouse.move(solo.x, solo.y);
   await page.mouse.down();
   await page.mouse.move(solo.x + 70, solo.y, { steps: 10 });
   await page.mouse.up();
   await page.waitForTimeout(500);
-  const t1 = (await starts(page, [sel1[1]]))[sel1[1]].t;
+  const t1 = (await starts(page, [soloId]))[soloId].t;
   check('REGRESSION: single-note drag still moves the note',
     Math.abs(t1 - t0) > 1e-3, `${t0.toFixed(3)} -> ${t1.toFixed(3)}`);
 
@@ -541,7 +554,7 @@ console.log('\n== group drag: glyphs follow the notes, and the ghost clamps at t
   //     moving in _dragMovingIds — that set is what shifts the glyph atlas (fraction
   //     labels) and the octave arrows. If it misses group members, the rects move and
   //     the labels stay behind.
-  const grabId = sel[Math.floor(sel.length / 2)];
+  const [grabId] = await reachable(page, sel);
   const gp = await pointOfNote(page, grabId);
   await warm(page, gp.x, gp.y);
   await page.mouse.move(gp.x, gp.y);
@@ -573,7 +586,7 @@ console.log('\n== group drag: glyphs follow the notes, and the ghost clamps at t
   // --- drag the group HARD to the left: the ghost must stop at the base note, not
   //     slide past it and snap back on drop.
   const sel2 = await selection(page);
-  const grab2 = sel2[0];
+  const [grab2] = await reachable(page, sel2);
   const gp2 = await pointOfNote(page, grab2);
   const baseT = await page.evaluate(() =>
     Number(window.__rmtWorkspace._module.baseNote.getVariable('startTime').valueOf()));
@@ -614,8 +627,8 @@ console.log('\n== group drag: glyphs follow the notes, and the ghost clamps at t
   await ctx.close();
 }
 
-// ═════════════════ MEASURE BARS ARE NOT GROUP-SELECTABLE ════════════════════
-console.log('\n== measure bars must stay out of multi-select entirely');
+// ═════════════════ SELECTING MEASURE BARS ════════════════════
+console.log('\n== mixed and measure-only group selections');
 {
   const { ctx, page, errors } = await newPage({ width: 1280, height: 820 });
 
@@ -623,33 +636,9 @@ console.log('\n== measure bars must stay out of multi-select entirely');
     Array.from(window.__rmtRenderer._measureTriIds || []).map(Number));
   console.log(`  module has ${measureIds.length} measure bars: [${measureIds.join(', ')}]`);
 
-  // pickRect over the WHOLE viewport — the widest net there is.
-  const rectHits = await page.evaluate(() => {
-    const R = window.__rmtRenderer;
-    const hits = R.pickRect(0, 0, innerWidth, innerHeight) || [];
-    return { types: [...new Set(hits.map(h => h.type))], ids: hits.map(h => Number(h.id)) };
-  });
-  const rectMeasures = rectHits.ids.filter((id) => measureIds.includes(id));
-  check('pickRect never returns a measure bar',
-    rectMeasures.length === 0 && !rectHits.types.includes('measure'),
-    `types=[${rectHits.types.join(', ')}], measures caught=[${rectMeasures.join(', ')}]`);
-
-  // A real marquee across the whole workspace, which certainly crosses measure bars.
-  await warm(page, 40, 200);
-  await page.keyboard.down('Shift');
-  await page.mouse.move(40, 200);
-  await page.mouse.down();
-  await page.mouse.move(1240, 800, { steps: 14 });
-  await page.mouse.up();
-  await page.keyboard.up('Shift');
-  await page.waitForTimeout(500);
-
-  const sel = await selection(page);
-  const selMeasures = sel.filter((id) => measureIds.includes(id));
-  check('a full-workspace marquee selects notes but NO measure bars',
-    sel.length > 0 && selMeasures.length === 0,
-    `${sel.length} selected, measures among them = [${selMeasures.join(', ')}]`);
-  await shoot(page, '19-marquee-excludes-measures');
+  const hits = await page.evaluate(() => window.__rmtRenderer.pickRect(0, 0, innerWidth, innerHeight));
+  check('the marquee picker includes measures and notes and excludes BaseNote',
+    hits.some(h => h.type === 'measure') && hits.some(h => h.type === 'note') && hits.every(h => Number(h.id) !== 0));
 
   // Find a measure triangle with the SAME picker the click handler uses — deriving its
   // screen box by hand puts it off-viewport and the test silently skips.
@@ -666,19 +655,62 @@ console.log('\n== measure bars must stay out of multi-select entirely');
   if (!mPt) throw new Error('no measure triangle reachable by the picker');
   console.log('  measure triangle at ' + JSON.stringify(mPt));
 
-  // Shift-clicking a measure must do nothing at all.
-  {
-    const before = await selection(page);
-    await warm(page, mPt.x, mPt.y);
-    await page.keyboard.down('Shift');
-    await page.mouse.click(mPt.x, mPt.y);
-    await page.keyboard.up('Shift');
-    await page.waitForTimeout(350);
-    const after = await selection(page);
-    check(`shift-clicking measure bar [${mPt.id}] does NOT add it to the group`,
-      !after.includes(mPt.id) && after.length === before.length,
-      `selection ${before.length} -> ${after.length}`);
-  }
+  const [chain] = await findChains(page);
+  const p = await pointOfNote(page, chain.a);
+  const prior = await starts(page, [chain.a]);
+  await warm(page, p.x, p.y);
+  await page.keyboard.down('Shift');
+  await page.mouse.down();
+  await page.mouse.move(mPt.x, mPt.y, { steps: 12 });
+  check('Shift-drag starting on a note shows a marquee', await page.evaluate(() => !!window.__rmtRenderer._marqueeRect));
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await page.waitForTimeout(350);
+  const sel = await selection(page);
+  check('Shift-drag selects its starting note and a measure', sel.includes(chain.a) && sel.includes(mPt.id), JSON.stringify(sel));
+  check('Shift-drag preserves the starting note', (await starts(page, [chain.a]))[chain.a].raw === prior[chain.a].raw);
+  await shoot(page, '19-marquee-mixed-group');
+  await parkGroupWidget(page);
+  await warm(page, mPt.x, mPt.y);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(mPt.x, mPt.y);
+  await page.keyboard.up('Shift');
+  await page.waitForTimeout(300);
+  check('Shift-click removes a selected measure', !(await selection(page)).includes(mPt.id));
+
+  await emit(page, 'workspace:marqueeCommit', { ids: [1, 2], additive: false });
+  await page.waitForTimeout(200);
+  const vars = await page.locator('#group-widget [aria-label="Variable to change"] option:enabled').evaluateAll(opts => opts.map(o => o.value));
+  check('a measure-only group offers duration editing', vars.length === 1 && vars[0] === 'duration', JSON.stringify(vars));
+  await page.click('#group-widget [data-action="copy-to-modules"]');
+  const copied = await page.evaluate(async () => {
+    const state = JSON.parse(localStorage.getItem('ui-state'));
+    const data = state.categories.flatMap(c => c.modules).filter(m => m.isUploaded).at(-1)?.moduleData;
+    if (!data) return [];
+    const { Module } = await import('/src/module.js');
+    const restored = await Module.loadFromJSON(data);
+    return Object.values(restored.notes).filter(n => n.properties?.measure).map(n => ({
+      id: n.id, raw: n.variables.startTimeString
+    }));
+  });
+  check('copied measures reload with their bar type and internal start link',
+    copied.length === 2 && copied[1].raw.includes(`[${copied[0].id}].t`), JSON.stringify(copied));
+  const before = await starts(page, [1, 2, 3]);
+  const depth = await undoDepth(page);
+  await parkGroupWidget(page);
+  await warm(page, mPt.x, mPt.y);
+  await page.mouse.down();
+  await page.mouse.move(mPt.x + 96, mPt.y, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const after = await starts(page, [1, 2, 3]);
+  const delta = after[1].t - before[1].t;
+  check('dragging a selected measure moves linked bars exactly once in one undo step',
+    Math.abs(delta) > 1e-3 && (await undoDepth(page)) === depth + 1 &&
+    [2, 3].every(i => Math.abs(after[i].t - before[i].t - delta) < 1e-3) &&
+    [2, 3].every(i => after[i].raw === before[i].raw));
+  await emit(page, 'history:undo');
+  await page.waitForTimeout(400);
 
   // REGRESSION: measures must still work exactly as they always did on their own.
   await warm(page, 900, 700);
@@ -729,7 +761,7 @@ console.log('\n== group delete: liberate dependents, keep their positions, one u
   const before = await starts(page, [A, B, C]);
   const uBefore = await undoDepth(page);
 
-  await emit(page, 'workspace:marqueeCommit', { ids: [A, B], additive: false });
+  await emit(page, 'workspace:marqueeCommit', { ids: [1, A, B], additive: false });
   await page.waitForTimeout(250);
   await shoot(page, '10-before-group-delete');
 
@@ -748,7 +780,7 @@ console.log('\n== group delete: liberate dependents, keep their positions, one u
   const after = await starts(page, [A, B, C]);
   const nAfter = await noteCount();
 
-  check('the two selected notes are gone', after[A] === null && after[B] === null,
+  check('the selected measure and notes are gone', (await starts(page, [1]))[1] === null && after[A] === null && after[B] === null,
     `note count ${nBefore} -> ${nAfter}`);
   check('the OUTSIDE dependent C was LIBERATED, not deleted', after[C] !== null,
     after[C] ? `C survives, expr now "${after[C].raw}"` : 'C WAS DELETED');
@@ -775,7 +807,7 @@ console.log('\n== group delete: liberate dependents, keep their positions, one u
   await page.waitForTimeout(700);
   const restored = await starts(page, [A, B, C]);
   check('a single undo restores the whole group',
-    restored[A] !== null && restored[B] !== null &&
+    await page.evaluate(() => window.__rmtWorkspace._module.getNoteById(1)?.properties.measure) && restored[A] !== null && restored[B] !== null &&
     Math.abs(restored[A].t - before[A].t) < 1e-3 && Math.abs(restored[B].t - before[B].t) < 1e-3,
     `A=${restored[A] ? restored[A].t.toFixed(3) : 'gone'} B=${restored[B] ? restored[B].t.toFixed(3) : 'gone'}`);
   await shoot(page, '13-after-undo');
@@ -883,7 +915,7 @@ console.log('\n== mobile 390x844 (touch) — long-press marquee');
   await touch('touchEnd', []);
 
   // 1. REMOVE a note that is in the group
-  const victim = mSel[0];
+  const [victim] = await reachable(page, mSel);
   const afterRemove = await longPressNote(victim);
   check(`long-press REMOVES note ${victim} from the group (was clearing everything)`,
     !afterRemove.includes(victim) && afterRemove.length === mSel.length - 1,
@@ -910,8 +942,8 @@ console.log('\n== mobile 390x844 (touch) — long-press marquee');
     eventBus.emit('workspace:marqueeCommit', { ids: [], additive: false });
   });
   await page.waitForTimeout(300);
-  const notes = await page.evaluate(() => Array.from(window.__rmtRenderer._instanceNoteIds || []).slice(0, 40));
-  const solo = notes.find((n) => n !== 0);
+  const notes = await page.evaluate(() => Array.from(window.__rmtRenderer._instanceNoteIds || []));
+  const [solo] = await reachable(page, notes.filter(n => n !== 0));
   const p = await pointOfNote(page, solo);
   await touch('touchStart', [{ x: p.x, y: p.y }]);
   await page.waitForTimeout(750);
@@ -923,10 +955,18 @@ console.log('\n== mobile 390x844 (touch) — long-press marquee');
     noteWidget: document.getElementById('note-widget').classList.contains('visible'),
     groupWidget: !!document.getElementById('group-widget')?.classList.contains('visible'),
   }));
-  check(`an initial long-press on note ${solo} SELECTS it (one note = normal selection)`,
-    Number(soloState.selectedId) === Number(solo) && soloState.noteWidget && !soloState.groupWidget,
+  check(`an initial long-press on note ${solo} starts an additive touch selection`,
+    soloState.sel === 1 && (await selection(page)).includes(solo) && !soloState.noteWidget && soloState.groupWidget,
     JSON.stringify(soloState));
   await shoot(page, '23-mobile-longpress-initial-select');
+
+  const [second] = await reachable(page, notes.filter(n => n !== solo && n !== 0));
+  const q = await pointOfNote(page, second);
+  await touch('touchStart', [{ x: q.x, y: q.y }]);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(350);
+  const added = await selection(page);
+  check('a quick tap after a long-press adds a second note', added.includes(solo) && added.includes(second), JSON.stringify(added));
 
   // 5. REGRESSION: a quick TAP on a note must still select it normally (not toggle)
   await page.evaluate(async () => {

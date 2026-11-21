@@ -56,9 +56,12 @@ Every control writes to the settings store on change. The store re-validates, pe
 | **Border thickness** | 0–6 px, step 0.5 | 1 px |
 | **Corner radius** | 0–20 px, step 1 | 6 px |
 | **Envelope inside notes** | Notes that set attack or release / Every note / None | Notes that set attack or release |
+| **Reduce detail above** | 1–500,000 visible notes, or Never | 1,536 |
 | **Tails after the note's end** | on / off | off |
 | **Colour pickers** | 15 pickers in three groups | per theme |
 | **Reset colors to theme** | button, disabled when you have no custom colours | — |
+
+Choosing **Never** can slow down panning, zooming and playback when many notes are visible.
 
 The three geometry sliders reshape every note on the canvas live — and picking a theme preset re-seeds them with that preset's declared geometry. The theme dropdown and the colour pickers are covered in full, picker by picker, on [Themes & Appearance](/user-guide/interface/themes).
 

@@ -152,7 +152,64 @@ console.log('\nGroup editing: Set, Inherit, instrument and colour');
   check(json.notes.filter((n) => red.includes(n.id)).every((n) => n.color === 'rgba(10,20,30,0.5)'), 'colour set on the theme, and saved with the module');
   const bars = Object.values(m.notes).filter((n) => n.properties?.measure).map((n) => Number(n.id));
   const r = G.setGroup(m, [0, ...bars, red[0]], 'amplitude', '1/2');
-  check(r.changed.length === 1 && r.changed[0] === red[0], 'the BaseNote and measure bars are never edited by a group action');
+  check(r.changed.length === 1 && r.changed[0] === red[0], 'amplitude applies only to ordinary notes in a mixed group');
+}
+
+{
+  const m = await load();
+  const [bar, nextBar] = Object.values(m.notes).filter(n => n.properties?.measure);
+  const id = ofColor(m, RED)[0];
+  const ids = [bar.id, nextBar.id, id];
+  G.setGroup(m, [bar.id], 'duration', '2');
+  G.setGroup(m, [nextBar.id], 'duration', `[${bar.id}].d`);
+  G.setGroup(m, [id], 'duration', `[${nextBar.id}].d`);
+  const r = G.scaleGroup(m, ids, 'duration', '3/2');
+  m.evaluateModule();
+  check(r.changed.length === 1 && r.changed[0] === bar.id && sameSet(new Set(r.followed), new Set([nextBar.id, id])) &&
+    ids.every(i => X.equals(ex(m, i, 'duration'), new Fraction(3))), 'scaling a bar changes chained bar and note durations exactly once');
+  check(G.relatedNoteIds(m, bar.id, 'dependents', 'd').has(id), 'duration relations traverse bars to their linked notes');
+  const bars = ids.slice(0, 2);
+  const actions = [G.setGroup(m, bars, 'frequency', '440'), G.scaleGroup(m, bars, 'amplitude', '2'),
+    G.inheritGroup(m, bars, 'release'), G.setGroupOnePlayer(m, bars, 'organ'), G.setGroupProperty(m, bars, 'color', RED)];
+  check(actions.every(a => a.changed.length === 0) && bars.every(i => m.getNoteById(i).properties.measure &&
+    !m.getNoteById(i).hasExpression('frequency')), 'note-only actions preserve bars in measure-only groups');
+}
+
+{
+  const m = await load({
+    baseNote: { startTime: '0', duration: '1', frequency: '440' },
+    notes: [
+      { id: 1, startTime: 'base.t + base.d * 2', duration: 'base.d', measure: true },
+      { id: 2, startTime: '[1].d', duration: 'base.d' },
+      { id: 3, startTime: '[1].t * 2', duration: 'base.d' },
+      { id: 4, startTime: '[1].t + base.d * (1/3)', duration: 'base.d' },
+      { id: 5, startTime: '[4].t + [2].d', duration: 'base.d' },
+      { id: 6, startTime: '[3].t + [5].t', duration: 'base.d' },
+      { id: 7, startTime: 'base.t', duration: '[1].t * 3' },
+      { id: 8, startTime: '[7].d', duration: 'base.d' },
+      { id: 9, frequency: '440' },
+      { id: 10, startTime: '2^(1/2) * base.d', duration: 'base.d' },
+      { id: 11, startTime: '[10].t ^ 2', duration: 'base.d' }
+    ]
+  });
+  const ids = [8, 6, 5, 3, 2, 1, 9, 10, 11];
+  const original = new Map(ids.filter(id => id !== 9).map(id => [id, ex(m, id, 'startTime')]));
+  const rider = m.getNoteById(5).getExpressionSource('startTime');
+  const moved = G.translateGroupStarts(m, ids, 0.5);
+  m.evaluateModule();
+  check([...original].every(([id, t]) => X.equals(ex(m, id, 'startTime'), X.add(t, new Fraction(1, 2)))) &&
+    !m.getNoteById(9).hasExpression('startTime'), 'mixed movement accounts for scaled, duration-only, indirect, compound and cross-variable reads');
+  check(!moved.includes(5) && m.getNoteById(5).getExpressionSource('startTime') === rider,
+    'offbeat indirect followers retain their exact authored start expressions');
+  G.translateGroupStarts(m, ids, 0.5);
+  m.evaluateModule();
+  check(m.getNoteById(1).getExpressionSource('startTime').length < 32 &&
+    [...original].every(([id, t]) => X.equals(ex(m, id, 'startTime'), X.add(t, new Fraction(1)))),
+    'repeated drags fold their offsets and remain exact');
+  G.translateGroupStarts(m, ids, -20);
+  m.evaluateModule();
+  check([...original].every(([id, t]) => X.equals(ex(m, id, 'startTime'), X.sub(t, new Fraction(1)))),
+    'left clamp uses the earliest selected start, including duration-only readers');
 }
 
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }

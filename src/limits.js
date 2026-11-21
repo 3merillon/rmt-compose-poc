@@ -7,6 +7,7 @@
  * See "Limits" in docs/developer/performance.md for measurements.
  */
 export const MAX_MODULE_NOTES = 500000;
+export const DEFAULT_DETAIL_CUTOFF = 1536;
 
 /**
  * About 160 bytes of JSON per note of a typical module, with room to spare.

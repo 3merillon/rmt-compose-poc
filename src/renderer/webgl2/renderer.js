@@ -1622,6 +1622,7 @@ export class RendererAdapter {
     const rect = this._marqueeRect;
     if (rect) {
       const hits = this.pickRectIds(rect.x0, rect.y0, rect.x1, rect.y1);
+      if (rect.seedId != null && !hits.includes(rect.seedId)) hits.push(rect.seedId);
       return rect.additive && this._multiSelIds ? [...new Set([...this._multiSelIds, ...hits])] : hits;
     }
     return this._multiSelIds ? Array.from(this._multiSelIds) : [];
@@ -1642,7 +1643,7 @@ export class RendererAdapter {
       const cur = this._marqueeRect;
       const additive = !!rect.additive;
       if (cur && cur.x0 === x0 && cur.y0 === y0 && cur.x1 === x1 && cur.y1 === y1 && cur.additive === additive) return;
-      this._marqueeRect = { x0, y0, x1, y1, additive };
+      this._marqueeRect = { x0, y0, x1, y1, additive, seedId: rect.seedId ?? null };
       this.needsRedraw = true;
     } catch {
       this._marqueeRect = null;
@@ -1654,13 +1655,10 @@ export class RendererAdapter {
    * Rectangle pick in CLIENT CSS px. Returns every NOTE whose bounding box INTERSECTS
    * the rect (containment is not required).
    *
-   * Notes only. The BaseNote (id 0) and measure bars are deliberately never returned:
-   * a measure's startTime is its link in the measure chain, so a group move can neither
-   * re-anchor it (that reflows the grid under the whole score) nor leave it behind (the
-   * group visibly tears on drop). Half-supporting them was worse than not supporting them.
+   * Measures participate through their visible triangle handles.
    */
   pickRect(clientX0, clientY0, clientX1, clientY1) {
-    return this.pickRectIds(clientX0, clientY0, clientX1, clientY1).map(id => ({ type: 'note', id }));
+    return this.pickRectIds(clientX0, clientY0, clientX1, clientY1).map(id => ({ type: this._measureTriIdToIndex?.has(id) ? 'measure' : 'note', id }));
   }
 
   _worldRect(x0, y0, x1, y1) {
@@ -1669,8 +1667,39 @@ export class RendererAdapter {
     return [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)];
   }
 
-  pickRectIds(x0, y0, x1, y1) {
+  _measureRectHits(x0, y0, x1, y1) {
     const hits = [];
+    const css = this._measureTriCss;
+    if (!css) return hits;
+    const ox = this.canvasOffset?.x ?? 0, oy = this.canvasOffset?.y ?? 0;
+    const left = Math.min(x0, x1) - ox, right = Math.max(x0, x1) - ox;
+    const top = Math.min(y0, y1) - oy, bottom = Math.max(y0, y1) - oy;
+    if (!this._measureTriIds?.length || bottom < css[1] || top > css[1] + css[3]) return hits;
+    let first = 0;
+    const count = this._measureTriIds.length;
+    const ordered = !this._dragActive && !this._measurePreview && this.matrix?.[0] > 0;
+    if (ordered) {
+      let end = count;
+      while (first < end) {
+        const mid = Math.floor((first + end) / 2), o = mid * 4;
+        if (css[o] + css[o + 2] < left) first = mid + 1;
+        else end = mid;
+      }
+    }
+    for (let i = first; i < count; i++) {
+      const o = i * 4, x = css[o], y = css[o + 1], w = css[o + 2], h = css[o + 3];
+      if (ordered && x > right) break;
+      if (h <= 0 || bottom < y || top > y + h) continue;
+      // The widest overlapping slice is at the lower edge of the intersection.
+      const center = x + w / 2;
+      const radius = w / 2 * Math.min(1, (bottom - y) / h);
+      if (right >= center - radius && left <= center + radius) hits.push(this._measureTriIds[i]);
+    }
+    return hits;
+  }
+
+  pickRectIds(x0, y0, x1, y1) {
+    const hits = this._measureRectHits(x0, y0, x1, y1);
     if (!this.posSize || !this._instanceNoteIds) return hits;
     const [left, minY, right, maxY] = this._worldRect(x0, y0, x1, y1);
     const ranges = [];
@@ -1700,15 +1729,19 @@ export class RendererAdapter {
     const sel = this._multiSelIds;
     if (!sel || sel.size === 0) {
       this._multiSelNoteIdx = null;
+      this._multiSelMeasureIds = null;
       this._multiSelNoteMapRef = this._noteIdToIndex || null;
       return;
     }
     const noteMap = this._noteIdToIndex || null;
     const noteIdx = [];
+    const measureIds = [];
     for (const id of sel) {
       const i = noteMap?.get(id);
       if (i != null && i >= 0 && i < this.instanceCount) noteIdx.push(i);
+      else measureIds.push(id);
     }
+    this._multiSelMeasureIds = measureIds.length ? measureIds : null;
     this._multiSelNoteIdx = noteIdx.length ? noteIdx : null;
     this._multiSelNoteMapRef = noteMap;
   }
@@ -3042,22 +3075,20 @@ export class RendererAdapter {
     const old = this._visibleRanges || [];
     const m = this.matrix;
     this._detailRanges = ranges;
-    if (!this._rangeIndex || m[1] !== 0 || m[3] !== 0 || !(m[0] > 0)) {
+    const aligned = m[1] === 0 && m[3] === 0 && m[0] > 0 && m[4] > 0;
+    const x0 = (this.canvasOffset.x - m[6]) / m[0], x1 = x0 + vpW / m[0];
+    const y0 = (this.canvasOffset.y - m[7]) / m[4], y1 = y0 + vpH / m[4];
+    const dragPad = Math.abs(this._dragOffsetX || 0) + Math.abs(this._dragOffsetW || 0);
+    if (!this._rangeIndex || !aligned) {
       ranges.length = 0;
       ranges.push(0, this.instanceCount);
     } else {
-      const x0 = (this.canvasOffset.x - m[6]) / m[0];
-      const x1 = x0 + vpW / m[0];
-      // Include the overlay's CSS padding and Float32 shader roundoff at large
-      // coordinates. During previews either the origin or the width can move.
-      const pad = 4 / m[0] + Math.max(Math.abs(x0), Math.abs(x1)) * 1e-6
-        + 2 * (Math.abs(this._dragOffsetX || 0) + Math.abs(this._dragOffsetW || 0));
+      const pad = 4 / m[0] + Math.max(Math.abs(x0), Math.abs(x1)) * 1e-6 + 2 * dragPad;
       this._rangeIndex.collect(x0 - pad, x1 + pad, ranges);
-      let candidates = 0;
-      for (let j = 0; j < ranges.length; j += 2) candidates += ranges[j + 1] - ranges[j];
-      if (m[4] > 0 && candidates >= 512 && (m[0] < 1 || this.currentXScaleFactor < 1 || candidates > 8192)) {
-        this._detailRanges = this._overviewDetailRanges(vpW, vpH, x0, x1);
-      }
+    }
+    const cutoff = this._config.note.detailCutoff;
+    if (aligned && (this.instanceCount > cutoff || this.instanceCount >= 512)) {
+      this._detailRanges = this._viewportDetailRanges(ranges, x0, x1, y0, y1, dragPad, cutoff);
     }
     this._nextVisibleRanges = old;
     this._visibleRanges = ranges;
@@ -3070,43 +3101,35 @@ export class RendererAdapter {
     }
   }
 
-  // Bodies, selection and picking keep the full geometry. At overview scales
-  // only draw controls which fit their note; when they overlap heavily, retain
-  // the selected/hovered controls. Query a margin around the view so following
-  // the playhead can reuse the result without scanning notes on every frame.
-  _overviewDetailRanges(vpW, vpH, x0, x1) {
-    const m = this.matrix, scale = m[0];
-    const y0 = (this.canvasOffset.y - m[7]) / m[4], y1 = y0 + vpH / m[4];
+  // Count intersecting bodies in the actual viewport. Index leaf blocks may
+  // contain offscreen notes, so their slot counts alone cannot decide the cutoff.
+  _viewportDetailRanges(bodyRanges, x0, x1, y0, y1, dragPad, cutoff) {
     let cache = this._overviewDetails;
-    const budget = Math.max(128, Math.min(1024, Math.floor(vpW * vpH / (32 * 24))));
+    const sx = this.matrix[0], sy = this.matrix[4];
     if (!cache || cache.pos !== this._posEpoch || cache.drag !== this._dragEpoch ||
-        cache.sx !== scale || cache.sy !== m[4] || cache.budget !== budget ||
-        x0 < cache.x0 || x1 > cache.x1 || y0 < cache.y0 || y1 > cache.y1) {
-      const padX = (x1 - x0) / 4, padY = (y1 - y0) / 4;
-      cache = this._overviewDetails = {
-        x0: x0 - padX, x1: x1 + padX, y0: y0 - padY, y1: y1 + padY,
-        sx: scale, sy: m[4], pos: this._posEpoch, drag: this._dragEpoch, budget,
-        ranges: [], crowded: false
-      };
-      if (this._cfgNoteH() * 2 * m[4] >= 8) {
-        const blocks = [];
-        const dx = Math.abs(this._dragOffsetX || 0), dw = Math.abs(this._dragOffsetW || 0);
-        this._rangeIndex.collect(cache.x0 - dx - dw, cache.x1 + dx + dw, blocks);
-        let count = 0;
-        for (let j = 0; j < blocks.length && !cache.crowded; j += 2) {
-          for (let i = blocks[j]; i < blocks[j + 1]; i++) {
-            const o = i * 4, p = this.posSize, w = p[o+2] + dw, h = p[o+3];
-            if (w * scale < 10 || h * m[4] < 8 || p[o] - dx > cache.x1 ||
-                p[o] + dx + w < cache.x0 || p[o+1] > cache.y1 || p[o+1] + h < cache.y0) continue;
-            const ranges = cache.ranges;
-            if (ranges.length && ranges[ranges.length - 1] === i) ranges[ranges.length - 1]++;
-            else ranges.push(i, i + 1);
-            // Fragmented painter order would otherwise issue a GL draw per note
-            // in every controls pass, even for a visually very small footprint.
-            if (++count > budget || ranges.length > 256) { cache.crowded = true; break; }
-          }
+        cache.x0 !== x0 || cache.x1 !== x1 || cache.y0 !== y0 || cache.y1 !== y1 ||
+        cache.sx !== sx || cache.sy !== sy || cache.cutoff !== cutoff) {
+      const blocks = this._detailBlocks || (this._detailBlocks = []);
+      if (this._rangeIndex) this._rangeIndex.collect(x0 - dragPad, x1 + dragPad, blocks, y0, y1);
+      const candidates = this._rangeIndex ? blocks : bodyRanges;
+      const ranges = [];
+      let visible = 0;
+      const p = this.posSize;
+      for (let j = 0; j < candidates.length && visible <= cutoff; j += 2) {
+        for (let i = candidates[j]; i < candidates[j + 1]; i++) {
+          const o = i * 4;
+          const shifted = this._dragActive && this._dragFlags?.[i];
+          const x = p[o] + (shifted ? this._dragOffsetX : 0);
+          const w = p[o + 2] + (shifted ? this._dragOffsetW : 0);
+          const y = p[o + 1], h = p[o + 3];
+          if (x >= x1 || x + w <= x0 || y >= y1 || y + h <= y0) continue;
+          if (++visible > cutoff) break;
+          if (ranges.length && ranges[ranges.length - 1] === i) ranges[ranges.length - 1]++;
+          else ranges.push(i, i + 1);
         }
       }
+      cache = this._overviewDetails = { x0, x1, y0, y1, sx, sy, cutoff,
+        pos: this._posEpoch, drag: this._dragEpoch, ranges, crowded: visible > cutoff };
     }
     if (!cache.crowded) return cache.ranges;
     const selected = this._noteIdToIndex?.get(this._lastSelectedNoteId);
@@ -6040,23 +6063,23 @@ const e = startSec + addDx + durSec;
         }
 // Build per-instance drag flags for triangles and update CPU picking CSS to match shader shift
 {
-  const flags = new Float32Array(count);
   const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size) ? this._dragMovingIds : null;
   const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
 
   // CPU picking CSS array mirroring on-screen triangles
-  const triCssPick = new Float32Array(this.measureTriPosSize);
+  const triCssPick = moving ? new Float32Array(this.measureTriPosSize) : this.measureTriPosSize;
 
   const flaggedIdx = [];
   if (moving && this._measureTriIdToIndex) {
     try {
-      for (const id of moving) {
+      const candidates = moving.size < count ? moving : this._measureTriIds;
+      for (const id of candidates) {
+        if (!moving.has(id)) continue;
         const idNum = Number(id);
         const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, idNum));
         if (hasPrev) continue;
         const idx = this._measureTriIdToIndex.get ? this._measureTriIdToIndex.get(idNum) : -1;
         if (idx != null && idx >= 0 && idx < count) {
-          flags[idx] = 1.0;
           flaggedIdx.push(idx);
           // Adjust CPU picking left X to match shader shift
           const o = idx * 4;
@@ -6069,6 +6092,8 @@ const e = startSec + addDx + durSec;
   flaggedIdx.sort((a,b) => a-b);
   const triKey = `${count}|${flaggedIdx.join(',')}`;
   if (this._lastTriFlagsKey !== triKey) {
+    const flags = new Float32Array(count);
+    for (const idx of flaggedIdx) flags[idx] = 1;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flags, gl.DYNAMIC_DRAW);
     this._lastTriFlagsKey = triKey;
@@ -6485,7 +6510,40 @@ try {
       drawTriOutlineAtIndex(idx, [hr[0], hr[1], hr[2], 0.6], this.measureTriPosSizeOutline);
     }
 
-    // (No multi-selection outline for measures: measures are not group-selectable.)
+    const rect = this._marqueeRect;
+    this._ensureMultiSelIndices();
+    const committed = !rect || rect.additive ? this._multiSelMeasureIds : null;
+    if (rect || committed?.length) {
+      const css = this._measureTriCss;
+      let cache = this._measureRingCache;
+      if (!cache || cache.rect !== rect || cache.committed !== committed || cache.css !== css
+          || cache.map !== idToIdx || cache.view !== this._viewEpoch || cache.preview !== this._triPreviewEpoch) {
+        const selected = new Set(rect ? this._measureRectHits(rect.x0, rect.y0, rect.x1, rect.y1) : []);
+        for (const id of committed || []) selected.add(id);
+        const entries = [];
+        for (const id of selected) {
+          const i = idToIdx?.get(id);
+          if (i == null) continue;
+          const o = i * 4;
+          entries.push(css[o] - 1, css[o + 1] - 1, css[o + 2] + 2, css[o + 3] + 2);
+        }
+        cache = this._measureRingCache = { rect, committed, css, map: idToIdx, view: this._viewEpoch,
+          preview: this._triPreviewEpoch, boxes: new Float32Array(entries) };
+      }
+      const boxes = cache.boxes;
+      if (boxes.length) {
+        gl.uniform4fv(uColD, this._multiSelRingRgba());
+        // Picking boxes already carry the live drag offset.
+        gl.uniform1f(this._uniforms.measureTriOutline.u_dragCssX, 0);
+        gl.bindVertexArray(this.measureTriVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, boxes, gl.DYNAMIC_DRAW);
+        gl.disableVertexAttribArray(2);
+        gl.drawArraysInstanced(gl.LINE_LOOP, 0, 3, boxes.length / 4);
+        gl.enableVertexAttribArray(2);
+        gl.bindVertexArray(null);
+      }
+    }
   }
 } catch {}
 

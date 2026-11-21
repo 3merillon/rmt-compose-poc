@@ -111,6 +111,7 @@ class ThemeManager {
       // Not a preset property: a view choice that travels with the note geometry
       // because it changes the note rects sync() builds.
       envelopeMode: ['own', 'all', 'none'].includes(appearance.envelopes) ? appearance.envelopes : 'own',
+      detailCutoff: appearance.neverReduceDetail ? Infinity : appearance.detailCutoff,
       showTails: appearance.showTails === true,
     };
     return { id: preset.id, tokens, geometry };
@@ -165,6 +166,7 @@ class ThemeManager {
           borderPxAtZoom1: geometry.borderPxAtZoom1,
           roundedCornerPxAtZoom1: geometry.roundedCornerPxAtZoom1,
           envelopeMode: geometry.envelopeMode,
+          detailCutoff: geometry.detailCutoff,
           showTails: geometry.showTails,
         },
         ...(playRgba ? { playhead: { color: playRgba } } : {}),

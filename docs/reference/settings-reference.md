@@ -21,6 +21,8 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `appearance.note.borderPxAtZoom1` | number | `1` | 0 – 6, step 0.5 | Border thickness |
 | `appearance.note.roundedCornerPxAtZoom1` | number | `6` | 0 – 20, step 1 | Corner radius |
 | `appearance.envelopes` | string | `'own'` | `own`, `all`, `none` | Envelope inside notes (an older boolean `showEnvelopes: true` reads as `all`) |
+| `appearance.detailCutoff` | integer | `1536` | 1–500,000 | Reduce detail above |
+| `appearance.neverReduceDetail` | boolean | `false` | — | Never reduce detail by note count |
 | `appearance.showTails` | boolean | `false` | — | Tails after the note's end |
 | `arrows.enabled` | boolean | `true` | — | Show note arrows |
 | `arrows.mode` | string | `'reciprocal'` | `reciprocal`, `independent` | Arrow mode |
@@ -64,6 +66,7 @@ Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate
 | **Border thickness** | slider, `N px` | 0 – 6, step 0.5 | 1 px | — |
 | **Corner radius** | slider, `N px` | 0 – 20, step 1 | 6 px | — |
 | **Envelope inside notes** | select | Notes that set attack or release / Every note / None | Notes that set attack or release | "The envelope each note sounds with, drawn inside it on a loudness (dB) scale: its own attack and release, else its instrument's." |
+| **Reduce detail above** | number + Never checkbox | 1–500,000 visible notes or Never | 1,536 | Above this count, controls and labels appear only for the selected or hovered note. Never keeps details wherever they fit. |
 | **Tails after the note's end** | toggle | on / off | off | "Draws the release that rings after each note's end, as a key lifted or a bow leaving the string. Display only: picking, dragging and snapping use the note itself." |
 | **Reset colors to theme** | button | — | — | Disabled while you have no overrides |
 

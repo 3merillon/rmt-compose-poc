@@ -53,7 +53,7 @@ const GROUP_ACTIONS = [
   {
     id: 'copy-to-modules',
     label: 'Copy to Modules',
-    hint: 'Saves the selection as a module in the library’s Custom section, rooted at its earliest note and keeping the tree intact.',
+    hint: 'Saves the selection as a module in the library’s Custom section, rooted at its earliest timed item and keeping the tree intact.',
     handler: (ctx) => {
       if (typeof ctx.callbacks.onCopyToModules === 'function') ctx.callbacks.onCopyToModules();
       // Non-destructive: keep the selection so the user can copy, then keep working
@@ -64,7 +64,7 @@ const GROUP_ACTIONS = [
     id: 'delete-all',
     label: 'Delete all',
     danger: true,
-    hint: 'Dependent notes are liberated, not deleted — they keep their positions.',
+    hint: 'Dependent notes and measures keep their positions.',
     handler: confirmDeleteAll,
   },
 ];
@@ -81,6 +81,15 @@ let built = false;      // listeners + actions wired exactly once
 let placed = false;     // has it been given its first position?
 
 let count = 0;
+let measureCount = 0;
+
+export function selectionLabel(total, measures) {
+  const notes = total - measures;
+  const parts = [];
+  if (notes || !measures) parts.push(`${notes} note${notes === 1 ? '' : 's'}`);
+  if (measures) parts.push(`${measures} measure${measures === 1 ? '' : 's'}`);
+  return parts.join(' and ');
+}
 // The caller (player.js) owns the selection; we only hold its callbacks.
 const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null, onGroupEdit: null };
 let instrumentSelect = null;   // filled from the caller's instrument list
@@ -104,7 +113,7 @@ const CHANGE_HINT = {
   attack: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
   release: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
   frequency: '× transposes: each note not read from another selected note is multiplied, the others follow, so the group keeps its intervals.',
-  duration: '× changes every length by the ratio; notes that begin where another ends move with it.',
+  duration: 'Set or scale the length of selected notes and measures. Items linked to their ends follow.',
 };
 
 // ---- public API ---------------------------------------------------------
@@ -123,7 +132,7 @@ const CHANGE_HINT = {
  *        apply one edit to the selection: op 'set' | 'scale' | 'inherit' | 'instrument' | 'color'
  * @param {string[]} o.instruments  the instruments the INSTRUMENT list offers
  */
-export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = null, onCopyToModules = null, onGroupEdit = null, instruments = null } = {}) {
+export function showGroupWidget({ count: n = 0, measureCount: bars = 0, onDeleteAll = null, onClear = null, onCopyToModules = null, onGroupEdit = null, instruments = null } = {}) {
   if (!ensureRoot()) return;
 
   callbacks.onCopyToModules = onCopyToModules;
@@ -131,7 +140,7 @@ export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = nu
   if (Array.isArray(instruments)) fillInstruments(instruments);
   callbacks.onDeleteAll = onDeleteAll;
   callbacks.onClear = onClear;
-  setCount(n);
+  setCount(n, bars);
 
   root.classList.add('visible');
   if (!placed) { placeDefault(); placed = true; }
@@ -152,9 +161,9 @@ export function hideGroupWidget() {
  * A count of 0 means the selection is gone: the widget hides itself rather than
  * offering actions on nothing.
  */
-export function updateGroupWidgetCount(n) {
+export function updateGroupWidgetCount(n, bars = 0) {
   if (!root) return;
-  setCount(n);
+  setCount(n, bars);
   if (count === 0) { hideGroupWidget(); return; }
   if (isGroupWidgetVisible()) fitHeight();
 }
@@ -171,15 +180,12 @@ export function isGroupWidgetVisible() {
 function confirmDeleteAll(ctx) {
   const n = ctx.count;
   if (n <= 0) return;
-  const plural = n === 1 ? '' : 's';
+  const description = selectionLabel(n, measureCount);
   showConfirmation({
     messageHtml:
-      `Delete <span style='color: var(--rmt-danger, #ff0000);'>${n} selected note${plural}</span>? `
-      + `Notes that depend on them will be <span style='color: var(--rmt-accent, #ffa800);'>liberated</span> `
-      + `(their expressions are inlined so they keep their positions). `
-      + `This action is <span style='color: var(--rmt-danger, #ff0000);'>irreversible</span>, `
-      + `are you sure you wish to proceed?`,
-    confirmLabel: `Yes, Delete ${n} Note${plural}`,
+      `Delete <span style='color: var(--rmt-danger, #ff0000);'>${description}</span>? `
+      + 'Items that depend on this selection keep their positions.',
+    confirmLabel: `Yes, Delete ${description}`,
     onConfirm: () => {
       if (typeof ctx.callbacks.onDeleteAll === 'function') ctx.callbacks.onDeleteAll();
       // The notes are gone, so the selection is too — never leave a stale count
@@ -198,11 +204,25 @@ function clearSelection() {
 
 // ---- DOM ----------------------------------------------------------------
 
-function setCount(n) {
-  count = Math.max(0, Number(n) || 0);
-  if (countEl) countEl.textContent = String(count);
-  if (labelEl) labelEl.textContent = count === 1 ? 'note selected' : 'notes selected';
-  if (root) root.setAttribute('aria-label', `${count} notes selected`);
+function setCount(n, bars) {
+  count = n;
+  measureCount = bars;
+  const description = selectionLabel(count, measureCount);
+  const space = description.indexOf(' ');
+  countEl.textContent = description.slice(0, space);
+  labelEl.textContent = description.slice(space + 1) + ' selected';
+  root.setAttribute('aria-label', description + ' selected');
+
+  const onlyMeasures = count > 0 && count === measureCount;
+  const variable = bodyEl.querySelector('[data-section="change"] select');
+  for (const option of variable.options) option.disabled = onlyMeasures && option.value !== 'duration';
+  if (variable.selectedOptions[0]?.disabled) {
+    variable.value = 'duration';
+    variable.dispatchEvent(new Event('change'));
+  }
+  for (const section of bodyEl.querySelectorAll('[data-section="instrument"], [data-section="color"]')) {
+    section.hidden = onlyMeasures;
+  }
 }
 
 function ensureRoot() {
