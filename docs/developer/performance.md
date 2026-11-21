@@ -15,10 +15,47 @@ the numbers yourself.
 
 ## The measured picture
 
-**Setup for every number below:** headless Chromium via Playwright (`--use-angle=default
---enable-gpu`), viewport 1600×900, against the Vite dev server on a fast Windows desktop. The
-frame budget for 60 fps is **16.6 ms**. Your machine will differ; the *shape* of the curve is what
-matters.
+The large-score measurements use headless Microsoft Edge driven by Playwright on Windows,
+with a 1600×900 viewport and local Vite servers. The earlier rendering benchmarks used
+Chromium with `--use-angle=default --enable-gpu`. A 60 fps frame budget is **16.7 ms**.
+
+### Large modules after the editing pass
+
+The same headless Edge harness ran against the starting revision (`c14d112`) and
+the finished pass on local Vite servers. Each size loaded in a new browser context.
+Load ends on the animation frame after the first instanced GL draw. Heap is in decimal
+MB after autosave and a full GC. Undo and redo include two animation callbacks after
+the history restore. The edit handler returns before the deferred IndexedDB write.
+
+The two revisions matched at all 26 steps on the default module, `chain-1000`,
+`voices-5000` and `hub-5000`. Comparisons covered exact evaluation records, both
+history stacks, autosave text and the renderer's CPU and GPU buffers. All 39 canvas
+scenes were pixel-identical, including active move and resize previews.
+
+| Workload | 100,000 notes | 250,000 notes | 500,000 notes |
+|---|---:|---:|---:|
+| Fetch through first drawn frame | 3.22 s → 2.69 s | 7.10 s → 5.52 s | 14.50 s → 12.18 s |
+| Retained JS heap after full GC | 237 MB → 211 MB | 538 MB → 477 MB | 1,063 MB → 938 MB |
+| Warm octave edit, synchronous handler | 87 ms → 2 ms | 207.9 ms → 2.9 ms | 532.6 ms → 3.6 ms |
+| Undo through restored frame | 2.70 s → 31 ms | 7.01 s → 64 ms | 14.97 s → 122 ms |
+| Redo through restored frame | 2.63 s → 40 ms | 6.64 s → 84 ms | 16.17 s → 138 ms |
+| Stationary redraw, CPU | 16.5 ms → 1.8 ms | 41 ms → 2.8 ms | 94.2 ms → 2.9 ms |
+| Pan frame interval | 64.4 ms → 8.4 ms | 184.6 ms → 8.8 ms | 390.5 ms → 8 ms |
+
+CDP pointer recordings used a chain with about 200 descendants and a hub with 4,999
+direct dependents. Drag figures are the median for 15 real pointer moves. Selection
+and drop include two animation callbacks. These elapsed times include browser input
+dispatch and drawing.
+
+| Gesture | 100,000 notes | 250,000 notes | 500,000 notes |
+|---|---:|---:|---:|
+| Chain drag, pointer move | 25 → 12 ms | 70 → 10 ms | 107 → 13 ms |
+| Chain drop | 661 → 83 ms | 2,099 → 161 ms | 3,833 → 311 ms |
+| Hub selection | 718 → 101 ms | 1769 → 107 ms | 3936 → 132 ms |
+| Hub drag, pointer move | 43 → 20 ms | 76 → 18 ms | 122 → 25 ms |
+| Hub drop | 655 → 195 ms | 1742 → 264 ms | 3756 → 508 ms |
+| Hover frame | 17 → 8 ms | 43 → 8 ms | 91 → 8 ms |
+| Marquee move, 12 notes hit | 25 → 8 ms | 63 → 8 ms | 109 → 9 ms |
 
 ### Render scaling — `bench-render.mjs`
 
@@ -43,21 +80,22 @@ took 1.77 / 3.94 s to select its anchor, 76 / 122 ms per move and 1.74 / 3.76 s
 to drop it. Selection and drop include two animation callbacks. These are
 elapsed times in one browser run, including the cost of profiling.
 
-The load profile at 500k attributed 29% of non-idle time to compilation
-(including its callees), 20% to dependency registration and 8% to evaluation.
-Undo and redo repeated compilation and registration. The largest costs during
-panning were in the note overlays, including rebuilding and uploading the
-tab and arrow regions. The add-note form's `refreshEvaluations` also appeared
-on selection and drop. Each field built a new cache of every variable of every note.
+The baseline CPU profiles attribute the following shares of non-idle sample time.
+Shares include callees and can overlap. Gesture recordings include pointer dispatch
+and drawing. Each add-note preview field built its own cache of every note variable.
 
-At 500k, `sync` accounted for 50% of non-idle samples in the commit recording,
-including time in `toNumber`. During undo, compilation took 24% and dependency
-registration 19%. Compilation accounted for 23% during redo. During a chain or
-hub drop the note widget's preview evaluation took 29%. Selecting the hub spent
-34% in `sync`. The render loop took 34% during hover and 35% during marquee,
-while the player's end-time lookup took 8% and 16% respectively. These percentages
-include callees and overlap. The gesture recordings include pointer dispatch and
-the frames drawn during the gesture.
+| Baseline operation | Function or pass | 250,000 | 500,000 |
+|---|---|---:|---:|
+| Load | Compile / register dependencies / evaluate | 30 / 19 / 7% | 29 / 20 / 8% |
+| Octave commit | Renderer sync, including numeric conversion | 49% | 50% |
+| Undo | Compile / register dependencies | 26 / 19% | 24 / 19% |
+| Redo | Compile | 26% | 23% |
+| Redraw / pan | Note overlays, including tab and arrow regions | 7 / 22% | 8 / 24% |
+| Chain / hub drag | Renderer frame loop | 37 / 42% | 35 / 39% |
+| Chain / hub drop | Add-note form's `refreshEvaluations` | 32 / 28% | 29 / 29% |
+| Hub selection | Renderer sync | 37% | 34% |
+| Hover / marquee | Renderer frame loop | 32 / 34% | 34 / 35% |
+| Hover / marquee | Player end-time lookup | 6 / 20% | 8 / 16% |
 
 The add-note form now reads the explicit references of the compiled preview
 expression and the BaseNote for inherited values. The text and tooltips for
@@ -298,6 +336,17 @@ ring.
 With the 4,999-dependent hub selected, the median real pointer move fell from 34.2 to
 19.9 ms at 100k, 46.5 to 20.0 ms at 250k and 42.1 to 25.3 ms at 500k.
 The run includes pointer dispatch and drawing the dependency lines.
+
+A single-note drop also looks for a note ending at the new start. The first lookup
+records the minimum and maximum ends in blocks of 128 IDs. Later drops recalculate
+the blocks affected by intervening evaluations and inspect candidates in the matching
+blocks. They use the original landing tolerance, cycle check and parent tie-break.
+The first lookup measured 36 → 28, 73 → 78 and 158 → 142 ms at 100k, 250k and
+500k. The median of subsequent lookups with edits between them fell from 23 to
+0.9 ms, 57 to 1.1 ms and 140 to 1.0 ms. All 27 landing targets matched.
+For repeated chain moves through the workspace drop handler, time to the displayed frame
+fell from 53 to 33 ms, 136 to 57 ms and 263 to 104 ms. The handler itself took
+5.7, 6.3 and 6.6 ms respectively. Both builds wrote the same follow expressions.
 
 Ring colours (`renderer.js:3282-3300`) are property-specific — orange = frequency, teal = startTime,
 purple = duration — and dim the properties a drag is *not* changing. Parent-chain rings are drawn at
@@ -617,6 +666,7 @@ node scripts/perf/converge.mjs
 |---|---|
 | **Incremental sync for complex scenes** | Stable body slots and partial GPU uploads ship for ordinary edits. Scenes with rests, envelopes, tails or corruption use the full synchronization path. |
 | **Structural undo** | Ordinary expression edits share history pages and restore changed records. Undo across a topology change still uses the full loader. |
+| **Drop target search** | The first single-note drop builds the time ranges. Structural edits and an expired evaluation journal rebuild them. Overlapping ranges can still require inspecting much of a score. |
 | **GPU picking** | **Not shipped.** `picking.js` is a self-described scaffold: no ID pass is ever drawn, `begin()`/`end()` have zero call sites, and `Workspace.pickAt` tries `pickAllAt()` first (which always exists), so the GPU branch is unreachable. All picking is CPU-side. |
 | **Measure-triangle outline batching** | Intentionally skipped — bounded by measure count M ≪ N. |
 | **Spatial index for picking** | Not warranted by measurement. |
@@ -679,9 +729,11 @@ Two limits come before it:
   can still scale with the score. A deferred save copies the full string into IndexedDB.
 
 After an octave edit to the 500,000-note fixture, writing and reading back the single
-IndexedDB value took 403 ms. Its 78,865,576 characters matched a fresh serialization,
-and a page reload restored the edited expression. The name, expressions and other text in an arbitrary module can
-change its byte length. The measurements support keeping the 500,000-note and 120 MB caps.
+IndexedDB value took 399–403 ms across two runs. Its 78,865,576 characters matched a fresh serialization,
+and a page reload restored the edited expression. The loaded application retained about
+938 decimal MB after GC, or 1.88 kB per note on this fixture. The name, expressions and
+other text in an arbitrary module can change the byte length of its autosave. The
+measurements support keeping the 500,000-note and 120 MB caps.
 
 The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
 localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored

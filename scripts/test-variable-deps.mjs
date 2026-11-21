@@ -660,5 +660,33 @@ console.log('\nG. A note dragged exactly to the end of another follows it\n');
     'G6 written [3].t + [3].d, it evaluates to exactly 1 s, and note 5 follows it');
 }
 
+{
+  const { findFollowedNote } = await import('../src/utils/followed-note.js');
+  const mod = await Module.loadFromJSON({
+    baseNote: { frequency: '440', startTime: '0', duration: '1' },
+    notes: [
+      { id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f' },
+      { id: 2048, startTime: '100 * base.d', duration: 'base.d' },
+      { id: 4100, startTime: '100 * base.d', duration: 'base.d', frequency: 'base.f' },
+    ],
+  });
+  const find = time => findFollowedNote(mod, mod.notes[1], time)?.id ?? null;
+  check(find(101) === 2048, 'G7 a rest is eligible and the lowest ID breaks an equal-start tie across blocks');
+  mod.notes[2048].setVariable('durationString', '7 * base.d');
+  check(find(101) === 4100 && find(107) === 2048, 'G8 a cached range expands and its old match disappears');
+  mod.notes[2048].setVariable('startTimeString', '51 * base.d');
+  check(find(107) === null && find(58.00005) === 2048 && find(58.00007) === null,
+    'G9 shrinking a range preserves the original landing tolerance at its boundary');
+  mod.removeNote(2048);
+  check(find(58) === null, 'G10 removing the only note in a sparse block removes its match');
+  const added = mod.addNote({ startTimeString: '200 * base.d', durationString: 'base.d', frequencyString: 'base.f' });
+  check(find(201) === added.id, 'G11 an added note is reachable in the rebuilt index');
+  for (let i = 0; i < 10; i++) {
+    added.setVariable('durationString', (i + 2) + ' * base.d');
+    mod.evaluateModule();
+  }
+  check(find(211) === added.id && find(201) === null, 'G12 a gap in the evaluation journal rebuilds drop ranges');
+}
+
 console.log(`\n${failures ? `${failures} failure(s).` : 'All variable-dependency checks passed.'}`);
 process.exit(failures ? 1 : 0);

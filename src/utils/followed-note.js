@@ -15,6 +15,67 @@ import { compiler } from '../expression-compiler.js';
 import { findDependencyCycle } from '../variable-deps.js';
 import { toNumber } from './fraction-num.js';
 
+// A drop compares the separately converted start and duration used by the snap
+// rule. Store only the range of those ends for each occupied block of IDs.
+const RANGE_SIZE = 128;
+const endRanges = new WeakMap();
+
+function* candidates(module, landing, tolerance) {
+  if (typeof module.evaluationChangesSince !== 'function') {
+    yield* Object.keys(module.notes);
+    return;
+  }
+  const values = module.getEvaluationCache();
+  let index = endRanges.get(module);
+  if (index?.revision !== module._evaluationRevision) {
+    const dirty = index && module.evaluationChangesSince(index.revision);
+    const blocks = dirty ? index.blocks : new Map();
+    const include = (id, block) => {
+      const note = module.notes[id];
+      if (!note) return;
+      const record = note.module === module ? values.get(note.id) : null;
+      const duration = toNumber(record?.duration ?? note.getVariable('duration'), 0);
+      if (!(duration > 0)) return;
+      const end = toNumber(record?.startTime ?? note.getVariable('startTime'), NaN) + duration;
+      if (!Number.isFinite(end)) return;
+      const range = blocks.get(block);
+      if (range) {
+        if (end < range.min) range.min = end;
+        if (end > range.max) range.max = end;
+      } else blocks.set(block, { min: end, max: end });
+    };
+    if (dirty) {
+      const touched = new Set();
+      for (const id of dirty) touched.add(Math.floor(id / RANGE_SIZE));
+      for (const block of touched) {
+        blocks.delete(block);
+        const first = block * RANGE_SIZE;
+        for (let id = first; id < first + RANGE_SIZE; id++) include(id, block);
+      }
+    } else {
+      for (const key in module.notes) {
+        const id = Number(key);
+        // Programmatic callers can supply aliased notes or nonnumeric keys.
+        // Such objects have no stable ID block or local evaluation revision.
+        if (!Number.isSafeInteger(id) || id < 0 || String(id) !== key ||
+            module.notes[key]?.id !== id || module.notes[key].module !== module) {
+          endRanges.delete(module);
+          yield* Object.keys(module.notes);
+          return;
+        }
+        include(id, Math.floor(id / RANGE_SIZE));
+      }
+    }
+    index = { revision: module._evaluationRevision, blocks };
+    endRanges.set(module, index);
+  }
+  for (const [block, range] of index.blocks) {
+    if (range.min - landing > tolerance || landing - range.max > tolerance) continue;
+    const first = block * RANGE_SIZE;
+    for (let id = first; id < first + RANGE_SIZE; id++) yield id;
+  }
+}
+
 /** The start expression that follows note `id`. */
 export const followExpr = (id) => `[${id}].t + [${id}].d`;
 
@@ -31,7 +92,7 @@ export function findFollowedNote(module, note, newStartSec, currentParent = null
     if (!note?.variables?.startTimeString) return null;
     const tol = 1e-6 * Math.max(1, Math.abs(newStartSec));
     let best = null, bestStart = -Infinity;
-    for (const idStr in module.notes) {
+    for (const idStr of candidates(module, newStartSec, tol)) {
       const id = Number(idStr);
       if (id === 0 || id === note.id) continue;
       const p = module.notes[idStr];
