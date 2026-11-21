@@ -121,7 +121,7 @@ async function initApp() {
     // Perf harness (dev tool): only loaded with ?perf=1 in the URL
     try {
         if (new URLSearchParams(location.search).has('perf')) {
-            await import('./dev/perf-harness.js');
+            await import('./dev/perf-harness.ts');
         }
     } catch (e) {
         console.warn('perf harness failed to load', e);

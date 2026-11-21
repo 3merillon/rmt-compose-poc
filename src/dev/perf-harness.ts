@@ -21,17 +21,22 @@
  * into public/modules/perf/.
  */
 
+import type { EvaluationCache, EvaluationRecord } from '../model-types.ts';
+import type { Module } from '../module.ts';
+import type { Workspace } from '../renderer/webgl2/workspace.js';
+import type { RendererAdapter } from '../renderer/webgl2/renderer.js';
+import type { AppEvents } from '../utils/event-bus.ts';
 import { getModule, getEvaluatedNotes } from '../store/app-state.js';
 import { eventBus } from '../utils/event-bus.js';
 import { replaceSavedModule, clearSavedModule } from '../store/autosave.js';
 
 
-function percentile(sorted, p) {
+function percentile(sorted: number[], p: number) {
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
   return sorted[idx];
 }
 
-function stats(samples) {
+function stats(samples: number[]) {
   const s = [...samples].sort((a, b) => a - b);
   return {
     'p50 (ms)': +percentile(s, 50).toFixed(2),
@@ -48,23 +53,23 @@ function requireModule() {
   return mod;
 }
 
-function noteCount(mod) {
+function noteCount(mod: Module) {
   return Object.keys(mod.notes).length;
 }
 
-function evaluatorName(mod) {
+function evaluatorName(mod: Module) {
   return mod?._binaryEvaluator?.constructor?.name || 'unknown';
 }
 
-function pickMidNoteId(mod) {
+function pickMidNoteId(mod: Module) {
   const ids = Object.keys(mod.notes).map(Number).filter((id) => id !== 0).sort((a, b) => a - b);
   return ids[Math.floor(ids.length / 2)];
 }
 
-async function loadStress(name) {
+async function loadStress(name: string) {
   const res = await fetch(`modules/perf/${name}.json`);
   if (!res.ok) throw new Error(`[perf] fetch failed for ${name}: ${res.status}`);
-  const data = await res.json();
+  const data: { notes: unknown[] } = await res.json();
   // The autosave (src/store/autosave.js) opens it after the reload
   await replaceSavedModule(JSON.stringify(data));
   console.log(`[perf] snapshot set to ${name} (${data.notes.length} notes); reloading…`);
@@ -92,13 +97,13 @@ function measureEval(iterations = 10) {
   return result;
 }
 
-function measureCommit(iterations = 10, noteId = null) {
+function measureCommit(iterations = 10, noteId: number | null = null) {
   const mod = requireModule();
   const id = noteId ?? pickMidNoteId(mod);
   const samples = [];
   // Pair up/down so the module ends unchanged (history gains entries).
   for (let i = 0; i < iterations; i++) {
-    for (const direction of ['up', 'down']) {
+    for (const direction of ['up', 'down'] as const) {
       const t0 = performance.now();
       eventBus.emit('player:octaveChange', { noteId: id, direction });
       samples.push(performance.now() - t0);
@@ -118,7 +123,7 @@ function requireRenderer() {
 // Pick the note whose selection lights up the MOST dependency-highlight rings
 // (i.e. the most-connected hub). This is the worst case for the per-instance
 // ring pass (renderer.js drawIdxList) that Phase 8 batches.
-function pickHubNoteId(mod) {
+function pickHubNoteId(mod: Module) {
   let bestId = 0, bestCount = -1;
   const ids = Object.keys(mod.notes).map(Number);
   for (const id of ids) {
@@ -136,7 +141,7 @@ function pickHubNoteId(mod) {
 // Time renderer.sync() in isolation (item build + corruption pass + fraction
 // labels + GPU upload). This is the per-commit CPU cost the Phase 8 sync fixes
 // target. Reconstructs sync args from app-state + the renderer's own scale.
-function measureSync(iterations = 20, selectedNoteId = null) {
+function measureSync(iterations = 20, selectedNoteId: number | null = null) {
   const mod = requireModule();
   const r = requireRenderer();
   const ev = getEvaluatedNotes();
@@ -163,7 +168,7 @@ function measureSync(iterations = 20, selectedNoteId = null) {
 // Time a full GL redraw (_render) with a note selected, so the per-instance
 // dependency-ring + measure-tri outline passes are hot. Pass a hub note id to
 // hit the worst case.
-function measureRedraw(iterations = 30, selectedNoteId = null) {
+function measureRedraw(iterations = 30, selectedNoteId: number | null = null) {
   const mod = requireModule();
   const r = requireRenderer();
   const ev = getEvaluatedNotes();
@@ -217,22 +222,23 @@ const PASSES = [
   '_flushGlyphRunsAtlas',
   '_renderDependencyLinesAndDragOverlay',
   '_renderOctaveGuides'
-];
+] as const;
+type TimedPass = typeof PASSES[number];
 
-function profileFrame(iterations = 30, selectedNoteId = null) {
+function profileFrame(iterations = 30, selectedNoteId: number | null = null) {
   const mod = requireModule();
   const r = requireRenderer();
-  const totals = Object.create(null);
-  const originals = Object.create(null);
+  const totals: Partial<Record<TimedPass, number>> = Object.create(null);
+  const originals: Partial<Record<TimedPass, () => void>> = Object.create(null);
 
   for (const name of PASSES) {
     if (typeof r[name] !== 'function') continue;
     const orig = r[name].bind(r);
     originals[name] = r[name];
     totals[name] = 0;
-    r[name] = function (...args) {
+    r[name] = function () {
       const t0 = performance.now();
-      try { return orig(...args); } finally { totals[name] += performance.now() - t0; }
+      try { return orig(); } finally { totals[name]! += performance.now() - t0; }
     };
   }
 
@@ -245,7 +251,7 @@ function profileFrame(iterations = 30, selectedNoteId = null) {
       selectedNoteId
     });
     r.needsRedraw = true; r._render(); // warm
-    for (const k of Object.keys(totals)) totals[k] = 0;
+    for (const k of Object.keys(totals) as TimedPass[]) totals[k] = 0;
 
     for (let i = 0; i < iterations; i++) {
       r.needsRedraw = true;
@@ -254,10 +260,10 @@ function profileFrame(iterations = 30, selectedNoteId = null) {
       total += performance.now() - t0;
     }
   } finally {
-    for (const name of Object.keys(originals)) r[name] = originals[name];
+    for (const name of Object.keys(originals) as TimedPass[]) r[name] = originals[name]!;
   }
 
-  const rows = {};
+  const rows: Record<string, { 'ms/frame': number }> = {};
   let accounted = 0;
   for (const [name, ms] of Object.entries(totals)) {
     accounted += ms;
@@ -301,17 +307,21 @@ function getEvaluatedNotesRef() {
 }
 
 // Dev-only escape hatch to drive eventBus flows (octaveChange, undo/redo) from automation.
-function emit(ev, payload) { return eventBus.emit(ev, payload); }
-function noteFreq(id) {
+function emit<K extends keyof AppEvents>(ev: K, ...args: AppEvents[K]) { return eventBus.emit(ev, ...args); }
+function cachedEvaluation(ev: EvaluationCache | Record<number, EvaluationRecord> | null, id: number) {
+  if (!ev) return undefined;
+  return 'get' in ev && typeof ev.get === 'function' ? ev.get(id) : (ev as Record<number, EvaluationRecord>)[id];
+}
+function noteFreq(id: number) {
   // Prefer the evaluated cache (has computed frequencies incl. expression-derived).
   try {
     const ev = getEvaluatedNotes();
-    const e = ev && (typeof ev.get === 'function' ? ev.get(Number(id)) : ev[Number(id)]);
+    const e = cachedEvaluation(ev, Number(id));
     const f = e && e.frequency;
     if (f != null) return (typeof f.valueOf === 'function' ? f.valueOf() : Number(f));
   } catch {}
   const mod = requireModule();
-  try { return mod.getNoteById(Number(id)).getVariable('frequency').valueOf(); } catch { return null; }
+  try { return mod.getNoteById(Number(id))?.getVariable('frequency')?.valueOf() ?? null; } catch { return null; }
 }
 // Find a note (id !== 0) whose evaluated frequency is a finite number — a safe target
 // for octave-change round-trip tests (skips measure/silence notes).
@@ -320,7 +330,7 @@ function pickFreqNoteId() {
   const ev = getEvaluatedNotes();
   const ids = Object.keys(mod.notes).map(Number).filter((id) => id !== 0).sort((a, b) => a - b);
   for (const id of ids) {
-    const e = ev && (typeof ev.get === 'function' ? ev.get(id) : ev[id]);
+    const e = cachedEvaluation(ev, id);
     const f = e && e.frequency;
     const v = f != null ? (typeof f.valueOf === 'function' ? f.valueOf() : Number(f)) : null;
     if (v != null && isFinite(v) && v > 0) return id;
@@ -328,5 +338,14 @@ function pickFreqNoteId() {
   return ids[0] ?? null;
 }
 
-window.__rmtPerf = { loadStress, restoreDefault, measureEval, measureCommit, measureSync, measureRedraw, measureIdleFrame, profileFrame, pickHubNoteId: () => pickHubNoteId(requireModule()), report, info, getModuleRef, getEvaluatedNotesRef, emit, noteFreq, pickFreqNoteId };
+const perf = { loadStress, restoreDefault, measureEval, measureCommit, measureSync, measureRedraw, measureIdleFrame, profileFrame, pickHubNoteId: () => pickHubNoteId(requireModule()), report, info, getModuleRef, getEvaluatedNotesRef, emit, noteFreq, pickFreqNoteId };
+declare global {
+  interface Window {
+    __rmtPerf?: typeof perf;
+    __rmtWorkspace?: Workspace;
+    __rmtRenderer?: RendererAdapter & Record<TimedPass, () => void>;
+    __rmtLastOctaveChangeTs?: number;
+  }
+}
+window.__rmtPerf = perf;
 console.log('[perf] harness ready: window.__rmtPerf — loadStress(name) | restoreDefault() | measureEval() | measureCommit() | measureSync(n,selId) | measureRedraw(n,selId) | measureIdleFrame(n) | profileFrame(n,selId) | report()');
