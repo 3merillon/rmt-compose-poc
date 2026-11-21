@@ -1,6 +1,6 @@
 # WebGL2 renderer
 
-`RendererAdapter` in `src/renderer/webgl2/renderer.js` turns the module’s evaluation cache into draw data. Its instance arrays contain geometry, colours and display flags. It also maintains a note-ID-to-slot index. An array slot belongs to the current scene and can change after a structural edit.
+`RendererAdapter` in `src/renderer/webgl2/renderer.ts` turns the module’s evaluation cache into draw data. Its instance arrays contain geometry, colours and display flags. It also maintains a note-ID-to-slot index. An array slot belongs to the current scene and can change after a structural edit.
 
 ## Full and incremental synchronization
 

@@ -13,7 +13,7 @@ A note count alone says little about playback or editing. A long score with one 
 | Audio voices | **Most voices at once** offers 128 through 4,096, default 256. The engine prefers fading release tails. A larger chord can keep its sustained notes. |
 | Visible detail | Default 1,536 visible notes, adjustable in Appearance. This affects labels and controls while composing. |
 
-See `src/limits.js`, `src/binary-note.js` and `src/store/history.js` for the enforced boundaries. Browser storage also has quotas. Autosave writes one score string, whose byte length depends on its text. A score within the loading limits can still encounter memory or storage pressure. [Saving a score](/user-guide/modules/saving-modules)
+See `src/limits.ts`, `src/binary-note.ts` and `src/store/history.ts` for the enforced boundaries. Browser storage also has quotas. Autosave writes one score string, whose byte length depends on its text. A score within the loading limits can still encounter memory or storage pressure. [Saving a score](/user-guide/modules/saving-modules)
 
 ## The measured picture
 

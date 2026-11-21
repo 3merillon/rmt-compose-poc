@@ -50,7 +50,7 @@ The attack and any decay start at the note's start, the sustain (or the instrume
 - **Range.** The attack is clamped to `0`-`1` and the release to `0`-`4` (a release may ring for up to four times the note's length), for the sound only. The module keeps the exact value, and an expression that reads `[N].attack` sees it unclamped.
 - A release that rings into the next note simply overlaps it, as a lifted key does.
 
-See `envelopeTimes`, `applyVoiceEnvelope` and `noteShape` in `src/instruments/instrument-manager.js`, and how the engine passes the shares in `src/player/audio-engine.js`.
+See `envelopeTimes`, `applyVoiceEnvelope` and `noteShape` in `src/instruments/instrument-manager.ts`, and how the engine passes the shares in `src/player/audio-engine.ts`.
 
 ## Where you edit them
 
@@ -113,11 +113,11 @@ A recording's own decay (the piano's, the violin's) is not drawn yet: their band
 
 The note's full colour is inside the band; outside it the colour is dimmed (alpha × 0.3). The shape
 comes from the same function as playback, `envelopeShares` and `envelopeTimes` in
-`src/instruments/instrument-manager.js`, so the part that is drawn includes the instrument's own
+`src/instruments/instrument-manager.ts`, so the part that is drawn includes the instrument's own
 times for whatever the note leaves unset, the 3 ms floor, and the fit of the attack inside the note.
 With the default display setting, a note that has neither value of its own or through the BaseNote has no inner band. **Every note** also draws instrument defaults. The
 renderer side is `_envelopeSharesFor` and the envelope block in `rectBorderFS` in
-`src/renderer/webgl2/renderer.js`.
+`src/renderer/webgl2/renderer.ts`.
 
 ## Dependencies
 

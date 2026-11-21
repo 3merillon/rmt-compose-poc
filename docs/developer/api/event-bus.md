@@ -1,16 +1,16 @@
 ---
 title: EventBus
-description: Reference for the EventBus in src/utils/event-bus.js and the complete catalogue of events RMT Compose actually emits.
+description: Reference for the EventBus in src/utils/event-bus.ts and the complete catalogue of events RMT Compose actually emits.
 ---
 
 # EventBus
 
-`EventBus` (`src/utils/event-bus.js`) is a small, dependency-free, synchronous publish/subscribe
-bus. It is how subsystems that must not import each other — the renderer and `player.js`, the
+`EventBus` (`src/utils/event-bus.ts`) is a small, dependency-free, synchronous publish/subscribe
+bus. It is how subsystems that must not import each other — the renderer and `player.ts`, the
 settings panel and the audio graph, the module bar and the history stack — talk.
 
 ```javascript
-import { eventBus } from './utils/event-bus.js'
+import { eventBus } from './utils/event-bus.ts'
 
 const off = eventBus.on('history:stackChanged', ({ canUndo, canRedo }) => {
   undoBtn.disabled = !canUndo
@@ -32,7 +32,7 @@ const off = eventBus.on(event, handler)
 ```
 
 Subscribes, and **returns an unsubscribe function**. That return value is the idiomatic cleanup
-path in this codebase — `src/settings/settings-panel.js` collects them in a `disposers` array and
+path in this codebase — `src/settings/settings-panel.ts` collects them in a `disposers` array and
 calls them when the panel is torn down.
 
 | Parameter | Type | Description |
@@ -103,26 +103,26 @@ This is every topic in `src/` at the current commit. Payloads are exact.
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `player:invalidateModuleEndTimeCache` | — | `Note._notifyChange()` — any expression or property change | `player.js` (recompute end time, reposition measure bars) |
-| `player:requestPause` | — | modals, workspace commits, history restore, the note widget | `player.js` — stops playback before a mutating edit |
-| `player:octaveChange` | `{ noteId, direction: 'up' \| 'down' }` | the ▲/▼ arrows (note widget and canvas), the perf harness | `player.js` — applies the arrow interval to the frequency expression |
-| `player:selectNote` | `{ noteId }` | note/measure creation, so the new note lands selected | `player.js` |
-| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library tile is dropped on a note, a measure triangle or the BaseNote | `player.js` — grafts the module in |
+| `player:invalidateModuleEndTimeCache` | — | `Note._notifyChange()` — any expression or property change | `player.ts` (recompute end time, reposition measure bars) |
+| `player:requestPause` | — | modals, workspace commits, history restore, the note widget | `player.ts` — stops playback before a mutating edit |
+| `player:octaveChange` | `{ noteId, direction: 'up' \| 'down' }` | the ▲/▼ arrows (note widget and canvas), the perf harness | `player.ts` — applies the arrow interval to the frequency expression |
+| `player:selectNote` | `{ noteId }` | note/measure creation, so the new note lands selected | `player.ts` |
+| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library tile is dropped on a note, a measure triangle or the BaseNote | `player.ts` — grafts the module in |
 
 ### history (undo / redo)
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `history:capture` | `{ label, snapshotStr, version }` for editor checkpoints. Standalone `snapshotStr` or `snapshot` payloads are also accepted. | every undoable action | `store/history.js` retains the version. `player.js` passes the string to autosave. |
-| `history:seedIfEmpty` | The same checkpoint or standalone payload with `label: 'Initial'` | the same call sites, just before `history:capture` | `store/history.js` |
-| `history:undo` / `history:redo` | — | the module-bar buttons, the + menu buttons, Ctrl/⌘+Z and Ctrl/⌘+Y | `store/history.js` |
-| `history:requestRestore` | `{ version, snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` patches compatible versions in place. A full restore reads the lazy `snapshot` and reloads the module. |
+| `history:capture` | `{ label, snapshotStr, version }` for editor checkpoints. Standalone `snapshotStr` or `snapshot` payloads are also accepted. | every undoable action | `store/history.ts` retains the version. `player.ts` passes the string to autosave. |
+| `history:seedIfEmpty` | The same checkpoint or standalone payload with `label: 'Initial'` | the same call sites, just before `history:capture` | `store/history.ts` |
+| `history:undo` / `history:redo` | — | the module-bar buttons, the + menu buttons, Ctrl/⌘+Z and Ctrl/⌘+Y | `store/history.ts` |
+| `history:requestRestore` | `{ version, snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.ts` patches compatible versions in place. A full restore reads the lazy `snapshot` and reloads the module. |
 | `history:stackChanged` | `{ undo, redo, canUndo, canRedo }` | `HistoryManager`, after every push/undo/redo | the undo/redo buttons in the module bar and the + menu |
 
 ### workspace (canvas gestures → authoritative commit)
 
 The WebGL2 workspace previews a gesture on the GPU and emits a commit event on release;
-`player.js` owns the module and writes the expression.
+`player.ts` owns the module and writes the expression.
 
 | Event | Payload | Emitted on |
 |---|---|---|
@@ -133,15 +133,15 @@ The WebGL2 workspace previews a gesture on the GPU and emits a commit event on r
 | `workspace:marqueeCommit` | `{ ids, additive, touch }` | Rectangle release. IDs can include note bodies and measure handles. An empty additive rectangle preserves the active group. |
 | `workspace:multiSelectToggle` | `{ id, touch? }` | Shift-click an item, or long-press a note or triangle on touch. The hold toggles before a subsequent drag. |
 
-All six are consumed by `player.js`.
+All six are consumed by `player.ts`.
 
 ### settings
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `settings:changed` | `{ path, value, settings }` — `path` is dotted, e.g. `'audio.defaultInstrument'` | `settingsStore` on every write | `player.js` (audio graph, default instrument, theme), the note widget |
-| `settings:loaded` | `{ settings }` | `settingsStore`, once, a microtask after construction | nothing today — the panel and `player.js` pull with `settingsStore.get()` instead |
-| `settings:panelToggled` | `{ open }` | the settings panel, on open/close | `main.js` |
+| `settings:changed` | `{ path, value, settings }` — `path` is dotted, e.g. `'audio.defaultInstrument'` | `settingsStore` on every write | `player.ts` (audio graph, default instrument, theme), the note widget |
+| `settings:loaded` | `{ settings }` | `settingsStore`, once, a microtask after construction | nothing today — the panel and `player.ts` pull with `settingsStore.get()` instead |
+| `settings:panelToggled` | `{ open }` | the settings panel, on open/close | `main.ts` |
 
 A `settings:changed` handler must check `path` — it fires for *every* setting:
 
@@ -157,9 +157,9 @@ eventBus.on('settings:changed', ({ path }) => {
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `modals:show` | `{ noteId, isMeasure }` | the widget, when it opens for a note | `player.js` |
-| `modals:cleared` | — | the widget, when it closes | `player.js` subscribes, but the handler is an empty placeholder — nothing happens today |
-| `modals:requestRefresh` | `{ note, measureId, clickedElement }` | `player.js` and the widget's own controls, after a commit | the widget — rebuilds itself in place |
+| `modals:show` | `{ noteId, isMeasure }` | the widget, when it opens for a note | `player.ts` |
+| `modals:cleared` | — | the widget, when it closes | `player.ts` subscribes, but the handler is an empty placeholder — nothing happens today |
+| `modals:requestRefresh` | `{ note, measureId, clickedElement }` | `player.ts` and the widget's own controls, after a commit | the widget — rebuilds itself in place |
 | `modals:init` | — | the widget, once | nothing today |
 
 ### Toolbar, repeat and history restoration
@@ -226,7 +226,7 @@ eventBus.emit = (event, ...args) => {
    `settings`, `modals`, `audio`.
 2. Pass a single object payload.
 3. Emit from the subsystem that owns the fact; consume where the reaction belongs. The workspace
-   never writes expressions; it emits a commit and lets `player.js` do it.
+   never writes expressions; it emits a commit and lets `player.ts` do it.
 4. Add it to the table above.
 
 ## See also

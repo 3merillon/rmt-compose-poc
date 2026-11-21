@@ -4,7 +4,7 @@
  *
  *   node scripts/check-doc-citations.mjs [docs/sub/folder-or-page.md ...]
  *
- * Two forms are cited (see the docs conventions): `path/file.js:N` or `:N-M`,
+ * Two forms are cited (see the docs conventions): `path/file.ts:N` or `:N-M`,
  * and a bare `:N` on pages that name their source file once. A bare citation
  * is resolved against the first source file the page names (its own file); on
  * a page that names several, that is said beside it. A citation past the end of its file
@@ -23,7 +23,8 @@ const walk = (p: string) => {
     for (const f of readdirSync(p)) if (f !== 'node_modules' && !f.startsWith('.')) walk(join(p, f));
   } else if (p.endsWith('.md')) pages.push(p);
 };
-for (const t of (targets.filter(a => !a.startsWith("--")).length ? targets.filter(a => !a.startsWith("--")) : ["docs"])) walk(join(root, t));
+const requestedPages = targets.filter(a => !a.startsWith('--'));
+for (const t of (requestedPages.length ? requestedPages : ['docs'])) walk(join(root, t));
 
 const FULL = /((?:src|rust|scripts|public)\/[A-Za-z0-9_./-]+\.(?:js|mjs|rs|ts|json)):(\d+)(?:-(\d+))?/g;
 const BARE = /`:(\d+)(?:-(\d+))?`/g;
@@ -32,14 +33,19 @@ const lines = (file: string) => {
   if (!cache.has(file)) cache.set(file, existsSync(join(root, file)) ? readFileSync(join(root, file), 'utf8').split(/\r?\n/) : null);
   return cache.get(file);
 };
+let invalid = 0;
+function missing(reason: string) {
+  invalid++;
+  return reason;
+}
 const show = (file: string, a: number, b?: number) => {
   const src = lines(file);
-  if (!src) return 'FILE NOT FOUND';
-  if (a < 1 || a > src.length || (b !== undefined && (b < a || b > src.length))) return `MISSING (file has ${src.length} lines)`;
+  if (!src) return missing('FILE NOT FOUND');
+  if (a < 1 || a > src.length || (b !== undefined && (b < a || b > src.length))) return missing(`MISSING (file has ${src.length} lines)`);
   return src.slice(a - 1, Math.min(b || a, a + 2)).map(s => s.trim()).join(' ⏎ ').slice(0, 160);
 };
 
-// A third form, `player.js:N`: a file named without its folder. Resolved by
+// A third form, `player.ts:N`: a file named without its folder. Resolved by
 // base name among the source files; a name two files share is reported.
 const SHORT = /(?<![\w./-])([A-Za-z0-9_-]+\.(?:ts|js|mjs|rs)):(\d+)(?:-(\d+))?/g;
 const byBase = new Map<string, string | null>();
@@ -55,7 +61,7 @@ const index = (dir: string) => {
 };
 ['src', 'scripts'].forEach(index);
 
-// --only a.js,b.js: list only citations into those files (by base name)
+// --only=a.ts,b.ts: list only citations into those files (by base name)
 const onlyArg = process.argv.find(a => a.startsWith('--only='));
 const only = onlyArg ? new Set(onlyArg.slice(7).split(',')) : null;
 const wanted = (file: string | null) => !only || (file && only.has(file.split('/').at(-1)!));
@@ -71,15 +77,15 @@ for (const page of pages) {
     }
     for (const m of line.matchAll(SHORT)) {
       const file = byBase.get(m[1]);
-      if (file === undefined || !wanted(file || m[1])) continue;
-      out.push(`  ${i + 1}: ${m[0]}  →  ${file ? `[${file}] ${show(file, +m[2], m[3] ? +m[3] : undefined)}` : 'ambiguous base name'}`);
+      if (!wanted(file || m[1])) continue;
+      out.push(`  ${i + 1}: ${m[0]}  →  ${file ? `[${file}] ${show(file, +m[2], m[3] ? +m[3] : undefined)}` : missing(file === null ? 'ambiguous base name' : 'FILE NOT FOUND')}`);
     }
     for (const m of line.matchAll(BARE)) {
       // The page's own file is the one it names first; say so when it names others too.
       const file = named[0] || null;
       if (!wanted(file)) continue;
       const note = named.length > 1 ? ` (first of ${named.length} files the page names)` : '';
-      out.push(`  ${i + 1}: ${m[0]}  →  ${file ? `[${file}${note}] ${show(file, +m[1], m[2] ? +m[2] : undefined)}` : 'no source file named on the page'}`);
+      out.push(`  ${i + 1}: ${m[0]}  →  ${file ? `[${file}${note}] ${show(file, +m[1], m[2] ? +m[2] : undefined)}` : missing('no source file named on the page')}`);
     }
   });
   if (out.length) {
@@ -89,3 +95,4 @@ for (const page of pages) {
   }
 }
 console.log(`\n${count} citation(s) in ${pages.length} page(s)`);
+if (invalid) process.exitCode = 1;

@@ -1,18 +1,18 @@
 ---
 title: MIDI Export
-description: Reference for src/midi/midi-export.js — a pure function from a Module to the bytes of a Standard MIDI File, its options, its report, and the byte layout it writes.
+description: Reference for src/midi/midi-export.ts — a pure function from a Module to the bytes of a Standard MIDI File, its options, its report, and the byte layout it writes.
 ---
 
 # MIDI Export
 
-`src/midi/midi-export.js` turns a `Module` into Standard MIDI File events with per-note pitch bends. Module JSON retains exact expressions and relationships.
+`src/midi/midi-export.ts` turns a `Module` into Standard MIDI File events with per-note pitch bends. Module JSON retains exact expressions and relationships.
 It is **pure** — module in, bytes out, no DOM and no Web Audio — so the same code runs behind the
 **Export MIDI** menu entry and in Node.
 
 ```javascript
 import { readFileSync, writeFileSync } from 'node:fs'
-import { Module } from './src/module.js'
-import { planMidi, encodeMidi } from './src/midi/midi-export.js'
+import { Module } from './src/module.ts'
+import { planMidi, encodeMidi } from './src/midi/midi-export.ts'
 
 const module = await Module.loadFromJSON(JSON.parse(readFileSync('public/modules/defaultModule.json', 'utf8')))
 
@@ -61,7 +61,7 @@ do not add meter changes; the file has one time signature. **No time signature i
 the module has no measure bar, or when the first bar's length cannot be written as one (a length
 such as 5/3 time units, or more than 255). Only the second case adds a warning.
 
-`toNumber()` (`src/utils/fraction-num.js`) is the only place a fraction becomes a float, as
+`toNumber()` (`src/utils/fraction-num.ts`) is the only place a fraction becomes a float, as
 everywhere else: for the frequency (its key and bend need a logarithm), for the gain, and for the
 numbers in the report.
 
@@ -164,7 +164,7 @@ velocity = round(unityVelocity × √gain), kept within 1–127
 ```
 
 `gain` is `amplitudeToGain(module.findAmplitude(note))` — the same clamp to 0–4 the audio engine
-applies (`src/player/amplitude.js`). A gain of 0 is not exported: playback builds no voice for it
+applies (`src/player/amplitude.ts`). A gain of 0 is not exported: playback builds no voice for it
 either. Note-off velocity is always 64.
 
 ### Channels

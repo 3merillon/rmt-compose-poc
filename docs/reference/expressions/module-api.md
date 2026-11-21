@@ -132,7 +132,7 @@ An instrument is not an expression value. See
 ## The Module object, from JavaScript
 
 Outside an expression, the application's `Module` has two methods for the new time model
-(`src/module.js`):
+(`src/module.ts`):
 
 | Method | Returns |
 |---|---|
@@ -141,7 +141,7 @@ Outside an expression, the application's `Module` has two methods for the new ti
 
 `findTempo()` and `findMeasureLength()` are gone, and the bytecode opcodes `FIND_TEMPO` and
 `FIND_MEASURE` are retired. `EXPRESSION_VARS` (the six variable names) and `isMeasureNote(note)` are exported from
-`src/note.js`.
+`src/note.ts`.
 
 ## Dependencies
 

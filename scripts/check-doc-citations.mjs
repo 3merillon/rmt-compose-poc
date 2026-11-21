@@ -1,3 +1,3 @@
 #!/usr/bin/env node
-import 'tsx/esm';
+import 'ts-blank-space/register';
 await import('./check-doc-citations.ts');

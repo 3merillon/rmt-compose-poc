@@ -15,17 +15,17 @@ There is **one** expression language, the DSL (`base.f * (3/2)`, `[1].t + [1].d`
 
 Older modules can hold two retired forms, and both are converted on load, before anything is compiled, by `Module.loadFromJSON()`:
 
-1. the old time model (tempo, beats per measure, `beat()`, `measure()`, `module.findTempo` chains): `migrateTimeModel()` (`src/migrate/relational-time.js`) rewrites it as relations of `base.d`;
-2. then the method-chain syntax (`module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))`): `migrateSyntax()` (`src/migrate/legacy-syntax.js`) rewrites it as DSL. See [The retired method-chain syntax](#the-retired-method-chain-syntax) below and [Module System](/developer/architecture/module-system#loading-old-modules).
+1. the old time model (tempo, beats per measure, `beat()`, `measure()`, `module.findTempo` chains): `migrateTimeModel()` (`src/migrate/relational-time.ts`) rewrites it as relations of `base.d`;
+2. then the method-chain syntax (`module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))`): `migrateSyntax()` (`src/migrate/legacy-syntax.ts`) rewrites it as DSL. See [The retired method-chain syntax](#the-retired-method-chain-syntax) below and [Module System](/developer/architecture/module-system#loading-old-modules).
 
 An expression relates a note to other notes through **six variables** (`VAR`, see [below](#variable-indices)): `startTime`, `duration` and `frequency`, and the interpretation variables `amplitude`, `attack` and `release`. The DSL has no functions.
 
 ## Entry point
 
-`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js`).
+`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.ts`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.ts`).
 
 1. **Cache probe.** A hit moves its entry to the end of the recency list and returns a **clone**.
-2. **Retired syntax.** Text that carries a method-chain marker (`new Fraction(`, `module.`, `.getVariable(`, `.mul(` …, or a bare variable name such as `frequency`; `isLegacyExpression()`, `src/migrate/legacy-syntax.js`) is refused (`src/expression-compiler.js`) with `The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2). In the DSL this reads: …`, the last sentence giving the converter's DSL form of what was typed when it has one. Loaded modules never reach this: they were converted before compiling.
+2. **Retired syntax.** Text that carries a method-chain marker (`new Fraction(`, `module.`, `.getVariable(`, `.mul(` …, or a bare variable name such as `frequency`; `isLegacyExpression()`, `src/migrate/legacy-syntax.ts`) is refused (`src/expression-compiler.ts`) with `The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2). In the DSL this reads: …`, the last sentence giving the converter's DSL form of what was typed when it has one. Loaded modules never reach this: they were converted before compiling.
 3. **`compileDSL()`**, which throws a `DSLError` with a `userMessage` on a syntax error. There is no constant-0 fallback: interactive callers (the note widget's Save, the validators) surface the message, while the load paths catch per note and leave the property unset.
 
 `compile()` always returns `binary.clone()`, never the cached instance.
@@ -33,7 +33,7 @@ An expression relates a note to other notes through **six variables** (`VAR`, se
 ## The compile cache
 
 ```javascript
-const COMPILE_CACHE_MAX = 4000;  // src/expression-compiler.js
+const COMPILE_CACHE_MAX = 4000;  // src/expression-compiler.ts
 ```
 
 A `Map` keyed on the raw expression text finds each entry. A doubly linked list keeps the entries in recency order. On a miss at capacity the compiler reuses the oldest entry. The cap exists because drag and resize commits mint a fresh fraction string on every commit, so an unbounded cache grows for the life of the session. There is one cache, the singleton's; the validators and the simplifier use the singleton too, or `compileDSL()` directly, which does not cache.
@@ -42,21 +42,21 @@ A `Map` keyed on the raw expression text finds each entry. A doubly linked list 
 
 | File | Exports | Role |
 |---|---|---|
-| `src/dsl/lexer.js` | `tokenize(source)` | text → tokens. `#` starts a comment to end of line. |
-| `src/dsl/parser.js` | `parse(tokens)` | recursive descent → AST. The grammar is written out verbatim at `src/dsl/parser.js`. |
-| `src/dsl/ast.js` | `NodeType`, `collectDependencies`, `referencesBase` | node factories + AST walks |
-| `src/dsl/compiler.js` | `compile(ast, sourceText)` | AST → `BinaryExpression` |
-| `src/dsl/decompiler.js` | `decompile(binaryExpr)` | bytecode → DSL text |
-| `src/dsl/constants.js` | `TokenType`, `PropertyMap`, `RetiredTimeFunctions`, `RetiredTimeProperties`, `Precedence` | the tables; the two `Retired*` lists exist only to explain the removed names |
-| `src/dsl/errors.js` | `DSLLexerError`, `DSLParseError`, `DSLCompileError`, `ErrorMessages` | typed errors with a `userMessage` |
-| `src/dsl/index.js` | `compileDSL`, `decompileToDSL`, `validateDSL` | the public API |
-| `src/dsl/simplify.js` | `simplifyDSL`, `scaleDSL` | DSL-native canonicaliser (see [Exact Values](/developer/core/symbolic-power#the-simplifier)) |
+| `src/dsl/lexer.ts` | `tokenize(source)` | text → tokens. `#` starts a comment to end of line. |
+| `src/dsl/parser.ts` | `parse(tokens)` | recursive descent → AST. The grammar is written out verbatim at `src/dsl/parser.ts`. |
+| `src/dsl/ast.ts` | `NodeType`, `collectDependencies`, `referencesBase` | node factories + AST walks |
+| `src/dsl/compiler.ts` | `compile(ast, sourceText)` | AST → `BinaryExpression` |
+| `src/dsl/decompiler.ts` | `decompile(binaryExpr)` | bytecode → DSL text |
+| `src/dsl/constants.ts` | `TokenType`, `PropertyMap`, `RetiredTimeFunctions`, `RetiredTimeProperties`, `Precedence` | the tables; the two `Retired*` lists exist only to explain the removed names |
+| `src/dsl/errors.ts` | `DSLLexerError`, `DSLParseError`, `DSLCompileError`, `ErrorMessages` | typed errors with a `userMessage` |
+| `src/dsl/index.ts` | `compileDSL`, `decompileToDSL`, `validateDSL` | the public API |
+| `src/dsl/simplify.ts` | `simplifyDSL`, `scaleDSL` | DSL-native canonicaliser (see [Exact Values](/developer/core/symbolic-power#the-simplifier)) |
 
-`compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.js`).
+`compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.ts`).
 
 ### Properties
 
-`src/dsl/constants.js`. These aliases and no others:
+`src/dsl/constants.ts`. These aliases and no others:
 
 | Canonical | Accepted spellings | Canonical short form |
 |---|---|---|
@@ -67,11 +67,11 @@ A `Map` keyed on the raw expression text finds each entry. A doubly linked list 
 | `attack` | `atk`, `attack` | `attack` |
 | `release` | `rel`, `release` | `release` |
 
-`[0].prop` is parsed as `base.prop` — note id 0 **is** the BaseNote (`src/dsl/parser.js`).
+`[0].prop` is parsed as `base.prop` — note id 0 **is** the BaseNote (`src/dsl/parser.ts`).
 
 ### No functions
 
-The DSL has no functions (`src/dsl/parser.js` header). `beat()`, `tempo()` and `measure()` are refused, not compiled, with a message that names the replacement:
+The DSL has no functions (`src/dsl/parser.ts` header). `beat()`, `tempo()` and `measure()` are refused, not compiled, with a message that names the replacement:
 
 | You type | Refused with |
 |---|---|
@@ -80,11 +80,11 @@ The DSL has no functions (`src/dsl/parser.js` header). `beat()`, `tempo()` and `
 | `tempo(x)` | `'tempo()' was removed: tempo is no longer stored; durations relate to other durations (base.d is the time unit, 60 / base.d the tempo)` |
 | `x.tempo`, `x.bpm`, `x.beatsPerMeasure`, `x.ml`, `x.measureLength` | `'.name' was removed: tempo, beats per measure and measure length are no longer stored. Relate durations instead (base.d is the time unit; a measure bar's length is its .d)` |
 
-Any other function name gets `Unknown function 'name'. Expressions have no functions: write references such as [3].d or base.d` (`ErrorMessages` in `src/dsl/errors.js`). The time unit, one beat in seconds, is simply the BaseNote's duration: write `base.d`. Do not look for `60 / tempo(base)`; no tempo exists to divide by.
+Any other function name gets `Unknown function 'name'. Expressions have no functions: write references such as [3].d or base.d` (`ErrorMessages` in `src/dsl/errors.ts`). The time unit, one beat in seconds, is simply the BaseNote's duration: write `base.d`. Do not look for `60 / tempo(base)`; no tempo exists to divide by.
 
 ## Bytecode format
 
-`src/binary-note.js`:
+`src/binary-note.ts`:
 
 ```javascript
 export const OP = {
@@ -114,7 +114,7 @@ No compiler produces them. `DUP` and `SWAP` are implemented in the VM but unreac
 :::
 
 ::: warning Retired: `FIND_TEMPO` and `FIND_MEASURE`
-Opcodes `0x20` (`FIND_TEMPO`) and `0x21` (`FIND_MEASURE`) were removed from `OP` together with the tempo and measure-length variables. A byte with either value is now an unknown opcode in the VM. `src/binary-note.js` marks both values as not to be reused.
+Opcodes `0x20` (`FIND_TEMPO`) and `0x21` (`FIND_MEASURE`) were removed from `OP` together with the tempo and measure-length variables. A byte with either value is now an unknown opcode in the VM. `src/binary-note.ts` marks both values as not to be reused.
 :::
 
 ### Instruction encoding
@@ -133,7 +133,7 @@ Operands are pushed **before** the opcode — it is a stack machine, nothing nes
 
 ### Variable indices
 
-The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js`):
+The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.ts`):
 
 ```javascript
 export const VAR = {
@@ -152,17 +152,17 @@ Indices 0 to 2 are the language: they relate a note to other notes. Indices from
 
 ### Constant emission
 
-`emitFraction()` (`src/dsl/compiler.js`) GCD-normalises the fraction **in BigInt** (`bigGcd` from `src/utils/fraction-num.js`), moves the sign to the numerator, then picks the opcode by magnitude: `LOAD_CONST` if numerator and denominator both fit in i32 (`-2147483648 … 2147483647`), otherwise `LOAD_CONST_BIG`. There is no `constBig` AST node — the choice is made at emit time.
+`emitFraction()` (`src/dsl/compiler.ts`) GCD-normalises the fraction **in BigInt** (`bigGcd` from `src/utils/fraction-num.ts`), moves the sign to the numerator, then picks the opcode by magnitude: `LOAD_CONST` if numerator and denominator both fit in i32 (`-2147483648 … 2147483647`), otherwise `LOAD_CONST_BIG`. There is no `constBig` AST node — the choice is made at emit time.
 
-Number literals are exact at any size: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.js`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
+Number literals are exact at any size: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.ts`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
 
 ::: info `LOAD_CONST_BIG` carries BigInts, and they survive
-The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
+The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.ts`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
 :::
 
 ## `BinaryExpression`
 
-`binary-note.js`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.ts`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -175,7 +175,7 @@ The evaluator decodes the variable-length BigInts straight into a pooled BigInt-
 
 Key methods: `addDependency()`, `getDependencySet()`, `getPropertyDependencies()` (scans the bytecode into a `Map<noteId, Set<varIndex>>` — this is where the [dependency graph](/developer/core/dependency-graph) gets its property-level edges), `referencesProperty()`, `isEmpty()`, `clone()`.
 
-A `LOAD_BASE` does **not** add note 0 as a dependency. Recording it would give the BaseNote a self-cycle; the `referencesBase` flag is tracked separately instead (`emitNoteReference()`, `src/dsl/compiler.js`).
+A `LOAD_BASE` does **not** add note 0 as a dependency. Recording it would give the BaseNote a self-cycle; the `referencesBase` flag is tracked separately instead (`emitNoteReference()`, `src/dsl/compiler.ts`).
 
 ## The retired method-chain syntax
 
@@ -187,23 +187,23 @@ module.baseNote.getVariable('duration')                                  →   b
 new Fraction(2).pow(new Fraction(1, 12)).mul(module.baseNote.getVariable('frequency'))   →   2^(1/12) * base.f
 ```
 
-Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` keeps only what converting it needs:
+Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.ts` keeps only what converting it needs:
 
-- `parseLegacy()` (`src/migrate/legacy-syntax.js`), a strict recursive-descent parser for exactly the old building blocks (`new Fraction(a[, b])` with decimal arguments, bare decimals, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, a bare variable name, parentheses, `.mul .div .add .sub .pow`), which builds a DSL syntax tree;
-- `legacyToDSL()` (`src/migrate/legacy-syntax.js`), which compiles that tree, decompiles it to DSL text, compiles the text again and refuses unless both give the same bytecode;
-- `migrateSyntax()` (`src/migrate/legacy-syntax.js`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
+- `parseLegacy()` (`src/migrate/legacy-syntax.ts`), a strict recursive-descent parser for exactly the old building blocks (`new Fraction(a[, b])` with decimal arguments, bare decimals, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, a bare variable name, parentheses, `.mul .div .add .sub .pow`), which builds a DSL syntax tree;
+- `legacyToDSL()` (`src/migrate/legacy-syntax.ts`), which compiles that tree, decompiles it to DSL text, compiles the text again and refuses unless both give the same bytecode;
+- `migrateSyntax()` (`src/migrate/legacy-syntax.ts`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.ts`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
 
-**It refuses rather than guesses.** The old compiler was a string splitter that read a chain correctly only when its methods came in the order `.pow`, then `.mul`/`.div`, then `.add`/`.sub` (`RANK`, `src/migrate/legacy-syntax.js`). It silently dropped a `.mul()` or `.div()` that followed an `.add()` (`a.add(b).mul(c)` evaluated as `a + b`), a `.pow()` that followed a `.mul()`, and every `.neg()`. For those the text and the old engine disagree, so the converter throws a `SyntaxMigrationError`, and `migrateSyntax()` adds the note and variable: the module does not load rather than load with a value nobody wrote. A note id above 16777215, an unknown variable (`'tempo'`), a quoted fraction (`new Fraction('1/3')`) and a division by zero are refused too.
+**It refuses rather than guesses.** The old compiler was a string splitter that read a chain correctly only when its methods came in the order `.pow`, then `.mul`/`.div`, then `.add`/`.sub` (`RANK`, `src/migrate/legacy-syntax.ts`). It silently dropped a `.mul()` or `.div()` that followed an `.add()` (`a.add(b).mul(c)` evaluated as `a + b`), a `.pow()` that followed a `.mul()`, and every `.neg()`. For those the text and the old engine disagree, so the converter throws a `SyntaxMigrationError`, and `migrateSyntax()` adds the note and variable: the module does not load rather than load with a value nobody wrote. A note id above 16777215, an unknown variable (`'tempo'`), a quoted fraction (`new Fraction('1/3')`) and a division by zero are refused too.
 
 `scripts/test-legacy-syntax.mjs` (part of `npm test`) loads every module of `scripts/fixtures/legacy-syntax-oracle.json`, the library plus fixtures in the old syntax (`scripts/fixtures/legacy-syntax/`: four library modules as the old decompiler wrote them, and `shapes.json` with every accepted building block and call order), and requires every start, duration, frequency, amplitude, attack, release and corruption flag to equal the value recorded with the old compiler.
 
 ## The decompiler
 
-`ExpressionDecompiler.decompile()` (`src/expression-compiler.js`, singleton `decompiler`) returns `binary.sourceText` when it is set, so for anything compiled from text it is a pass-through; otherwise it returns the DSL the bytecode decompiles to (`decompileToDSL()`). `Note.getExpressionSource()` and `Note.toJSON()` use it, so a saved module is always DSL.
+`ExpressionDecompiler.decompile()` (`src/expression-compiler.ts`, singleton `decompiler`) returns `binary.sourceText` when it is set, so for anything compiled from text it is a pass-through; otherwise it returns the DSL the bytecode decompiles to (`decompileToDSL()`). `Note.getExpressionSource()` and `Note.toJSON()` use it, so a saved module is always DSL.
 
-The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
+The DSL decompiler (`src/dsl/decompiler.ts`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.ts`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
 
-The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js`).
+The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.ts`).
 
 ### Round-trip is lossy in specific, harmless ways
 
@@ -226,13 +226,13 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 
 | Gate | Where | What it does |
 |---|---|---|
-| UI edits | `validateExpression()`, `src/modals/validation.js` | refuses the retired syntax with its DSL form, then `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
-| DSL syntax | `validateDSL()`, `src/dsl/index.js` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
-| JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
+| UI edits | `validateExpression()`, `src/modals/validation.ts` | refuses the retired syntax with its DSL form, then `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
+| DSL syntax | `validateDSL()`, `src/dsl/index.ts` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
+| JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.ts` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
 
-The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js`, `src/modals/variable-controls.js`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
+The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.ts`, `src/modals/variable-controls.ts`). The user-grade error strings in `src/dsl/errors.ts` are what the user actually reads.
 
 ## Worked example
 

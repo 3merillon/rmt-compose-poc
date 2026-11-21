@@ -1,11 +1,11 @@
 ---
 title: BinaryExpression Class
-description: Reference for BinaryExpression in src/binary-note.js — the compiled bytecode container, the exact instruction encoding, compilation and decompilation.
+description: Reference for BinaryExpression in src/binary-note.ts — the compiled bytecode container, the exact instruction encoding, compilation and decompilation.
 ---
 
 # BinaryExpression Class
 
-`BinaryExpression` (`src/binary-note.js`) is the compiled form of one note property. It holds a
+`BinaryExpression` (`src/binary-note.ts`) is the compiled form of one note property. It holds a
 bytecode buffer, an explicit list of the note ids the expression references, and the original
 source text.
 
@@ -15,11 +15,11 @@ An expression like
 base.f * (3/2)
 ```
 
-compiles to **12 bytes**, which the stack VM in `src/binary-evaluator.js` runs with exact rational
+compiles to **12 bytes**, which the stack VM in `src/binary-evaluator.ts` runs with exact rational
 arithmetic. Nothing in this pipeline uses `eval()` or `new Function()`.
 
 ```javascript
-import { BinaryExpression, OP, VAR, VAR_NAMES, CORRUPT, getCorruptionFlag } from './binary-note.js'
+import { BinaryExpression, OP, VAR, VAR_NAMES, CORRUPT, getCorruptionFlag } from './binary-note.ts'
 ```
 
 ## Constructor
@@ -30,7 +30,7 @@ const expr = new BinaryExpression(initialSize = 64)
 
 Creates an empty expression with a 64-byte bytecode buffer (it doubles as needed). You rarely
 build one by hand — the compilers do it. A note's unset variables share one frozen empty
-expression, `EMPTY_EXPRESSION` (`src/binary-note.js`); its `clone()` is an ordinary, writable
+expression, `EMPTY_EXPRESSION` (`src/binary-note.ts`); its `clone()` is an ordinary, writable
 one.
 
 ## Properties
@@ -76,7 +76,7 @@ const copy = expr.clone()
 
 Deep copy. `ExpressionCompiler.compile()` always hands back a clone, never the cached instance.
 
-A clone is at its size (`src/binary-note.js`): `bytecode` holds exactly `length` bytes and
+A clone is at its size (`src/binary-note.ts`): `bytecode` holds exactly `length` bytes and
 `dependencies` exactly `depCount` ids, as an `Array`. A 64-byte buffer and a 16-entry `Uint32Array`
 per expression cost about 530 B in Node for what is mostly a dozen bytes and one id. Writing to a
 clone grows it as it would any expression (`ensureCapacity()`, `addDependency()`, which grows from
@@ -164,7 +164,7 @@ emits any of them.** `FIND_INSTRUMENT` is not even handled by the VM. Treat all 
 
 ::: warning Removed: FIND_TEMPO and FIND_MEASURE
 The opcodes `FIND_TEMPO` (`0x20`) and `FIND_MEASURE` (`0x21`) are retired together with the tempo
-and measure-length variables. They are no longer in `OP`, and `src/binary-note.js` says not to
+and measure-length variables. They are no longer in `OP`, and `src/binary-note.ts` says not to
 reuse the two byte values.
 :::
 
@@ -183,7 +183,7 @@ reuse the two byte values.
 
 `FIRST_INTERPRETATION_VAR` is `VAR.AMPLITUDE` (3). Indices below it relate a note to other notes;
 indices from it up interpret the note when it sounds, and **only those fall back to the BaseNote**
-when the note does not define them (`src/variable-deps.js` resolves inheritance for indices
+when the note does not define them (`src/variable-deps.ts` resolves inheritance for indices
 `>= FIRST_INTERPRETATION_VAR` and nothing else). The variables `tempo`, `beatsPerMeasure` and
 `measureLength` that held indices 3 to 5 before are removed; the indices were reused for amplitude,
 attack and release.
@@ -215,11 +215,11 @@ for ids 65536 to 16,777,215. The DSL compiler writes the 2-byte form whenever th
 module whose ids fit compiles to the same bytecode as before. `dependencies` holds the ids as
 numbers, up to `MAX_NOTE_ID`.
 
-`MAX_NOTE_ID` (`0xFFFFFF`, 16,777,215, exported from `src/binary-note.js`) is the largest id a note
+`MAX_NOTE_ID` (`0xFFFFFF`, 16,777,215, exported from `src/binary-note.ts`) is the largest id a note
 can have. The renderer's picking draws each id in 24 bits of colour, and 2^24 − 1 is also the
 largest integer a float32 vertex attribute holds exactly. `Module.loadFromJSON()` rejects (skips,
 with a console warning) any note whose id is outside `0 … MAX_NOTE_ID`. The DSL parser enforces the
-same range at compile time — `[16777216].f` is a parse error (`src/dsl/parser.js`), and so is
+same range at compile time — `[16777216].f` is a parse error (`src/dsl/parser.ts`), and so is
 `module.getNoteById(16777216)` in the converter of the retired method-chain syntax — so an id can
 never wrap.
 
@@ -295,7 +295,7 @@ stays clean.
 ## Compilation
 
 ```javascript
-import { compiler } from './expression-compiler.js'
+import { compiler } from './expression-compiler.ts'
 
 const expr = compiler.compile('base.f * (3/2)')
 ```
@@ -314,25 +314,25 @@ const expr = compiler.compile('base.f * (3/2)')
 To compile DSL directly, without the cache:
 
 ```javascript
-import { compileDSL, validateDSL } from './dsl/index.js'
+import { compileDSL, validateDSL } from './dsl/index.ts'
 
 const expr = compileDSL('[1].f * 2^(7/12)')
 ```
 
 The pipeline is lexer → parser → compiler (`src/dsl/`), producing the AST node types in
-`src/dsl/ast.js`.
+`src/dsl/ast.ts`.
 
 ## Decompilation
 
 ```javascript
-import { decompiler } from './expression-compiler.js'
-import { decompileToDSL } from './dsl/index.js'
+import { decompiler } from './expression-compiler.ts'
+import { decompileToDSL } from './dsl/index.ts'
 
 decompiler.decompile(expr)   // sourceText verbatim if present, else decompileToDSL(expr)
 decompileToDSL(expr)         // always walks the bytecode, always emits DSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js`),
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.ts`),
 so for anything compiled from text it is a pass-through. A synthesised expression (empty
 `sourceText`) is decompiled to DSL.
 
@@ -345,13 +345,13 @@ The DSL has no functions, so there is nothing to reconstruct beyond the six vari
 the retired-syntax refusal. Callers that can show the message do (the note widget's inline error,
 the validators); load paths catch per-note and leave the property unset rather than zeroing it.
 
-The DSL layer *does* throw, with its own error classes (`src/dsl/errors.js`) — `DSLError` and its
+The DSL layer *does* throw, with its own error classes (`src/dsl/errors.ts`) — `DSLError` and its
 subclasses `DSLLexerError`, `DSLParseError`, `DSLCompileError`. Each carries a `position` and a
 `userMessage` getter, plus `formatWithContext(source)` for a caret-annotated dump.
 
 ```javascript
-import { compileDSL, validateDSL } from './dsl/index.js'
-import { DSLError } from './dsl/errors.js'
+import { compileDSL, validateDSL } from './dsl/index.ts'
+import { DSLError } from './dsl/errors.ts'
 
 validateDSL('[1].t +')
 // → { valid: false, error: "Unexpected '', expected expression (at column 8)" }
@@ -389,7 +389,7 @@ npm run perf:bench     # scripts/perf/bench-node.mjs
 
 ## The other two classes in this file
 
-`src/binary-note.js` also exports `BinaryNote` (six `BinaryExpression`s plus cached values) and
+`src/binary-note.ts` also exports `BinaryNote` (six `BinaryExpression`s plus cached values) and
 `BinaryModule` (a `Map` of them). **Neither is on the live path** — nothing imports them (their
 last consumer, the dead `src/module-serializer.js`, has been deleted from the repo). The live
 containers are `Note` and `Module`. Do not build against them without checking that first.
