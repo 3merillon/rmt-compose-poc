@@ -133,7 +133,7 @@ export function instrumentOf(module: Module, note: Note | null | undefined, memo
   // Walk the chain iteratively (a line can be tens of thousands of notes long),
   // then give every note on the way the instrument found at its end.
   const path = [];
-  const seen = new Set();
+  const seen = new Set<number>();
   let r = defaultName;
   for (let n = note; n; ) {
     const hit = M.get(n.id);
@@ -187,7 +187,7 @@ export function legacyInstrumentOf(module: Module, note: Note | null | undefined
 export function legacyInstrumentOf(module: Module, note: Note | null | undefined, memo: Map<number, string> | null | undefined, defaultName: string): string | null {
   if (!note) return 'sine-wave';
   const path = [];
-  const seen = new Set();
+  const seen = new Set<number>();
   let r = defaultName;
   for (let n = note; n; ) {
     const hit = memo && memo.get(n.id);

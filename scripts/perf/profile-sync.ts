@@ -56,7 +56,7 @@ const { profile } = await cdp.send('Profiler.stop');
 
 // Aggregate self time per function.
 const byId = new Map(profile.nodes.map((n) => [n.id, n]));
-const self = new Map();
+const self = new Map<string, number>();
 const total = (profile.samples || []).length;
 for (const id of profile.samples || []) {
   const n = byId.get(id);

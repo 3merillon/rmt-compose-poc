@@ -88,7 +88,7 @@ if (PROFILE) {
     if (!n) continue;
     const k = key(n);
     self.set(k, (self.get(k) || 0) + 1);
-    const seen = new Set();
+    const seen = new Set<string>();
     for (let cur: number | undefined = id; cur != null; cur = parent.get(cur)) {
       const kk = key(byId.get(cur)!);
       if (seen.has(kk)) continue;

@@ -75,7 +75,7 @@ if (idleControl && (from || loop)) throw Error('Idle control uses the stationary
 
 const cache = score.getEvaluationCache();
 const inheritedGain = cache.get(0)?.amplitude;
-const instruments = new Map();
+const instruments = new Map<number, string>();
 const spans = [];
 let sineOnly = true;
 for (const note of Object.values(score.notes)) {
@@ -85,7 +85,7 @@ for (const note of Object.values(score.notes)) {
   sineOnly &&= score.findInstrument(note, instruments).toLowerCase() === 'sine-wave';
   spans.push([+ev.startTime!, +ev.startTime! + +ev.duration]);
 }
-const expectedAttacks = new Map();
+const expectedAttacks = new Map<number, number>();
 const step = 0.02;
 const binCount = Math.ceil(seconds / step);
 const coverage = new Float64Array(binCount + 1);
@@ -390,7 +390,7 @@ try {
   frameGaps.sort((a: number,b: number) => a-b);
   const planned = times.filter(([at]) => at < t0 + seconds - 1e-8);
   const counts = planned.map(([,g])=>g);
-  const nativeAttacks = new Map();
+  const nativeAttacks = new Map<number, number>();
   for (const [at, g] of planned) {
     const k = Math.round((at - t0) * 1000);
     nativeAttacks.set(k,(nativeAttacks.get(k) || 0) + g[0]);

@@ -19,11 +19,11 @@ await page.waitForTimeout(1500);
 const hits = await page.evaluate(async () => {
   const r = window.__rmtRenderer!;
   let v = r.needsRedraw;
-  const counts = new Map();
+  const counts = new Map<string, number>();
   Object.defineProperty(r, 'needsRedraw', {
     configurable: true,
     get() { return v; },
-    set(nv) {
+    set(nv: boolean) {
       if (nv === true && v === false) {
         const st = (new Error().stack || '').split('\n').slice(2, 5).join(' <- ').replace(/https?:\/\/[^/]+/g, '');
         counts.set(st, (counts.get(st) || 0) + 1);

@@ -110,7 +110,7 @@ console.log(`  slow frames (>25ms) at frame#: ${r.slowAt.map(([i, x]) => `${i}($
 
 if (profile) {
   const byId = new Map(profile.nodes.map((n) => [n.id, n]));
-  const self = new Map();
+  const self = new Map<string, number>();
   const total = (profile.samples || []).length;
   for (const id of profile.samples || []) {
     const n = byId.get(id);
