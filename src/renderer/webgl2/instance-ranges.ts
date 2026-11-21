@@ -3,7 +3,14 @@
 const BLOCK = 64;
 
 export class InstanceRanges {
-  constructor(positions) {
+  readonly count: number;
+  readonly leaves: number;
+  readonly left: Float64Array;
+  readonly right: Float64Array;
+  readonly top: Float64Array;
+  readonly bottom: Float64Array;
+
+  constructor(positions: ArrayLike<number>) {
     this.count = positions.length / 4;
     let leaves = 1;
     while (leaves * BLOCK < this.count) leaves *= 2;
@@ -29,7 +36,7 @@ export class InstanceRanges {
     }
   }
 
-  update(positions, slots) {
+  update(positions: ArrayLike<number>, slots: Iterable<number>) {
     let previous = -1;
     for (const i of slots) {
       const block = Math.floor(i / BLOCK);
@@ -59,9 +66,9 @@ export class InstanceRanges {
   }
 
   // Half-open ranges, merged when adjacent. Bounds may overlap across voices.
-  collect(lo, hi, result, minY = -Infinity, maxY = Infinity) {
+  collect(lo: number, hi: number, result: number[], minY = -Infinity, maxY = Infinity) {
     result.length = 0;
-    const visit = (node, first, end) => {
+    const visit = (node: number, first: number, end: number) => {
       if (first >= this.count || this.right[node] < lo || this.left[node] > hi ||
           this.bottom[node] < minY || this.top[node] > maxY) return;
       if (node >= this.leaves || (lo <= this.left[node] && hi >= this.right[node] &&

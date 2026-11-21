@@ -10,7 +10,7 @@
  * @param {*} str - Value to escape (will be converted to string)
  * @returns {string} HTML-safe string
  */
-export function escapeHtml(str) {
+export function escapeHtml(str: unknown) {
     if (str == null) return '';
     return String(str)
         .replace(/&/g, '&amp;')
@@ -25,7 +25,7 @@ export function escapeHtml(str) {
  * @param {*} str - Value to escape
  * @returns {string} Attribute-safe string
  */
-export function escapeAttr(str) {
+export function escapeAttr(str: unknown) {
     if (str == null) return '';
     return String(str)
         .replace(/&/g, '&amp;')
@@ -41,7 +41,7 @@ export function escapeAttr(str) {
  * @param {*} color - Color value to validate
  * @returns {string|null} Sanitized color or null if invalid
  */
-export function validateColorInput(color) {
+export function validateColorInput(color: unknown) {
     if (typeof color !== 'string') return null;
     const trimmed = color.trim();
     if (!trimmed) return null;

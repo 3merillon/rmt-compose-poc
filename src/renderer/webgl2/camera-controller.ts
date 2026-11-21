@@ -11,8 +11,38 @@
  * [RendererAdapter.updateViewportBasis()](src/renderer/webgl2/renderer.js:343)
  */
 
+interface Point { x: number; y: number }
+
 export class CameraController {
-  constructor(containerEl) {
+  declare onChange?: () => void;
+  containerEl: HTMLElement;
+  canvasOffset: Point;
+  scale: number;
+  minScale: number;
+  maxScale: number;
+  tx: number;
+  ty: number;
+  maintainFocusOnResize: boolean;
+  _lastRect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'> | null;
+  inputEnabled: boolean;
+  singleFingerPanEnabled: boolean;
+  lockX: boolean;
+  _dragging: boolean;
+  _lastX: number;
+  _lastY: number;
+  _touches: Map<number, Point>;
+  _pinching: boolean;
+  _pinchLastDist: number;
+  _pinchCenter: Point;
+  _onWheel: ((event: WheelEvent) => void) | null;
+  _onResize: (() => void) | null;
+  _hasDocListeners: boolean;
+  _onPointerDown: ((event: PointerEvent) => void) | null;
+  _onPointerMove: ((event: PointerEvent) => void) | null;
+  _onPointerUp: ((event: PointerEvent) => void) | null;
+  _onPointerCancel: ((event: PointerEvent) => void) | null;
+
+  constructor(containerEl: HTMLElement) {
     this.containerEl = containerEl;
     this.canvasOffset = { x: 0, y: 0 };
 
@@ -66,12 +96,12 @@ export class CameraController {
     try {
       const el = this.containerEl || document;
       if (el && this._onPointerDown) el.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
-      if (document && this._onPointerMove) document.removeEventListener('pointermove', this._onPointerMove, true);
-      if (document && this._onPointerUp) document.removeEventListener('pointerup', this._onPointerUp, true);
-      if (document && this._onPointerCancel) document.removeEventListener('pointercancel', this._onPointerCancel, true);
-      if (this.containerEl && this._onWheel) this.containerEl.removeEventListener('wheel', this._onWheel, { passive: false });
+      if (document && this._onPointerMove) document.removeEventListener('pointermove', this._onPointerMove!, true);
+      if (document && this._onPointerUp) document.removeEventListener('pointerup', this._onPointerUp!, true);
+      if (document && this._onPointerCancel) document.removeEventListener('pointercancel', this._onPointerCancel!, true);
+      if (this.containerEl && this._onWheel) this.containerEl.removeEventListener('wheel', this._onWheel, false);
       if (window && this._onResize) window.removeEventListener('resize', this._onResize, true);
-      if (window) window.removeEventListener('scroll', this._onResize, true);
+      if (window && this._onResize) window.removeEventListener('scroll', this._onResize, true);
     } catch {}
     this._onWheel = this._onPointerDown = this._onPointerMove = this._onPointerUp = this._onPointerCancel = this._onResize = null;
   }
@@ -121,9 +151,9 @@ export class CameraController {
       if (this.containerEl && this.containerEl.style) {
         this.containerEl.style.touchAction = 'none';
         // Safari/iOS polish
-        this.containerEl.style.webkitTapHighlightColor = 'transparent';
+        (this.containerEl.style as CSSStyleDeclaration & { webkitTapHighlightColor?: string }).webkitTapHighlightColor = 'transparent';
         // Legacy/MS prefix (no-op in modern engines, harmless)
-        this.containerEl.style.msTouchAction = 'none';
+        (this.containerEl.style as CSSStyleDeclaration & { msTouchAction?: string }).msTouchAction = 'none';
       }
     } catch {}
 
@@ -214,9 +244,9 @@ export class CameraController {
         }
         // Capture further events at document level
         if (!this._hasDocListeners) {
-          document.addEventListener('pointermove', this._onPointerMove, true);
-          document.addEventListener('pointerup', this._onPointerUp, true);
-          document.addEventListener('pointercancel', this._onPointerCancel, true);
+          document.addEventListener('pointermove', this._onPointerMove!, true);
+          document.addEventListener('pointerup', this._onPointerUp!, true);
+          document.addEventListener('pointercancel', this._onPointerCancel!, true);
           this._hasDocListeners = true;
         }
       } catch {}
@@ -333,9 +363,9 @@ export class CameraController {
         }
         // Remove document listeners only when no gesture is active
         if (!this._dragging && !this._pinching && this._touches.size === 0 && this._hasDocListeners) {
-          document.removeEventListener('pointermove', this._onPointerMove, true);
-          document.removeEventListener('pointerup', this._onPointerUp, true);
-          document.removeEventListener('pointercancel', this._onPointerCancel, true);
+          document.removeEventListener('pointermove', this._onPointerMove!, true);
+          document.removeEventListener('pointerup', this._onPointerUp!, true);
+          document.removeEventListener('pointercancel', this._onPointerCancel!, true);
           this._hasDocListeners = false;
         }
       } catch {}
@@ -350,9 +380,9 @@ export class CameraController {
         this._pinchLastDist = 0;
         this._dragging = false;
         if (this._hasDocListeners && this._touches.size === 0) {
-          document.removeEventListener('pointermove', this._onPointerMove, true);
-          document.removeEventListener('pointerup', this._onPointerUp, true);
-          document.removeEventListener('pointercancel', this._onPointerCancel, true);
+          document.removeEventListener('pointermove', this._onPointerMove!, true);
+          document.removeEventListener('pointerup', this._onPointerUp!, true);
+          document.removeEventListener('pointercancel', this._onPointerCancel!, true);
           this._hasDocListeners = false;
         }
       } catch {}
@@ -375,17 +405,17 @@ export class CameraController {
   }
 
   // Enable/disable camera input (pan/zoom) during GL interactions
-  setInputEnabled(enabled) {
+  setInputEnabled(enabled: boolean) {
     this.inputEnabled = !!enabled;
   }
 
   // Enable/disable single-finger panning, while still allowing pinch-zoom
-  setSingleFingerPanEnabled(enabled) {
+  setSingleFingerPanEnabled(enabled: boolean) {
     this.singleFingerPanEnabled = !!enabled;
   }
 
   // Inverse mapping (screen CSS px -> world)
-  screenToWorld(sx, sy) {
+  screenToWorld(sx: number, sy: number) {
     const s = this.scale || 1;
     const ex = (sx - (this.canvasOffset?.x || 0) - this.tx) / s;
     const ey = (sy - (this.canvasOffset?.y || 0) - this.ty) / s;
@@ -393,7 +423,7 @@ export class CameraController {
   }
 
   // World -> screen CSS px (container-local)
-  worldToScreen(wx, wy) {
+  worldToScreen(wx: number, wy: number) {
     const s = this.scale || 1;
     const sx = wx * s + this.tx;
     const sy = wy * s + this.ty;

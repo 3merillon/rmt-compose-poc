@@ -14,7 +14,16 @@
  */
 
 // Family -> tile hue. Higher-limit + comma aliases fold into a canonical key.
-const FAMILY_HUES = {
+export interface IconMetadata {
+  name?: string;
+  family?: string;
+  cents?: number;
+  ratio?: string;
+}
+
+interface IconOptions { showCents?: boolean; name?: string }
+
+const FAMILY_HUES: Record<string, string> = {
   '3-limit':     '#f2a71b', // amber   — Pythagorean / perfect
   '5-limit':     '#3fb950', // green   — classic just intonation
   '7-limit':     '#4a90e2', // blue    — septimal
@@ -29,34 +38,34 @@ const FAMILY_HUES = {
   'default':     '#f2a71b',
 };
 
-const FAMILY_ALIAS = {
+const FAMILY_ALIAS: Record<string, string> = {
   '11-limit': 'higher', '13-limit': 'higher', '17-limit': 'higher',
   '19-limit': 'higher', '23-limit': 'higher', 'higher-limit': 'higher',
   'commas': 'comma',
 };
 
-export function familyHue(family) {
+export function familyHue(family: string) {
   const key = FAMILY_ALIAS[family] || family;
   return FAMILY_HUES[key] || FAMILY_HUES.default;
 }
 
 // Relative luminance (sRGB) → legible ink colour for text on the hue.
-function inkFor(hex) {
+function inkFor(hex: string) {
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16) / 255;
   const g = parseInt(h.slice(2, 4), 16) / 255;
   const b = parseInt(h.slice(4, 6), 16) / 255;
-  const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
   const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   return L > 0.45 ? '#181019' : '#ffffff';
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function esc(s: string) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c as '&' | '<' | '>' | '"']));
 }
 
 // Greedy word/char wrap into at most `maxLines` lines aiming for ~maxChars each.
-function wrapLines(text, maxChars, maxLines) {
+function wrapLines(text: string, maxChars: number, maxLines: number) {
   const words = String(text).trim().split(/\s+/);
   const lines = [];
   let cur = '';
@@ -83,7 +92,7 @@ function wrapLines(text, maxChars, maxLines) {
   return kept;
 }
 
-function fractionMarkup(num, den, size, ink, meta, showCents) {
+function fractionMarkup(num: string, den: string, size: number, ink: string, meta: IconMetadata | null, showCents: boolean) {
   const cx = size / 2;
   const cents = meta && meta.cents != null ? meta.cents : null;
   const hasCents = showCents && cents != null;
@@ -106,7 +115,7 @@ function fractionMarkup(num, den, size, ink, meta, showCents) {
   return s;
 }
 
-function labelMarkup(text, size, ink, opts = {}) {
+function labelMarkup(text: string, size: number, ink: string, opts: { big?: boolean; caption?: string } = {}) {
   const t = String(text || '').trim();
   if (!t) return '';
   const caption = opts.caption ? String(opts.caption).trim() : '';
@@ -137,7 +146,7 @@ function labelMarkup(text, size, ink, opts = {}) {
  * @param {number} sizePx  tile edge length in px
  * @param {object} opts  { showCents?, name? }
  */
-export function moduleIconSvg(meta, sizePx, opts = {}) {
+export function moduleIconSvg(meta: IconMetadata | null, sizePx: number, opts: IconOptions = {}) {
   const size = Math.max(24, Math.round(sizePx || 56));
   const family = (meta && meta.family) || 'default';
   const hue = familyHue(family);
@@ -166,7 +175,7 @@ export function moduleIconSvg(meta, sizePx, opts = {}) {
 /**
  * Render the icon SVG into a container element (clears it first).
  */
-export function renderModuleIcon(container, meta, sizePx, opts = {}) {
+export function renderModuleIcon(container: Element | null, meta: IconMetadata | null, sizePx: number, opts: IconOptions = {}) {
   if (!container) return;
   container.innerHTML = moduleIconSvg(meta, sizePx, opts);
 }

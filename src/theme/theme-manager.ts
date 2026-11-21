@@ -19,14 +19,14 @@
  *   themeManager.init({ renderer, requestResync: () => updateVisualNotes(...) });
  */
 
-import { settingsStore } from '../settings/settings-store.js';
-import { getPreset } from './presets.js';
+import { settingsStore } from '../settings/settings-store.ts';
+import { getPreset } from './presets.ts';
 
 /**
  * Parse a #rgb / #rrggbb hex string to {r,g,b} 0..255 ints. Returns null on
  * failure.
  */
-function hexToRgb255(hex) {
+function hexToRgb255(hex: unknown) {
   if (typeof hex !== 'string') return null;
   let h = hex.trim().replace(/^#/, '');
   if (h.length === 3) h = h.split('').map((c) => c + c).join('');
@@ -40,7 +40,7 @@ function hexToRgb255(hex) {
  * Parse a #rgb / #rrggbb hex string to a [r,g,b,a] float array in 0..1.
  * Returns null on failure.
  */
-function hexToRgba(hex) {
+function hexToRgba(hex: unknown) {
   const c = hexToRgb255(hex);
   if (!c) return null;
   return [c.r / 255, c.g / 255, c.b / 255, 1.0];
@@ -66,7 +66,17 @@ const CSS_VAR_MAP = {
   depDuration: '--rmt-dep-duration',
 };
 
+type ResolvedTheme = ReturnType<ThemeManager['resolve']>;
+interface ThemeRenderer {
+  setConfig(patch: import('../renderer/webgl2/renderer-config.ts').RendererConfigPatch): void;
+  setThemeColors?(colors: Record<string, unknown>): void;
+}
+
 class ThemeManager {
+  declare _renderer: ThemeRenderer | null;
+  declare _requestResync: (() => void) | null;
+  declare _initialized: boolean;
+  declare _lastGeometryKey: string | null;
   constructor() {
     this._renderer = null;
     this._requestResync = null;
@@ -79,7 +89,7 @@ class ThemeManager {
    * current theme, and subscribe to settings changes.
    * @param {{renderer:object, requestResync:Function}} opts
    */
-  init({ renderer, requestResync } = {}) {
+  init({ renderer, requestResync }: { renderer?: ThemeRenderer; requestResync?: () => void } = {}) {
     this._renderer = renderer || null;
     this._requestResync = typeof requestResync === 'function' ? requestResync : null;
     this._initialized = true;
@@ -124,7 +134,7 @@ class ThemeManager {
     this._applyRenderer(theme.geometry, theme.tokens);
   }
 
-  _applyCssVars(tokens) {
+  _applyCssVars(tokens: Record<string, unknown>) {
     try {
       const rootStyle = document.documentElement.style;
       for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
@@ -133,7 +143,7 @@ class ThemeManager {
       }
       // RGB component triplets for rgba(var(--rmt-*-rgb), A) usages (glows,
       // scrollbars, translucent bars). Derived from the hex tokens.
-      const setRgb = (cssVar, hex) => {
+      const setRgb = (cssVar: string, hex: unknown) => {
         const c = hexToRgb255(hex);
         if (c) rootStyle.setProperty(cssVar, `${c.r}, ${c.g}, ${c.b}`);
       };
@@ -152,7 +162,7 @@ class ThemeManager {
     }
   }
 
-  _applyRenderer(geometry, tokens) {
+  _applyRenderer(geometry: ResolvedTheme['geometry'], tokens: Record<string, unknown>) {
     if (!this._renderer || typeof this._renderer.setConfig !== 'function') return;
     try {
       // Playhead color is already config-driven (renderer-config playhead.color

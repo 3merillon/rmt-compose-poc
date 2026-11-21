@@ -103,14 +103,19 @@ export const defaultRendererConfig = {
  * - Arrays are replaced (last write wins), primitives are overwritten
  * - Objects are merged recursively
  */
-export function normalizeRendererConfig(partial) {
+export type RendererConfig = typeof defaultRendererConfig;
+export type RendererConfigPatch = { [K in keyof RendererConfig]?: Partial<RendererConfig[K]> };
+
+export function normalizeRendererConfig(partial?: RendererConfigPatch | null): RendererConfig {
   return deepMerge(defaultRendererConfig, partial || {});
 }
 
 /**
  * Deep merge: returns a new object; does not mutate inputs.
  */
-export function deepMerge(a, b) {
+export function deepMerge<T extends object>(a: T, b: { [K in keyof T]?: Partial<T[K]> }): T;
+export function deepMerge(a: unknown, b: unknown): unknown;
+export function deepMerge(a: unknown, b: unknown): unknown {
   if (!isObject(a)) return clone(b);
   if (!isObject(b)) return clone(a);
 
@@ -127,13 +132,13 @@ export function deepMerge(a, b) {
   return out;
 }
 
-function isObject(x) {
+function isObject(x: unknown): x is Record<string, unknown> {
   return x !== null && typeof x === 'object';
 }
-function isPlainObject(x) {
+function isPlainObject(x: unknown): x is Record<string, unknown> {
   return isObject(x) && Object.getPrototypeOf(x) === Object.prototype;
 }
-function clone(v) {
+function clone(v: unknown): unknown {
   if (Array.isArray(v)) return v.slice();
   if (isPlainObject(v)) return { ...v };
   return v;

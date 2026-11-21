@@ -133,7 +133,8 @@ const HIGH_CONTRAST = {
 };
 
 /** @type {Record<string, ThemePreset>} */
-export const THEME_PRESETS = {
+export type ThemePreset = typeof CLASSIC_ORANGE;
+export const THEME_PRESETS: Record<string, ThemePreset> = {
   'classic-orange': CLASSIC_ORANGE,
   'slate-cyan': SLATE_CYAN,
   'mono-light': MONO_LIGHT,
@@ -142,6 +143,6 @@ export const THEME_PRESETS = {
 
 export const DEFAULT_THEME_ID = 'classic-orange';
 
-export function getPreset(id) {
+export function getPreset(id: string) {
   return THEME_PRESETS[id] || THEME_PRESETS[DEFAULT_THEME_ID];
 }

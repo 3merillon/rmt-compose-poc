@@ -8,7 +8,7 @@ import { bigDigits, toNumber } from '../utils/fraction-num.js';
 const EXACT_DIGIT_LIMIT = 24;
 const EDGE_DIGITS = 12;
 
-function elideDigits(v) {
+function elideDigits(v: bigint) {
   const neg = v < 0n;
   const s = (neg ? -v : v).toString();
   const body = s.length <= EXACT_DIGIT_LIMIT
@@ -26,12 +26,12 @@ function elideDigits(v) {
  * @param {object} frac - Fraction (BigInt-backed) or duck-typed {s,n,d}
  * @returns {{text: string, title: string} | null}
  */
-export function hugeFractionDisplay(frac) {
+export function hugeFractionDisplay(frac: { n?: number | bigint; d?: number | bigint; s: bigint | number } | null | undefined) {
   const n = frac?.n;
   const d = frac?.d;
   if (typeof n !== 'bigint' || typeof d !== 'bigint') return null;
   if (bigDigits(n) + bigDigits(d) <= EXACT_DIGIT_LIMIT) return null;
-  const signed = frac.s < 0n ? -n : n;
+  const signed = frac!.s < 0n ? -n : n;
   return {
     text: `≈${toNumber(frac).toPrecision(8)}`,
     title: `${elideDigits(signed)}/${elideDigits(d)}`

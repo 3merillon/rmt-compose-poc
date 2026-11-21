@@ -14,41 +14,52 @@
 
 import { eventBus } from '../utils/event-bus.js';
 import {
+  type Settings,
   SETTINGS_VERSION,
   defaultSettings,
   validateSettings,
   migrate,
-} from './settings-schema.js';
+} from './settings-schema.ts';
 
 const STORAGE_KEY = 'rmt:settings:v1';
 
-function deepClone(obj) {
+type AtPath<T, P extends string> =
+  P extends '' ? T :
+  P extends keyof T ? T[P] :
+  P extends `${infer K}.${infer Rest}` ? K extends keyof T ? AtPath<T[K], Rest> : unknown : unknown;
+
+export interface SettingsChange { path: string; value: unknown; settings: Settings }
+type Subscriber = (change: SettingsChange) => void;
+
+function deepClone<T>(obj: T): T {
   // Settings are plain JSON-compatible data.
   return JSON.parse(JSON.stringify(obj));
 }
 
-function getAtPath(obj, path) {
+function getAtPath(obj: unknown, path: string): unknown {
   const parts = path.split('.');
   let cur = obj;
   for (const p of parts) {
     if (cur == null || typeof cur !== 'object') return undefined;
-    cur = cur[p];
+    cur = (cur as Record<string, unknown>)[p];
   }
   return cur;
 }
 
-function setAtPath(obj, path, value) {
+function setAtPath(obj: Settings, path: string, value: unknown) {
   const parts = path.split('.');
-  let cur = obj;
+  let cur: Record<string, unknown> = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const p = parts[i];
     if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = {};
-    cur = cur[p];
+    cur = cur[p] as Record<string, unknown>;
   }
   cur[parts[parts.length - 1]] = value;
 }
 
 class SettingsStore {
+  _settings: Settings;
+  _subscribers: Set<Subscriber>;
   constructor() {
     this._settings = this._load();
     this._subscribers = new Set();
@@ -85,7 +96,7 @@ class SettingsStore {
     }
   }
 
-  _emit(path, value) {
+  _emit(path: string, value: unknown) {
     const payload = { path, value, settings: this.getAll() };
     for (const fn of Array.from(this._subscribers)) {
       try { fn(payload); } catch (e) { console.error('[settings] subscriber error', e); }
@@ -104,7 +115,9 @@ class SettingsStore {
    * Get a value at a dot path. Returns a deep copy for objects.
    * @param {string} path
    */
-  get(path) {
+  get(): Settings;
+  get<P extends string>(path: P): AtPath<Settings, P>;
+  get(path?: string): unknown {
     if (!path) return this.getAll();
     const v = getAtPath(this._settings, path);
     return (v && typeof v === 'object') ? deepClone(v) : v;
@@ -116,9 +129,9 @@ class SettingsStore {
    * clamps out-of-range values; the pre-edit tree is passed along so an invalid
    * edit heals back to the user's previous value, not the schema default.
    * @param {string} path
-   * @param {any} value
+   * @param {unknown} value
    */
-  set(path, value) {
+  set<P extends string>(path: P, value: unknown) {
     const prev = deepClone(this._settings);
     setAtPath(this._settings, path, value);
     this._settings = validateSettings(this._settings, prev);
@@ -133,9 +146,9 @@ class SettingsStore {
    * @param {string} section
    * @param {object} value
    */
-  setSection(section, value) {
+  setSection<K extends keyof Settings>(section: K, value: unknown) {
     const prev = deepClone(this._settings);
-    this._settings[section] = value;
+    setAtPath(this._settings, section, value);
     this._settings = validateSettings(this._settings, prev);
     this._persist();
     this._emit(section, getAtPath(this._settings, section));
@@ -146,7 +159,7 @@ class SettingsStore {
    * Reset one top-level section to defaults.
    * @param {string} section
    */
-  resetSection(section) {
+  resetSection<K extends keyof Settings>(section: K) {
     const d = defaultSettings();
     if (!(section in d)) return;
     this._settings[section] = d[section];
@@ -167,9 +180,9 @@ class SettingsStore {
   /**
    * Subscribe to any settings change. Returns an unsubscribe function.
    * (In addition to the eventBus 'settings:changed' broadcast.)
-   * @param {(payload:{path:string,value:any,settings:object})=>void} fn
+   * @param {(payload:{path:string,value:unknown,settings:object})=>void} fn
    */
-  subscribe(fn) {
+  subscribe(fn: Subscriber) {
     this._subscribers.add(fn);
     return () => this._subscribers.delete(fn);
   }

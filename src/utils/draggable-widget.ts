@@ -16,8 +16,8 @@
  * paying for the same measurements three times a frame.
  */
 
-import { viewportWidth, viewportHeight } from './viewport.js';
-import { registerPanel, raisePanel, unregisterPanel } from './panel-stack.js';
+import { viewportWidth, viewportHeight } from './viewport.ts';
+import { registerPanel, raisePanel, unregisterPanel } from './panel-stack.ts';
 
 // The fixed top bar is 50px tall; floating panels stay below it, and keep a
 // 19px buffer to every viewport edge.
@@ -27,14 +27,14 @@ export const MIN_BUFFER = 19;
 // Touch list must be probed before clientX/clientY: a MouseEvent has no `.touches`,
 // and a coordinate of 0 is falsy, so `e.clientY || e.touches[0].clientY` throws at
 // the viewport edge.
-export function pointerOf(e) {
-  if (e.touches && e.touches.length > 0) {
+export function pointerOf(e: MouseEvent | TouchEvent) {
+  if ('touches' in e && e.touches.length > 0) {
     return { x: e.touches[0].clientX, y: e.touches[0].clientY };
   }
-  if (e.changedTouches && e.changedTouches.length > 0) {
+  if ('changedTouches' in e && e.changedTouches.length > 0) {
     return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
   }
-  return { x: e.clientX, y: e.clientY };
+  return { x: 'clientX' in e ? e.clientX : undefined, y: 'clientY' in e ? e.clientY : undefined };
 }
 
 /**
@@ -57,12 +57,18 @@ export function makeDraggableWidget({
   onMove = () => {},
   isVisible = () => true,
   ignoreDragStart = () => false,
+}: {
+  el: HTMLElement;
+  handle: HTMLElement;
+  onMove?: () => void;
+  isVisible?: () => boolean;
+  ignoreDragStart?: (e: MouseEvent | TouchEvent) => boolean;
 }) {
   if (!el || !handle) return { destroy() {}, clampIntoView() {}, raise() {} };
 
   el.style.position = 'fixed';
   // Draggable panels stack against the ones that are not draggable (the "+" menu),
-  // so the stack is a module of its own — see panel-stack.js.
+  // so the stack is a module of its own — see panel-stack.ts.
   registerPanel(el);
 
   let isDragging = false;
@@ -74,7 +80,7 @@ export function makeDraggableWidget({
   let dragWidth = 0;
   let dragHandleHeight = 0;
 
-  function startDrag(e) {
+  function startDrag(e: TouchEvent | MouseEvent) {
     if (ignoreDragStart(e)) return;
     isDragging = true;
     e.preventDefault();
@@ -82,8 +88,8 @@ export function makeDraggableWidget({
 
     const rect = el.getBoundingClientRect();
     const { x, y } = pointerOf(e);
-    dragOffsetX = x - rect.left;
-    dragOffsetY = y - rect.top;
+    dragOffsetX = Number(x) - rect.left;
+    dragOffsetY = Number(y) - rect.top;
     dragWidth = rect.width;
     dragHandleHeight = handle.getBoundingClientRect().height || TOP_HEADER_HEIGHT;
 
@@ -94,20 +100,20 @@ export function makeDraggableWidget({
     document.addEventListener('touchcancel', endDrag);
   }
 
-  function duringDrag(e) {
+  function duringDrag(e: TouchEvent | MouseEvent) {
     if (!isDragging) return;
     e.preventDefault();
 
     const { x, y } = pointerOf(e);
 
     const maxLeft = viewportWidth() - dragWidth - MIN_BUFFER;
-    const newLeft = Math.max(MIN_BUFFER, Math.min(x - dragOffsetX, maxLeft));
+    const newLeft = Math.max(MIN_BUFFER, Math.min(Number(x) - dragOffsetX, maxLeft));
 
     // Only the handle has to stay on screen: a panel may hang off the bottom,
     // and onMove() shrinks it to fit.
     const minTop = TOP_HEADER_HEIGHT + MIN_BUFFER;
     const maxTop = viewportHeight() - dragHandleHeight - MIN_BUFFER;
-    const newTop = Math.max(minTop, Math.min(y - dragOffsetY, maxTop));
+    const newTop = Math.max(minTop, Math.min(Number(y) - dragOffsetY, maxTop));
 
     el.style.left = newLeft + 'px';
     el.style.top = newTop + 'px';

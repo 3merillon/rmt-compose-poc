@@ -9,7 +9,25 @@
  *       CPU fallback via RendererAdapter.pickAt remains the primary path for now.
  */
 
+interface PassBindings {
+  fboDraw: WebGLFramebuffer | null;
+  viewport: Int32Array;
+  blend: boolean;
+  depthTest: boolean;
+  scissor: boolean;
+}
+
 export class Picking {
+  gl: WebGL2RenderingContext | null;
+  fbo: WebGLFramebuffer | null;
+  colorTex: WebGLTexture | null;
+  depthRb: WebGLRenderbuffer | null;
+  canvas: HTMLCanvasElement | null;
+  devicePixelRatio: number;
+  w: number;
+  h: number;
+  _prevBindings: PassBindings | null;
+
   constructor() {
     this.gl = null;
 
@@ -32,7 +50,7 @@ export class Picking {
    * @param {HTMLCanvasElement} [canvasForCoords] Optional canvas used to compute CSS->device coords
    * @returns {boolean}
    */
-  init(gl, canvasForCoords) {
+  init(gl: WebGL2RenderingContext | null, canvasForCoords?: HTMLCanvasElement | null) {
     try {
       if (!gl) return false;
       this.gl = gl;
@@ -70,7 +88,7 @@ export class Picking {
    * Call when the canvas CSS size or DPR changes.
    * Attempts to mirror the renderer's canvas resolution.
    */
-  resizeFromCanvas(canvasForCoords) {
+  resizeFromCanvas(canvasForCoords?: HTMLCanvasElement | null) {
     if (canvasForCoords) this.canvas = canvasForCoords;
     this._resizeFromCanvas();
   }
@@ -146,7 +164,7 @@ export class Picking {
    * Coordinate system: clientX/clientY in page CSS px.
    * Returns { type: 'note', id } or null.
    */
-  readAt(clientX, clientY) {
+  readAt(clientX: number, clientY: number): { type: 'note'; id: number } | null {
     const gl = this.gl;
     if (!gl || !this.fbo || !this.colorTex) return null;
 
@@ -181,14 +199,14 @@ export class Picking {
    * Encode a positive integer id into 24-bit RGB.
    * Not used yet (draw integration TBD), kept for completeness.
    */
-  _encodeId24(id) {
+  _encodeId24(id: number) {
     const r = (id & 0x000000FF) >>> 0;
     const g = (id & 0x0000FF00) >>> 8;
     const b = (id & 0x00FF0000) >>> 16;
     return [r, g, b];
   }
 
-  _decodeId24(r, g, b) {
+  _decodeId24(r: number, g: number, b: number) {
     // 0 reserved for "no hit"
     const val = (r | (g << 8) | (b << 16)) >>> 0;
     return val;
@@ -213,7 +231,7 @@ export class Picking {
     }
   }
 
-  _allocate(w, h) {
+  _allocate(w: number, h: number) {
     const gl = this.gl;
     if (!gl) return;
 
@@ -271,7 +289,7 @@ export class Picking {
    * Convert page CSS client coordinates to device-pixel coordinates within the FBO.
    * Accounts for canvas CSS position and DPR, and flips Y for readPixels.
    */
-  _clientToPixel(clientX, clientY) {
+  _clientToPixel(clientX: number, clientY: number) {
     try {
       const dpr = this.devicePixelRatio || 1;
       if (!this.canvas) return null;

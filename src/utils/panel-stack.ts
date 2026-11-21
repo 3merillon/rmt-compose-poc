@@ -26,7 +26,7 @@
 const BASE_Z = 1200;
 
 // Back-to-front: the LAST entry is the panel on top.
-const panels = [];
+const panels: HTMLElement[] = [];
 
 function applyZ() {
   panels.forEach((el, i) => { el.style.zIndex = String(BASE_Z + i); });
@@ -36,13 +36,13 @@ function applyZ() {
  * Join the stack, at the front. Idempotent, so a panel built lazily can register on
  * every show without stealing its own place in the order.
  */
-export function registerPanel(el) {
+export function registerPanel(el: HTMLElement) {
   if (!el || panels.includes(el)) return;
   panels.push(el);
   applyZ();
 }
 
-export function unregisterPanel(el) {
+export function unregisterPanel(el: HTMLElement) {
   const i = panels.indexOf(el);
   if (i < 0) return;
   panels.splice(i, 1);
@@ -54,7 +54,7 @@ export function unregisterPanel(el) {
  * Bring `el` to the front. Call it when a panel OPENS (last opened wins) and when it
  * is PRESSED (click-to-front, so a panel buried under another is one tap away).
  */
-export function raisePanel(el) {
+export function raisePanel(el: HTMLElement) {
   const i = panels.indexOf(el);
   // Unregistered, or already on top. The already-on-top case is worth skipping
   // rather than reasserting: this runs on every mousedown on every panel.

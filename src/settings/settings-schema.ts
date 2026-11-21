@@ -33,7 +33,7 @@ export const TEMPO_HARD_MAX = 1000;
  * written tempo (so the slider can return to it). Whole BPM.
  * @returns {[number, number]}
  */
-export function tempoSliderBounds(range, notatedBpm) {
+export function tempoSliderBounds(range: { min: number; max: number } | undefined | null, notatedBpm: number): [number, number] {
   const r = range || { min: 20, max: 300 };
   const base = notatedBpm > 0 ? notatedBpm : 60;
   let lo = Math.max(Number(r.min) || 20, Math.ceil(base * 0.1));
@@ -52,7 +52,7 @@ export function tempoSliderBounds(range, notatedBpm) {
  * @param {number} hi
  * @returns {number}
  */
-export function scaleStep(lo, hi) {
+export function scaleStep(lo: number, hi: number) {
   const span = Math.max((hi - lo) || 0, SCALE_HARD_MIN);
   const raw = span / 50;
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -69,13 +69,16 @@ export function scaleStep(lo, hi) {
 /** The voice limits Settings → Audio offers (audio.maxVoices). */
 export const VOICE_LIMITS = [128, 256, 512, 1024, 2048, 4096];
 
+export interface ArrowRatio { n: number; d: number; label: string | null }
+export type Settings = ReturnType<typeof defaultSettings>;
+
 export function defaultSettings() {
   return {
     version: SETTINGS_VERSION,
     appearance: {
       themeId: 'classic-orange',
       // Sparse per-token color overrides on top of the active theme preset.
-      overrides: {},
+      overrides: {} as Record<string, unknown>,
       // Note geometry (mirrors renderer-config defaults).
       note: {
         heightWU: 22,
@@ -86,7 +89,7 @@ export function defaultSettings() {
       // that set an attack or a release (or inherit one from the BaseNote), 'all'
       // every sounding note, 'none' no note. 'own' is the app's behavior before the
       // setting existed. (Replaces the boolean `showEnvelopes`: true reads as 'all'.)
-      envelopes: 'own',
+      envelopes: 'own' as 'own' | 'all' | 'none',
       // Draw each note's release past its end: what rings after the note-off.
       // Display only; off by default.
       showTails: false,
@@ -97,9 +100,9 @@ export function defaultSettings() {
       enabled: true,
       // 'reciprocal' — user edits `up`, `down` auto-derives (d/n).
       // 'independent' — up and down are set separately.
-      mode: 'reciprocal',
-      up: { n: 2, d: 1, label: null },
-      down: { n: 1, d: 2, label: null },
+      mode: 'reciprocal' as 'reciprocal' | 'independent',
+      up: { n: 2, d: 1, label: null } as ArrowRatio,
+      down: { n: 1, d: 2, label: null } as ArrowRatio,
     },
     audio: {
       masterVolume: 1,
@@ -158,18 +161,20 @@ export function defaultSettings() {
 
 // ---- validation helpers -------------------------------------------------
 
-const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
-const clampNum = (v, lo, hi, fallback) => (isNum(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
-const asBool = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
-const isPosInt = (v) => Number.isInteger(v) && v > 0;
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const clampNum = (v: unknown, lo: number, hi: number, fallback: number) => (isNum(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+const asBool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object';
+const section = (v: unknown) => isRecord(v) ? v : {};
+const isPosInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
 
 /**
  * Validate/coerce an arrow ratio {n,d,label}. Returns a clean object.
  * Enforces positive integers, ratio in [1/16, 16], ratio !== 1.
  */
-export function validateRatio(raw, fallback) {
+export function validateRatio(raw: unknown, fallback?: ArrowRatio): ArrowRatio {
   const fb = fallback || { n: 2, d: 1, label: null };
-  if (!raw || typeof raw !== 'object') return { ...fb };
+  if (!isRecord(raw)) return { ...fb };
   let n = isPosInt(raw.n) ? raw.n : fb.n;
   let d = isPosInt(raw.d) ? raw.d : fb.d;
   const ratio = n / d;
@@ -187,7 +192,7 @@ export function validateRatio(raw, fallback) {
  * wholesale rather than inventing a bound the user never chose. (The panel
  * fixes ordering up before it writes, so this is the corrupt-storage path.)
  */
-function validateScaleRange(rawLo, rawHi, defLo, defHi) {
+function validateScaleRange(rawLo: unknown, rawHi: unknown, defLo: number, defHi: number) {
   const lo = clampNum(rawLo, SCALE_HARD_MIN, SCALE_HARD_MAX, defLo);
   const hi = clampNum(rawHi, SCALE_HARD_MIN, SCALE_HARD_MAX, defHi);
   return (hi > lo) ? { lo, hi } : { lo: defLo, hi: defHi };
@@ -201,50 +206,50 @@ function validateScaleRange(rawLo, rawHi, defLo, defHi) {
  * heals to the value the user previously had instead of the schema default —
  * so a bad edit doesn't silently replace a carefully-set interval with the
  * octave. Load/migrate paths pass no `prev` and behave as before.
- * @param {any} raw - possibly-partial, possibly-corrupt input
+ * @param {unknown} raw - possibly-partial, possibly-corrupt input
  * @param {object} [prev] - previous validated settings, used as ratio fallback
  * @returns {object}
  */
-export function validateSettings(raw, prev) {
+export function validateSettings(raw: unknown, prev?: Settings) {
   const d = defaultSettings();
-  if (!raw || typeof raw !== 'object') return d;
+  if (!isRecord(raw)) return d;
 
   const src = raw;
-  const a = src.appearance || {};
-  const an = a.note || {};
+  const a = section(src.appearance);
+  const an = section(a.note);
   d.appearance.themeId = typeof a.themeId === 'string' ? a.themeId : d.appearance.themeId;
   d.appearance.overrides = (a.overrides && typeof a.overrides === 'object') ? { ...a.overrides } : {};
   d.appearance.note.heightWU = clampNum(an.heightWU, 8, 60, d.appearance.note.heightWU);
   d.appearance.note.borderPxAtZoom1 = clampNum(an.borderPxAtZoom1, 0, 6, d.appearance.note.borderPxAtZoom1);
   d.appearance.note.roundedCornerPxAtZoom1 = clampNum(an.roundedCornerPxAtZoom1, 0, 20, d.appearance.note.roundedCornerPxAtZoom1);
-  d.appearance.envelopes = ['own', 'all', 'none'].includes(a.envelopes)
+  d.appearance.envelopes = (a.envelopes === 'own' || a.envelopes === 'all' || a.envelopes === 'none')
     ? a.envelopes
     : (a.showEnvelopes === true ? 'all' : d.appearance.envelopes);
   if (isPosInt(a.detailCutoff)) d.appearance.detailCutoff = Math.min(a.detailCutoff, MAX_MODULE_NOTES);
   d.appearance.neverReduceDetail = asBool(a.neverReduceDetail, false);
   d.appearance.showTails = asBool(a.showTails, d.appearance.showTails);
 
-  const ar = src.arrows || {};
-  const prevAr = (prev && prev.arrows) || {};
+  const ar = section(src.arrows);
+  const prevAr = prev?.arrows;
   d.arrows.enabled = asBool(ar.enabled, d.arrows.enabled);
   d.arrows.mode = ar.mode === 'independent' ? 'independent' : 'reciprocal';
-  d.arrows.up = validateRatio(ar.up, validateRatio(prevAr.up, d.arrows.up));
+  d.arrows.up = validateRatio(ar.up, validateRatio(prevAr?.up, d.arrows.up));
   if (d.arrows.mode === 'reciprocal') {
     d.arrows.down = { n: d.arrows.up.d, d: d.arrows.up.n, label: null };
   } else {
-    d.arrows.down = validateRatio(ar.down, validateRatio(prevAr.down, d.arrows.down));
+    d.arrows.down = validateRatio(ar.down, validateRatio(prevAr?.down, d.arrows.down));
   }
 
-  const au = src.audio || {};
-  const tp = au.tempered || {};
-  const rv = au.reverb || {};
-  const st = au.stereo || {};
-  const lm = au.limiter || {};
+  const au = section(src.audio);
+  const tp = section(au.tempered);
+  const rv = section(au.reverb);
+  const st = section(au.stereo);
+  const lm = section(au.limiter);
   d.audio.masterVolume = clampNum(au.masterVolume, 0, 1, d.audio.masterVolume);
   d.audio.defaultInstrument = typeof au.defaultInstrument === 'string' ? au.defaultInstrument : d.audio.defaultInstrument;
   d.audio.tempered.enabled = asBool(tp.enabled, d.audio.tempered.enabled);
   d.audio.maxVoices = VOICE_LIMITS.includes(Number(au.maxVoices)) ? Number(au.maxVoices) : d.audio.maxVoices;
-  const lp = au.loop || {};
+  const lp = section(au.loop);
   d.audio.loop.fold = asBool(lp.fold, d.audio.loop.fold);
   d.audio.reverb.enabled = asBool(rv.enabled, d.audio.reverb.enabled);
   d.audio.reverb.roomSize = clampNum(rv.roomSize, 0, 1, d.audio.reverb.roomSize);
@@ -255,20 +260,20 @@ export function validateSettings(raw, prev) {
   d.audio.stereo.enabled = asBool(st.enabled, d.audio.stereo.enabled);
   d.audio.stereo.width = clampNum(st.width, 0, 1, d.audio.stereo.width);
   d.audio.limiter.enabled = asBool(lm.enabled, d.audio.limiter.enabled);
-  const tr = au.tempoRange || {};
-  const tLo = clampNum(Math.round(tr.min), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.min);
-  const tHi = clampNum(Math.round(tr.max), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.max);
+  const tr = section(au.tempoRange);
+  const tLo = clampNum(Math.round(Number(tr.min)), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.min);
+  const tHi = clampNum(Math.round(Number(tr.max)), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.max);
   if (tHi > tLo) d.audio.tempoRange = { min: tLo, max: tHi };
 
-  const lib = src.library || {};
+  const lib = section(src.library);
   d.library.iconSizePx = clampNum(lib.iconSizePx, 32, 96, d.library.iconSizePx);
   d.library.showCents = asBool(lib.showCents, d.library.showCents);
   d.library.layoutVersion = isNum(lib.layoutVersion) ? lib.layoutVersion : d.library.layoutVersion;
 
   // Limits first, then the values — the range is what the value is clamped into,
   // so narrowing the limits pulls an out-of-range scale back in with it.
-  const sc = src.scale || {};
-  const sl = sc.limits || {};
+  const sc = section(src.scale);
+  const sl = section(sc.limits);
   const xr = validateScaleRange(sl.xMin, sl.xMax, d.scale.limits.xMin, d.scale.limits.xMax);
   const yr = validateScaleRange(sl.yMin, sl.yMax, d.scale.limits.yMin, d.scale.limits.yMax);
   d.scale.limits = { xMin: xr.lo, xMax: xr.hi, yMin: yr.lo, yMax: yr.hi };
@@ -283,10 +288,10 @@ export function validateSettings(raw, prev) {
 /**
  * Migrate a stored envelope forward to the current version. Currently a
  * passthrough (v1 is the first version); validateSettings then hardens it.
- * @param {any} stored
+ * @param {unknown} stored
  * @returns {object}
  */
-export function migrate(stored) {
+export function migrate(stored: unknown) {
   // Future: switch on stored.version and transform. For now just validate.
   return validateSettings(stored);
 }

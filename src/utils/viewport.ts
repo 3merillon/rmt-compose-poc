@@ -35,11 +35,12 @@
 // by construction.
 const KEYBOARD_SHRINK_PX = 120;
 
-const listeners = new Set();
+type ViewportListener = (width: number, height: number) => void;
+const listeners = new Set<ViewportListener>();
 let lastW = 0;
 let lastH = 0;
 let started = false;
-let probe = null;
+let probe: HTMLDivElement | null = null;
 
 /**
  * The one measurement a browser cannot get wrong, because it is not a report — it IS
@@ -103,7 +104,7 @@ function measureHeight() {
 // once per frame and hand out the same answer — which makes this cheaper than the
 // window.innerHeight reads it replaced, not dearer. `publish()` drops the cache first, so
 // the authoritative path always measures fresh.
-let cache = null;
+let cache: { w: number; h: number } | null = null;
 let cacheScheduled = false;
 
 function invalidate() {
@@ -133,7 +134,7 @@ export function viewportHeight() {
 }
 
 /** Run `fn(width, height)` whenever the usable viewport changes. */
-export function onViewportChange(fn) {
+export function onViewportChange(fn: ViewportListener) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }

@@ -24,6 +24,12 @@ export function showConfirmation({
   cancelLabel = 'Cancel',
   onConfirm,
   onCancel,
+}: {
+  messageHtml: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel?: () => void;
 }) {
   const overlay = document.createElement('div');
   overlay.className = 'delete-confirm-overlay';
@@ -52,7 +58,7 @@ export function showConfirmation({
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }
 
-  function onKeydown(e) {
+  function onKeydown(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
     e.stopPropagation();
     close();

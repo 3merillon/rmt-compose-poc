@@ -9,8 +9,10 @@
  * back to its own colour.
  */
 
+export type RGBA = [number, number, number, number];
+
 /** HSL to RGBA (h in degrees, s and l in 0..100, a in 0..1). */
-export function hslaToRgba(h, s, l, a) {
+export function hslaToRgba(h: number, s: number, l: number, a?: number | null): RGBA {
   h = (h % 360 + 360) % 360;
   s = Math.max(0, Math.min(100, s)) / 100;
   l = Math.max(0, Math.min(100, l)) / 100;
@@ -28,7 +30,7 @@ export function hslaToRgba(h, s, l, a) {
   return [r + m, g + m, b + m, a != null ? a : 1];
 }
 
-function parseDirect(s) {
+function parseDirect(s: string): RGBA | null {
   if (s.startsWith('rgb')) {
     const m = s.match(/^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/);
     if (m) return [Number(m[1]) / 255, Number(m[2]) / 255, Number(m[3]) / 255, m[4] != null ? Number(m[4]) : 1];
@@ -40,17 +42,17 @@ function parseDirect(s) {
     if (!/^[0-9a-f]+$/.test(hex)) return null;
     if (hex.length === 3 || hex.length === 4) hex = hex.split('').map((ch) => ch + ch).join('');
     if (hex.length === 6 || hex.length === 8) {
-      const byte = (i) => parseInt(hex.slice(i, i + 2), 16) / 255;
+      const byte = (i: number) => parseInt(hex.slice(i, i + 2), 16) / 255;
       return [byte(0), byte(2), byte(4), hex.length === 8 ? byte(6) : 1];
     }
   }
   return null;
 }
 
-let ctx2d;
+let ctx2d: CanvasRenderingContext2D | null | undefined;
 // The browser's own reading of a CSS colour: '#rrggbb' or 'rgba(r, g, b, a)', or
 // null when it is not a colour (or there is no DOM, as in node).
-function browserNormalise(s) {
+function browserNormalise(s: string): string | null {
   if (ctx2d === undefined) {
     try { ctx2d = document.createElement('canvas').getContext('2d'); } catch { ctx2d = null; }
   }
@@ -71,7 +73,7 @@ function browserNormalise(s) {
  *        paths do not read (default: the browser, through a 2D canvas)
  * @returns {number[]|null} [r, g, b, a] in 0..1
  */
-export function parseCssColor(col, normalise = browserNormalise) {
+export function parseCssColor(col: unknown, normalise = browserNormalise) {
   if (typeof col !== 'string') return null;
   const s = col.trim().toLowerCase();
   if (!s) return null;

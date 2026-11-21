@@ -18,15 +18,15 @@
 const ICON_UP = '<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 7.5 6 4.5 9 7.5"/></svg>';
 const ICON_DOWN = '<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
 
-function decimalsOf(x) {
+function decimalsOf(x: number) {
   const s = String(x);
   if (s.includes('e-')) return Number(s.split('e-')[1]) || 0;
   const i = s.indexOf('.');
   return i < 0 ? 0 : s.length - i - 1;
 }
 
-function stepOf(input, value) {
-  const ds = parseFloat(input.dataset.step);
+function stepOf(input: HTMLInputElement, value: number) {
+  const ds = parseFloat(input.dataset.step ?? '');
   if (Number.isFinite(ds) && ds > 0) return ds;
   const st = parseFloat(input.step);
   if (Number.isFinite(st) && st > 0) return st;
@@ -35,7 +35,7 @@ function stepOf(input, value) {
 }
 
 /** Step `input` once in direction dir (+1 / -1). Exported for tests. */
-export function stepNumberInput(input, dir) {
+export function stepNumberInput(input: HTMLInputElement, dir: number) {
   if (!input || input.disabled || input.readOnly) return;
   const cur = parseFloat(input.value);
   const min = parseFloat(input.min), max = parseFloat(input.max);
@@ -53,20 +53,20 @@ export function stepNumberInput(input, dir) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function makeButton(input, dir) {
+function makeButton(input: HTMLInputElement, dir: number) {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'rmt-stepper-btn ' + (dir > 0 ? 'rmt-stepper-up' : 'rmt-stepper-down');
   b.tabIndex = -1;                       // the field itself keeps the arrow keys
   b.setAttribute('aria-label', dir > 0 ? 'Increase' : 'Decrease');
   b.innerHTML = dir > 0 ? ICON_UP : ICON_DOWN;
-  let delay = null, repeat = null;
-  const stop = () => { clearTimeout(delay); clearInterval(repeat); delay = repeat = null; };
+  let delay: number | undefined, repeat: number | undefined;
+  const stop = () => { clearTimeout(delay); clearInterval(repeat); delay = repeat = undefined; };
   b.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();                  // keep focus (and an open edit) in the field
     stepNumberInput(input, dir);
-    delay = setTimeout(() => { repeat = setInterval(() => stepNumberInput(input, dir), 70); }, 420);
+    delay = window.setTimeout(() => { repeat = window.setInterval(() => stepNumberInput(input, dir), 70); }, 420);
   });
   b.addEventListener('pointerup', stop);
   b.addEventListener('pointerleave', stop);
@@ -75,7 +75,7 @@ function makeButton(input, dir) {
 }
 
 /** Wrap one number field with the steppers (idempotent). */
-export function enhanceNumberInput(input) {
+export function enhanceNumberInput(input: HTMLInputElement) {
   if (!input || input.dataset.rmtStepper === '1' || input.type !== 'number') return;
   if (!input.parentNode) return;
   input.dataset.rmtStepper = '1';
@@ -90,17 +90,17 @@ export function enhanceNumberInput(input) {
   wrap.appendChild(col);
 }
 
-function scan(root) {
+function scan(root: Element) {
   if (!root || !root.querySelectorAll) return;
-  if (root.matches && root.matches('input[type="number"]')) enhanceNumberInput(root);
-  root.querySelectorAll('input[type="number"]').forEach(enhanceNumberInput);
+  if (root instanceof HTMLInputElement && root.type === 'number') enhanceNumberInput(root);
+  root.querySelectorAll<HTMLInputElement>('input[type="number"]').forEach(enhanceNumberInput);
 }
 
-export function initNumberSteppers() {
+export const initNumberSteppers: { (): void; done?: boolean } = function init() {
   if (typeof document === 'undefined' || initNumberSteppers.done) return;
   initNumberSteppers.done = true;
   scan(document.body);
   new MutationObserver((records) => {
-    for (const r of records) for (const n of r.addedNodes) if (n.nodeType === 1) scan(n);
+    for (const r of records) for (const n of r.addedNodes) if (n instanceof Element) scan(n);
   }).observe(document.body, { childList: true, subtree: true });
 }
