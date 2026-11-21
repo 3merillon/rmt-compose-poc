@@ -1,105 +1,33 @@
 ---
 layout: home
 title: RMT Compose
-description: A ratio-based music composition tool. Write note pitches, start times and durations as exact fractions of one another, and hear the result.
-
+description: Hear the canon, trace its pitches and rhythms, and compose with exact musical relationships.
 hero:
   name: RMT Compose
-  text: Relative Music Theory
-  tagline: Compose with exact ratios instead of fixed pitches
+  text: Compose with relative pitch and time
+  tagline: Hear an eight-bar canon. Change one bass note and listen to the voice that follows it.
   image:
-    src: /screenshot.png
-    alt: The RMT Compose workspace — coloured note rectangles on a frequency/time grid, with the orange BaseNote circle at the left
+    src: /img/workspace-overview.png
+    alt: The opening bars of the canon with one blue bass note selected
   actions:
     - theme: brand
-      text: Get Started
-      link: /getting-started/
+      text: Make your first change
+      link: /getting-started/first-composition
     - theme: alt
-      text: Try the App
-      link: https://rmt.world
-    - theme: alt
-      text: View on GitHub
-      link: https://github.com/3merillon/rmt-compose-poc
-
-features:
-  - icon: 🎵
-    title: Ratio-First Music
-    details: A perfect fifth is 3/2, not 1.4983. Every note property is an expression over exact fractions, so intervals stay pure no matter where you move the BaseNote.
-  - icon: 🔗
-    title: Dependencies You Can See
-    details: A note can reference another note's pitch, start time or duration. Change the parent and every dependent follows. Select a note and its dependency lines light up — orange for frequency, teal for start time, purple for duration.
-  - icon: 🎹
-    title: Tuning Beyond 12-TET
-    details: The library ships 12-TET, 19-TET, 31-TET, Bohlen-Pierce, an 81-note Tesla scale and a mixed-base experiment. Power expressions let you build your own.
-  - icon: 📦
-    title: An 81-Module Library
-    details: Six sections — Intervals, Chords, Progressions, Melodies, Scale Systems, Custom — searchable by name, ratio, cents or tag. Drag a module onto a note and the whole structure re-roots itself there.
-  - icon: 🎧
-    title: Playback With a Room
-    details: Nine synth voices plus CC0 multisampled piano and violin, running through a reverb send, an optional pitch-based stereo spread and a master limiter.
-  - icon: 🎛️
-    title: Settings and Themes
-    details: Five tabs behind the top-bar gear — Appearance (four theme presets with per-colour overrides), Arrows (the interval the transpose arrows use), Audio, Library and Scale. Changes apply live and persist across reloads.
+      text: Open the app
+      link: https://www.rmt.world/
 ---
 
-## What is RMT Compose?
+Returning from the previous release? [What’s new in v2](/release-notes) covers the changes from the published version.
 
-RMT Compose is a proof-of-concept music composition tool built around **relative music theory**: the idea that musical relationships are ratios, not pitches.
+## Hear a relationship
 
-Instead of saying "this note is 659.25 Hz", you say "this note is 3/2 times the BaseNote's frequency". The consequences are practical:
+Press **Play** to hear the startup canon. A second bass answers the first a bar later. Zoom in and select a note. Its pitch can follow a note in another voice while its timing follows the previous note in its own line. In bar 5 the answering bass takes its A from an E that has yet to sound. [Read the canon and its cadences](/tutorials/workflows/canon-and-cadences)
 
-- **Intervals stay pure.** A 3/2 fifth is stored as the fraction 3/2 and evaluated exactly. It never drifts into a rounded decimal.
-- **Transposition is one edit.** Change the BaseNote's frequency and every note defined against it moves with it, in tune.
-- **Alternative tunings are just expressions.** `2^(1/12)` is a 12-TET semitone; `3^(1/13)` is a Bohlen-Pierce step. Nothing special is needed to write them.
+If the app has resumed an earlier session, download your piece with **+ → Save Module**. Choose **+ → Load Module ▾ → Reset Default Module** and confirm to hear the canon. Undo restores the previous score in this session. [Opening and restoring scores](/user-guide/modules/loading-modules)
 
-The workspace is a WebGL2 canvas: notes are rectangles on a frequency (vertical) / time (horizontal) grid, and you drag, resize, select and transpose them directly.
+## Try a different voicing
 
-## Quick example
+The **Progressions** section holds eight short scores. In **V7 – I** the harmony resolves from dominant to tonic while the lowest sounding voice moves down a whole tone. Drop a progression onto the BaseNote, play it, then move one chord tone by an octave and compare the two versions with **Undo**. [Module library](/user-guide/modules/module-library)
 
-A major triad in just intonation:
-
-| Note | Ratio | Interval |
-|------|-------|----------|
-| Root | 1/1 | Unison |
-| Third | 5/4 | Major third |
-| Fifth | 3/2 | Perfect fifth |
-
-You write those as frequency expressions:
-
-```
-base.f              # the root — the BaseNote's own frequency
-base.f * (5/4)      # a major third above it
-base.f * (3/2)      # a perfect fifth above it
-```
-
-Time works the same way. `base.d` is the BaseNote's duration, the time unit (one beat, if you count in beats), and `[1].t + [1].d` means "start exactly when note 1 ends":
-
-```
-base.d * 2          # two time units long
-[1].t + [1].d       # starts when note 1 ends
-```
-
-See the [expression syntax reference](/reference/expressions/syntax) for the full language.
-
-## Who is this for?
-
-- **Musicians and composers** exploring just intonation and microtonal music
-- **Music theorists** who want interval relationships to be exact and explicit
-- **Educators** teaching the harmonic series and the physics of tuning
-- **Developers** interested in expression DSLs, bytecode evaluation and WebGL rendering
-
-## Getting started
-
-<div class="tip custom-block" style="padding-top: 8px">
-
-Start with [Your First Composition](/getting-started/first-composition) — three notes in five minutes — or read [Core Concepts](/getting-started/concepts) first. To run it locally, see [Installation](/getting-started/installation).
-
-</div>
-
-## Support the project
-
-RMT Compose is free and open source under the **MIT License**. If you find it useful, consider supporting its development:
-
-<a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #e89191 0%, #d66b6b 100%); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">
-  ❤️ Donate
-</a>
+Use the [User Guide](/user-guide/) to find a control, the [Reference](/reference/) to look up an expression and the [Developer guide](/developer/) to build or test the app.

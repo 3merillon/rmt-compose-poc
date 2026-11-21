@@ -15,29 +15,38 @@ export default defineConfig({
 
   head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }],
-    ['link', { rel: 'canonical', href: 'https://docs.rmt.world/' }],
     ['meta', { property: 'og:title', content: 'RMT Compose Documentation' }],
     ['meta', { property: 'og:description', content: 'Learn to compose music using exact ratios and relative music theory' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:url', content: 'https://docs.rmt.world/' }],
-    ['meta', { property: 'og:image', content: 'https://docs.rmt.world/screenshot.png' }],
+    ['meta', { property: 'og:image', content: 'https://docs.rmt.world/img/workspace-overview.png' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'RMT Compose Documentation' }],
     ['meta', { name: 'twitter:description', content: 'Learn to compose music using exact ratios and relative music theory' }],
-    ['meta', { name: 'twitter:image', content: 'https://docs.rmt.world/screenshot.png' }],
+    ['meta', { name: 'twitter:image', content: 'https://docs.rmt.world/img/workspace-overview.png' }],
   ],
+
+  transformPageData(pageData) {
+    if (pageData.isNotFound) return
+    const path = pageData.relativePath.replace(/(^|\/)index\.md$/, '$1').replace(/\.md$/, '.html')
+    const url = new URL(path, 'https://docs.rmt.world/').href
+    pageData.frontmatter.head = [
+      ...(pageData.frontmatter.head ?? []),
+      ['link', { rel: 'canonical', href: url }],
+      ['meta', { property: 'og:url', content: url }]
+    ]
+  },
 
   themeConfig: {
     //logo: '/logo.svg',
     siteTitle: 'RMT Compose',
 
     nav: [
-      { text: 'Guide', link: '/getting-started/' },
+      { text: 'Getting Started', link: '/getting-started/' },
       { text: 'User Guide', link: '/user-guide/' },
       { text: 'Tutorials', link: '/tutorials/' },
       { text: 'Reference', link: '/reference/' },
       { text: 'Developer', link: '/developer/' },
-      { text: 'App', link: 'https://rmt.world', target: '_blank' },
+      { text: 'App', link: 'https://www.rmt.world/', target: '_blank' },
       { text: '❤️ Donate', link: 'https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00', target: '_blank' }
     ],
 
@@ -47,6 +56,7 @@ export default defineConfig({
           text: 'Getting Started',
           items: [
             { text: 'Introduction', link: '/getting-started/' },
+            { text: 'What’s new in v2', link: '/release-notes' },
             { text: 'Installation', link: '/getting-started/installation' },
             { text: 'First Composition', link: '/getting-started/first-composition' },
             { text: 'Core Concepts', link: '/getting-started/concepts' }
@@ -132,6 +142,7 @@ export default defineConfig({
           text: 'Intermediate',
           collapsed: false,
           items: [
+            { text: 'Intermediate overview', link: '/tutorials/intermediate/' },
             { text: 'Note Dependencies', link: '/tutorials/intermediate/dependencies' },
             { text: 'Octave Manipulation', link: '/tutorials/intermediate/octaves' },
             { text: 'Working with Measures', link: '/tutorials/intermediate/measures' }
@@ -141,6 +152,7 @@ export default defineConfig({
           text: 'Advanced',
           collapsed: false,
           items: [
+            { text: 'Advanced overview', link: '/tutorials/advanced/' },
             { text: 'Microtonal Composition', link: '/tutorials/advanced/microtonal' },
             { text: 'Understanding SymbolicPower', link: '/tutorials/advanced/symbolic-power' },
             { text: 'Complex Dependencies', link: '/tutorials/advanced/complex-dependencies' }
@@ -150,6 +162,8 @@ export default defineConfig({
           text: 'Workflows',
           collapsed: false,
           items: [
+            { text: 'Workflow overview', link: '/tutorials/workflows/' },
+            { text: 'Read the canon and its cadences', link: '/tutorials/workflows/canon-and-cadences' },
             { text: 'Building a Module Library', link: '/tutorials/workflows/module-library' },
             { text: 'Exploring Intervals', link: '/tutorials/workflows/intervals' },
             { text: 'Microtonal Experiments', link: '/tutorials/workflows/microtonal-experiments' }
