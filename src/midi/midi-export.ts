@@ -53,9 +53,55 @@
  */
 
 import Fraction from 'fraction.js';
-import { toNumber } from '../utils/fraction-num.js';
-import { amplitudeToGain, MAX_AMPLITUDE } from '../player/amplitude.js';
-import { isMeasureNote, isReferenceNote } from '../note.js';
+import { toNumber } from '../utils/fraction-num.ts';
+import { amplitudeToGain, MAX_AMPLITUDE } from '../player/amplitude.ts';
+import { isMeasureNote, isReferenceNote } from '../note.ts';
+
+import type { Module } from '../module.ts';
+
+export interface MidiOptions {
+  ppq?: number;
+  bendRange?: number;
+  unityVelocity?: number;
+  a4?: number;
+  title?: string;
+  layout?: 'general' | 'mpe';
+}
+
+interface MidiNote {
+  id: number;
+  instrument: string;
+  startTick: number;
+  endTick: number;
+  key: number;
+  bend: number;
+  cents: number;
+  velocity: number;
+  frequency: number;
+  channel: number;
+  program?: number;
+}
+interface Zone { freeAt: number[]; notes: MidiNote[] }
+interface Port extends Zone { last: (string | null)[] }
+type Track = { name: string; instrument: string; zone: number; notes: MidiNote[] } & (
+  { layout: 'general'; port: number; program: number } |
+  { layout: 'mpe'; memberChannels: number }
+);
+interface InstrumentReport {
+  instrument: string;
+  program?: number;
+  notes: number;
+  tracks: number;
+  maxPolyphony: number;
+}
+interface MidiEvent {
+  tick: number;
+  priority: number;
+  seq: number;
+  bytes: number[];
+}
+type SkipReason = 'silent' | 'noPitch' | 'outOfRange' | 'noLength' | 'beforeStart';
+export type MidiPlan = ReturnType<typeof planMidi>;
 
 /** MPE lower zone: master on channel 1 (index 0), members on channels 2–16. */
 const MASTER_CHANNEL = 0;
@@ -69,7 +115,7 @@ const MEMBER_CHANNELS = 15;
 const GENERAL_CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
 
 /** General MIDI program (0-based) for each instrument; anything else plays as piano. */
-const GM_PROGRAMS = Object.freeze({
+const GM_PROGRAMS: Readonly<Record<string, number>> = Object.freeze({
   'piano': 0,           // Acoustic Grand Piano
   'fm-epiano': 5,       // Electric Piano 2 (the FM one)
   'vibraphone': 11,     // Vibraphone
@@ -118,9 +164,9 @@ export const MIDI_EXPORT_DEFAULTS = Object.freeze({
 // ---------------------------------------------------------------------------
 
 /** Any evaluated value as a real Fraction (the evaluator hands out Fractions). */
-function asFraction(value) {
+function asFraction(value: Parameters<typeof toNumber>[0]) {
   if (value instanceof Fraction) return value;
-  if (value && typeof value.n === 'bigint' && typeof value.d === 'bigint') {
+  if (value && typeof value === 'object' && typeof value.n === 'bigint' && typeof value.d === 'bigint') {
     const sign = value.s != null && value.s < 0n ? -1n : 1n;
     return new Fraction(sign * value.n, value.d);
   }
@@ -129,7 +175,7 @@ function asFraction(value) {
 }
 
 /** Nearest integer to an exact Fraction, ties upward; null if not a safe integer. */
-function roundToInteger(frac) {
+function roundToInteger(frac: Fraction) {
   const num = 2n * frac.s * frac.n + frac.d;
   const den = 2n * frac.d;
   let q = num / den;                               // BigInt division truncates
@@ -150,7 +196,7 @@ function roundToInteger(frac) {
  * @returns {{ppq:number, bendRange:number, usPerQuarter:number, timeSignature:{numerator:number,denominator:number}|null,
  *   title:string, endTick:number, tracks:Array, report:object}}
  */
-export function planMidi(module, options = {}) {
+export function planMidi(module: Module, options: MidiOptions = {}) {
   const opt = { ...MIDI_EXPORT_DEFAULTS, ...options };
   const ppq = Math.round(Number(opt.ppq));
   if (!(ppq >= 1 && ppq <= 32767)) throw new RangeError(`ppq must be 1..32767 (got ${opt.ppq})`);
@@ -165,13 +211,13 @@ export function planMidi(module, options = {}) {
   if (layout !== 'general' && layout !== 'mpe') throw new RangeError(`layout must be 'general' or 'mpe' (got ${opt.layout})`);
 
   const cache = module.evaluateModule();
-  const base = cache.get(0) || {};
+  const base = cache.get(0);
   const warnings = [];
 
   // --- tempo -----------------------------------------------------------------
   // Nothing stores a tempo: the BaseNote's duration is the time unit, written
   // to the file as one quarter note.
-  const unit = asFraction(base.duration);
+  const unit = asFraction(base?.duration);
   const exactTempo = (unit && unit.compare(0) > 0) ? new Fraction(60).div(unit) : new Fraction(60);
 
   const idealUs = roundToInteger(new Fraction(60000000).div(exactTempo));
@@ -201,14 +247,14 @@ export function planMidi(module, options = {}) {
   const timeSignature = timeSignatureFor(barUnits);
 
   // --- notes -------------------------------------------------------------------
-  const skipped = { silent: [], noPitch: [], outOfRange: [], noLength: [], beforeStart: [] };
+  const skipped: Record<SkipReason, number[]> = { silent: [], noPitch: [], outOfRange: [], noLength: [], beforeStart: [] };
   let silences = 0, references = 0, lengthened = 0, clippedAtStart = 0, amplitudeClamped = 0, velocityFloored = 0;
   let maxStartError = 0, maxLengthError = 0, maxPitchError = 0;
   let endTick = 0;
-  const byInstrument = new Map();   // instrument -> notes, in first-appearance order
+  const byInstrument = new Map<string, MidiNote[]>();   // instrument -> notes, in first-appearance order
 
   const ids = Object.keys(module.notes).map(Number).filter((id) => id !== 0).sort((a, b) => a - b);
-  const instrumentMemo = new Map(); // one walk per line (Module.findInstrument)
+  const instrumentMemo = new Map<number, string>(); // one walk per line (Module.findInstrument)
   for (const id of ids) {
     const note = module.notes[id];
     const r = cache.get(id);
@@ -277,7 +323,7 @@ export function planMidi(module, options = {}) {
 
     const instrument = String(module.findInstrument(note, instrumentMemo) || 'sine-wave').toLowerCase();
     if (!byInstrument.has(instrument)) byInstrument.set(instrument, []);
-    byInstrument.get(instrument).push({ id, instrument, startTick, endTick: noteEndTick, key, bend, cents, velocity, frequency, channel: -1 });
+    byInstrument.get(instrument)!.push({ id, instrument, startTick, endTick: noteEndTick, key, bend, cents, velocity, frequency, channel: -1 });
   }
 
   // --- channels ----------------------------------------------------------------
@@ -286,8 +332,8 @@ export function planMidi(module, options = {}) {
   // that has been silent the longest — the rotation that leaves a release tail
   // the most time before the channel's bend is moved for the next note. When
   // every member channel is sounding, the note opens (or joins) a further track.
-  const tracks = [];
-  const instrumentReports = [];
+  const tracks: Track[] = [];
+  const instrumentReports: InstrumentReport[] = [];
   let overflowNotes = 0;
   let exported = 0;
 
@@ -298,13 +344,13 @@ export function planMidi(module, options = {}) {
     // re-voiced), otherwise the one silent longest. Past fifteen notes at once
     // the surplus goes to a second port, which a single-port player cannot follow.
     const all = [...byInstrument.values()].flat().sort((a, b) => (a.startTick - b.startTick) || (a.id - b.id));
-    const ports = [];
+    const ports: Port[] = [];
     for (const note of all) {
       note.program = GM_PROGRAMS[note.instrument] ?? 0;
       let placed = false;
       for (let p = 0; p < ports.length && !placed; p++) placed = placeInPort(ports[p], note);
       if (!placed) {
-        const port = { freeAt: new Array(GENERAL_CHANNELS.length).fill(-1), last: new Array(GENERAL_CHANNELS.length).fill(null), notes: [] };
+        const port: Port = { freeAt: new Array<number>(GENERAL_CHANNELS.length).fill(-1), last: new Array<string | null>(GENERAL_CHANNELS.length).fill(null), notes: [] };
         ports.push(port);
         placeInPort(port, note);
       }
@@ -329,12 +375,12 @@ export function planMidi(module, options = {}) {
     }
   } else for (const [instrument, notes] of byInstrument) {
     notes.sort((a, b) => (a.startTick - b.startTick) || (a.id - b.id));
-    const zones = [];
+    const zones: Zone[] = [];
     for (const note of notes) {
       let placed = false;
       for (let z = 0; z < zones.length && !placed; z++) placed = placeInZone(zones[z], note);
       if (!placed) {
-        const zone = { freeAt: new Array(MEMBER_CHANNELS).fill(-1), notes: [] };
+        const zone: Zone = { freeAt: new Array<number>(MEMBER_CHANNELS).fill(-1), notes: [] };
         zones.push(zone);
         placeInZone(zone, note);
       }
@@ -362,7 +408,7 @@ export function planMidi(module, options = {}) {
   }
 
   // --- report --------------------------------------------------------------------
-  const count = (list, what) => { if (list.length) warnings.push(`${list.length} note${list.length === 1 ? '' : 's'} not exported — ${what}: ${idList(list)}.`); };
+  const count = (list: number[], what: string) => { if (list.length) warnings.push(`${list.length} note${list.length === 1 ? '' : 's'} not exported — ${what}: ${idList(list)}.`); };
   count(skipped.outOfRange, `pitch outside what MIDI keys 0–127 can reach with a ±${bendRange}-semitone bend`);
   count(skipped.noPitch, 'no usable frequency');
   count(skipped.noLength, 'no usable length');
@@ -423,7 +469,7 @@ export function planMidi(module, options = {}) {
 }
 
 /** Give `note` the member channel of `zone` that fell silent longest ago. */
-function placeInZone(zone, note) {
+function placeInZone(zone: Zone, note: MidiNote) {
   let best = -1;
   for (let c = 0; c < zone.freeAt.length; c++) {
     if (zone.freeAt[c] > note.startTick) continue;                 // still sounding
@@ -441,7 +487,7 @@ function placeInZone(zone, note) {
  * note has ended; on the very tick it ends only for the same instrument, whose
  * note-off and note-on share a track and so keep their order.
  */
-function placeInPort(port, note) {
+function placeInPort(port: Port, note: MidiNote) {
   let best = -1, bestSame = false;
   for (let c = 0; c < port.freeAt.length; c++) {
     const same = port.last[c] === note.instrument;
@@ -457,7 +503,7 @@ function placeInPort(port, note) {
 }
 
 /** Most notes sounding at one instant (a note ending on a tick frees it for one starting there). */
-function maxPolyphony(notes) {
+function maxPolyphony(notes: MidiNote[]) {
   const edges = [];
   for (const n of notes) { edges.push([n.startTick, 1]); edges.push([n.endTick, -1]); }
   edges.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
@@ -470,10 +516,10 @@ function maxPolyphony(notes) {
  * A bar length in time units as a MIDI time signature over a quarter-note beat: 4 -> 4/4,
  * 7/2 -> 7/8. Null when it has no such form (5/3 beats, more than 255 beats).
  */
-function timeSignatureFor(beats) {
+function timeSignatureFor(beats: Fraction | null) {
   if (!beats || beats.compare(0) <= 0) return null;
   const n = beats.s * beats.n, d = beats.d;
-  for (const [den, mul] of [[4, 1n], [8, 2n], [16, 4n], [32, 8n], [64, 16n]]) {
+  for (const [den, mul] of [[4, 1n], [8, 2n], [16, 4n], [32, 8n], [64, 16n]] as const) {
     if (mul % d === 0n) {
       const numerator = n * (mul / d);
       return numerator >= 1n && numerator <= 255n ? { numerator: Number(numerator), denominator: den } : null;
@@ -482,7 +528,7 @@ function timeSignatureFor(beats) {
   return null;
 }
 
-function idList(ids) {
+function idList(ids: number[]) {
   const shown = ids.slice(0, 12).map((id) => `[${id}]`).join(' ');
   return ids.length > 12 ? `${shown} … (${ids.length} in all)` : shown;
 }
@@ -495,10 +541,10 @@ function idList(ids) {
  * Encode a plan from planMidi() as a Standard MIDI File, format 1.
  * @returns {Uint8Array}
  */
-export function encodeMidi(plan) {
+export function encodeMidi(plan: MidiPlan) {
   const chunks = [conductorTrack(plan), ...plan.tracks.map((track) => noteTrack(track, plan))];
 
-  const out = [];
+  const out: number[] = [];
   pushAscii(out, 'MThd');
   pushUint32(out, 6);
   pushUint16(out, 1);                    // format 1: simultaneous tracks
@@ -520,14 +566,14 @@ export function encodeMidi(plan) {
  * @param {Partial<typeof MIDI_EXPORT_DEFAULTS>} [options]
  * @returns {Uint8Array}
  */
-export function moduleToMidi(module, options = {}) {
+export function moduleToMidi(module: Module, options: MidiOptions = {}) {
   return encodeMidi(planMidi(module, options));
 }
 
-function conductorTrack(plan) {
-  const events = [];
+function conductorTrack(plan: MidiPlan) {
+  const events: MidiEvent[] = [];
   let seq = 0;
-  const at = (tick, bytes) => events.push({ tick, priority: 0, seq: seq++, bytes });
+  const at = (tick: number, bytes: number[]) => events.push({ tick, priority: 0, seq: seq++, bytes });
 
   at(0, meta(0x03, utf8(plan.title)));                                     // sequence name
   at(0, meta(0x01, utf8(plan.layout === 'mpe'
@@ -542,13 +588,13 @@ function conductorTrack(plan) {
   return serializeTrack(events, plan.endTick);
 }
 
-function noteTrack(track, plan) {
-  const events = [];
+function noteTrack(track: Track, plan: MidiPlan) {
+  const events: MidiEvent[] = [];
   let seq = 0;
   // Priorities order events that share a tick: setup, then note-offs (so a channel
   // reused on the very tick it fell free reads off -> bend -> on), bends, note-ons.
-  const at = (tick, priority, bytes) => events.push({ tick, priority, seq: seq++, bytes });
-  const cc = (channel, controller, value) => at(0, 0, [0xB0 | channel, controller, value]);
+  const at = (tick: number, priority: number, bytes: number[]) => events.push({ tick, priority, seq: seq++, bytes });
+  const cc = (channel: number, controller: number, value: number) => at(0, 0, [0xB0 | channel, controller, value]);
 
   at(0, 0, meta(0x03, utf8(track.name)));
 
@@ -564,7 +610,7 @@ function noteTrack(track, plan) {
     for (const note of track.notes) {
       // Each note names its program and bend itself: channels are shared by all
       // instruments, and a player may start anywhere.
-      at(note.startTick, 2, [0xC0 | note.channel, note.program]);
+      at(note.startTick, 2, [0xC0 | note.channel, note.program ?? 0]);
       at(note.startTick, 3, [0xE0 | note.channel, note.bend & 0x7F, (note.bend >> 7) & 0x7F]);
       at(note.startTick, 4, [0x90 | note.channel, note.key, note.velocity]);
       at(note.endTick, 1, [0x80 | note.channel, note.key, 64]);
@@ -595,11 +641,11 @@ function noteTrack(track, plan) {
 }
 
 /** Sort events, write delta times, append End of Track at `endTick`. */
-function serializeTrack(events, endTick) {
+function serializeTrack(events: MidiEvent[], endTick: number) {
   events.sort((a, b) => (a.tick - b.tick) || (a.priority - b.priority) || (a.seq - b.seq));
-  const out = [];
+  const out: number[] = [];
   let now = 0;
-  const advanceTo = (tick) => {
+  const advanceTo = (tick: number) => {
     let delta = tick - now;
     // A gap too long for one delta time is bridged with empty text events.
     while (delta > MAX_DELTA) { pushVarLen(out, MAX_DELTA); out.push(0xFF, 0x01, 0x00); delta -= MAX_DELTA; }
@@ -615,23 +661,23 @@ function serializeTrack(events, endTick) {
   return out;
 }
 
-function meta(type, data) {
+function meta(type: number, data: number[]) {
   const out = [0xFF, type];
   pushVarLen(out, data.length);
   for (const byte of data) out.push(byte);
   return out;
 }
 
-function utf8(text) {
+function utf8(text: string) {
   return Array.from(new TextEncoder().encode(String(text)));
 }
 
-function pushVarLen(out, value) {
+function pushVarLen(out: number[], value: number) {
   const groups = [value & 0x7F];
   for (let rest = Math.floor(value / 128); rest > 0; rest = Math.floor(rest / 128)) groups.unshift((rest & 0x7F) | 0x80);
   for (const group of groups) out.push(group);
 }
 
-function pushAscii(out, text) { for (let i = 0; i < text.length; i++) out.push(text.charCodeAt(i)); }
-function pushUint16(out, v) { out.push((v >>> 8) & 0xFF, v & 0xFF); }
-function pushUint32(out, v) { out.push((v >>> 24) & 0xFF, (v >>> 16) & 0xFF, (v >>> 8) & 0xFF, v & 0xFF); }
+function pushAscii(out: number[], text: string) { for (let i = 0; i < text.length; i++) out.push(text.charCodeAt(i)); }
+function pushUint16(out: number[], v: number) { out.push((v >>> 8) & 0xFF, v & 0xFF); }
+function pushUint32(out: number[], v: number) { out.push((v >>> 24) & 0xFF, (v >>> 16) & 0xFF, (v >>> 8) & 0xFF, v & 0xFF); }
