@@ -7481,7 +7481,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             }
           }
 
-          
+
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
           const uMat = Utb ? Utb.u_matrix      : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -7755,7 +7755,7 @@ try {
       }
       const arrPos = new Float32Array([ xwH, ywH, wwH, hhH ]);
 
-      
+
       gl.useProgram(this.tabMaskProgram);
       const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
       const uMat = Utb ? Utb.u_matrix       : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -8408,7 +8408,7 @@ try {
       // Batched silence erase bands (covers any DOM-drawn fraction bar when glonly=0)
       try {
         if (this.enableSilenceEraseBands && this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && this._anySilenceErase && this._silenceEraseRegions) {
-          
+
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
           const uMat = Utb ? Utb.u_matrix      : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -8466,7 +8466,7 @@ try {
       // Batched fraction dividers (single instanced pass, masked to inner rounded-rect)
       try {
         if (this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && _anyDivider) {
-          
+
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
           const uMat = Utb ? Utb.u_matrix      : gl.getUniformLocation(this.tabMaskProgram, 'u_matrix');
@@ -8523,7 +8523,7 @@ try {
       // Batched silence dashed rings (single instanced pass; non-silence instances discard in shader)
       try {
         if (batchSilenceRings && this.silenceDashRingProgram && this.rectVAO && this.instanceCount > 0) {
-          
+
           gl.useProgram(this.silenceDashRingProgram);
           const Usr = (this._uniforms && this._uniforms.silenceRing) ? this._uniforms.silenceRing : null;
           const uMat   = Usr ? Usr.u_matrix      : gl.getUniformLocation(this.silenceDashRingProgram, 'u_matrix');

@@ -117,5 +117,3 @@ try {
   workspace.destroy();
   initStub.mock.restore();
 }
-
-

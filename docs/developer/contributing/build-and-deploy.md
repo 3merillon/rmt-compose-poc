@@ -7,6 +7,7 @@ The app and documentation build as two static sites. From the repository root in
 | Command | Result |
 |---|---|
 | `npm run dev` | Starts the Vite app and opens a browser, normally on port 3000 |
+| `npm run typecheck` | Checks the browser application, Node scripts, compatibility entry points and Vue components |
 | `npm test` | Runs the module validator and the behavioral checks in the root package |
 | `npm run build` / `npm run preview` | Builds and serves the production app |
 | `npm run docs:dev` | Serves the editable VitePress site |
@@ -24,6 +25,7 @@ VitePress writes HTML, assets, local search data and a sitemap under `docs/.vite
 ## Verify both sites
 
 ```sh
+npm run typecheck
 npm test
 node scripts/gen-canon-parts.mjs --check
 npm run build
