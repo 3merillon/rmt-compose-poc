@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Run against Vite: node scripts/perf/check-group-copy-pitches.mjs [url]
+// Run against Vite dev or preview: node scripts/perf/check-group-copy-pitches.mjs [url]
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
@@ -25,7 +25,7 @@ function pitches(page, ids) {
 }
 
 // Find the actual canvas target under the pointer, away from tabs and transpose arrows.
-async function clickNote(page, id) {
+async function pointOfNote(page, id) {
   const point = await page.evaluate(id => {
     const w = window.__rmtWorkspace;
     const r = window.__rmtRenderer;
@@ -38,7 +38,21 @@ async function clickNote(page, id) {
     }
   }, id);
   assert.ok(point, 'expected a visible target for note ' + id);
-  await page.mouse.click(point.x, point.y);
+  return point;
+}
+
+async function clickNote(page, id) {
+  const { x, y } = await pointOfNote(page, id);
+  await page.mouse.click(x, y);
+}
+
+async function copyPair(page) {
+  await page.keyboard.down('Shift');
+  await clickNote(page, 21);
+  await clickNote(page, 22);
+  await page.keyboard.up('Shift');
+  await page.click('#group-widget [data-action="copy-to-modules"]');
+  return page.locator('.icon[data-category="custom"][data-name="Selection (2 notes)"]');
 }
 
 for (const [name, baseFrequency, lastFrequency, editId] of [
@@ -60,13 +74,9 @@ for (const [name, baseFrequency, lastFrequency, editId] of [
       });
       assert.deepEqual(await pitches(page, [21, 22]), [330, 660]);
 
-      await page.keyboard.down('Shift');
-      await clickNote(page, 21);
-      await clickNote(page, 22);
-      await page.keyboard.up('Shift');
-      await page.click('#group-widget [data-action="copy-to-modules"]');
+      const tile = await copyPair(page);
       await page.reload();
-      const copy = await page.locator('.icon[data-category="custom"][data-name="Selection (2 notes)"]').evaluate(tile => tile.moduleData);
+      const copy = await tile.evaluate(el => el.moduleData);
       assert.deepEqual(copy.notes.map(n => n.id), [1, 2]);
       await loadFile(page, copy);
       assert.deepEqual(await pitches(page, [1, 2]), [330, 660], 'pitches after reopening the library copy');
@@ -83,3 +93,42 @@ for (const [name, baseFrequency, lastFrequency, editId] of [
     }
   });
 }
+
+test('library drop remaps a commented reference past a colliding host ID', async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try {
+    await page.goto(url + '/?perf=1');
+    await page.waitForFunction(() => window.__rmtRenderer?.instanceCount > 0);
+    await loadFile(page, {
+      baseNote: { frequency: '330', startTime: '0', duration: '1' },
+      notes: [
+        { id: 1, startTime: '0', duration: '1', frequency: '110' },
+        { id: 21, startTime: '1', duration: '1', frequency: 'base.f' },
+        { id: 22, startTime: '2', duration: '1', frequency: '[ # phrase root\n21 ].f * 2' },
+      ],
+    });
+    const tile = await copyPair(page);
+    const copy = await tile.evaluate(el => el.moduleData);
+    assert.deepEqual(copy.notes.map(n => n.id), [1, 2]);
+    assert.match(copy.notes[1].frequency, /# phrase root\s+1\s*\]/);
+    await page.click('[data-action="clear-selection"]');
+
+    const pull = await page.locator('.pull-tab').boundingBox();
+    await page.mouse.move(pull.x + pull.width / 2, pull.y + pull.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(pull.x + pull.width / 2, 280, { steps: 10 });
+    await page.mouse.up();
+    await tile.scrollIntoViewIfNeeded();
+    const target = await pointOfNote(page, 0);
+    const canvas = page.locator('.myspaceapp');
+    const bounds = await canvas.boundingBox();
+    await tile.dragTo(canvas, { targetPosition: { x: target.x - bounds.x, y: target.y - bounds.y } });
+
+    await page.waitForFunction(() => window.__rmtWorkspace._module.notes[24]);
+    assert.deepEqual(await pitches(page, [1, 23, 24]), [110, 330, 660]);
+    const refs = await page.evaluate(() => [...window.__rmtWorkspace._module.notes[24].getAllDependencies()]);
+    assert.deepEqual(refs, [23], 'the imported child reads the imported root');
+  } finally {
+    await page.close();
+  }
+});
