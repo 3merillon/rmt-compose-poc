@@ -1,3 +1,6 @@
+import type { AstNode } from '../dsl/ast.ts';
+import type { BinaryExpression, ExpressionName } from '../binary-note.ts';
+import type { InputScore } from '../model-types.ts';
 /**
  * Convert expressions written in the retired method-chain syntax to the DSL.
  *
@@ -27,25 +30,28 @@
  * scripts/test-legacy-syntax.mjs checks every converted value against values
  * recorded with the old compiler (scripts/fixtures/legacy-syntax-oracle.json).
  */
-import { createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp } from '../dsl/ast.js';
-import { compile as compileAST } from '../dsl/compiler.js';
-import { compileDSL, decompileToDSL } from '../dsl/index.js';
-import { decimalStringToBigFraction } from '../utils/fraction-num.js';
-import { MAX_NOTE_ID } from '../binary-note.js';
+import { createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp } from '../dsl/ast.ts';
+import { compile as compileAST } from '../dsl/compiler.ts';
+import { compileDSL, decompileToDSL } from '../dsl/index.ts';
+import { decimalStringToBigFraction } from '../utils/fraction-num.ts';
+import { MAX_NOTE_ID } from '../binary-note.ts';
 
 export class SyntaxMigrationError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'SyntaxMigrationError';
   }
 }
 
-const EXPR_KEYS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
-const VARIABLES = new Set(EXPR_KEYS);
+const EXPR_KEYS: ExpressionName[] = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+const VARIABLES = new Set<string>(EXPR_KEYS);
+const isVariable = (name: string): name is ExpressionName => VARIABLES.has(name);
 const METHODS = new Set(['mul', 'div', 'add', 'sub', 'pow']);
-const OPERATOR = { mul: '*', div: '/', add: '+', sub: '-', pow: '^' };
+const OPERATOR = { mul: '*', div: '/', add: '+', sub: '-', pow: '^' } as const;
 // Method order within one chain: pow (rank 0), mul/div (1), add/sub (2).
 const RANK = { pow: 0, mul: 1, div: 1, add: 2, sub: 2 };
+
+const isMethod = (name: string): name is keyof typeof OPERATOR => METHODS.has(name);
 
 const LEGACY_MARKER = /new\s+Fraction\s*\(|\bmodule\s*\.|\.\s*getVariable\s*\(|\.\s*(?:mul|div|add|sub|pow|neg)\s*\(/;
 
@@ -54,7 +60,7 @@ const LEGACY_MARKER = /new\s+Fraction\s*\(|\bmodule\s*\.|\.\s*getVariable\s*\(|\
  * of its markers, and for a bare variable name ("frequency"), which the old
  * compiler read as the BaseNote's variable.
  */
-export function isLegacyExpression(text) {
+export function isLegacyExpression(text: unknown) {
   if (typeof text !== 'string') return false;
   const t = text.trim();
   return LEGACY_MARKER.test(t) || VARIABLES.has(t);
@@ -64,7 +70,7 @@ export function isLegacyExpression(text) {
 // Tokens
 // ---------------------------------------------------------------------------
 
-function tokenize(src) {
+function tokenize(src: string) {
   const toks = [];
   const re = /\s*(?:(\d+(?:\.\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|'([A-Za-z_][A-Za-z0-9_]*)'|([().,\-]))/y;
   let i = 0;
@@ -86,12 +92,12 @@ function tokenize(src) {
 // Parser: old text -> DSL syntax tree
 // ---------------------------------------------------------------------------
 
-function parseLegacy(src) {
+function parseLegacy(src: string): AstNode {
   const toks = tokenize(src);
   let p = 0;
   const peek = (o = 0) => toks[p + o];
-  const is = (k, v) => peek() && peek().k === k && (v === undefined || peek().v === v);
-  const eat = (k, v) => {
+  const is = (k: string, v?: string) => peek() && peek().k === k && (v === undefined || peek().v === v);
+  const eat = (k: string, v?: string) => {
     if (!is(k, v)) {
       const t = peek();
       throw new SyntaxMigrationError(`expected ${v ?? k} but found ${t ? `"${t.v}"` : 'the end'}`);
@@ -109,7 +115,7 @@ function parseLegacy(src) {
     return f;
   }
 
-  function constant(num, den) {
+  function constant(num: bigint, den: bigint) {
     if (den === 0n) throw new SyntaxMigrationError('division by zero in a constant');
     if (den < 0n) { num = -num; den = -den; }
     // A negative integer prints as `-3`, which the DSL reads as -(3); build it
@@ -120,11 +126,11 @@ function parseLegacy(src) {
 
   function variable() {
     const name = eat('str').v;
-    if (!VARIABLES.has(name)) throw new SyntaxMigrationError(`unknown variable '${name}'`);
+    if (!isVariable(name)) throw new SyntaxMigrationError(`unknown variable '${name}'`);
     return name;
   }
 
-  function primary() {
+  function primary(): AstNode {
     if (is('(')) {
       p++;
       const e = chain();
@@ -172,14 +178,16 @@ function parseLegacy(src) {
       eat(')');
       return createNoteReference(id, v);
     }
-    if (is('id') && VARIABLES.has(peek().v)) {
-      return createNoteReference('base', toks[p++].v);
+    const bareName = peek()?.v;
+    if (is('id') && isVariable(bareName)) {
+      p++;
+      return createNoteReference('base', bareName);
     }
     const t = peek();
     throw new SyntaxMigrationError(t ? `unexpected "${t.v}"` : 'unexpected end');
   }
 
-  function chain() {
+  function chain(): AstNode {
     let node = primary();
     let rank = -1;
     let pows = 0;
@@ -190,7 +198,7 @@ function parseLegacy(src) {
       if (m === 'neg') {
         throw new SyntaxMigrationError('.neg() was ignored by the old compiler, so what it meant is unclear');
       }
-      if (!METHODS.has(m)) throw new SyntaxMigrationError(`unknown method .${m}()`);
+      if (!isMethod(m)) throw new SyntaxMigrationError(`unknown method .${m}()`);
       if (RANK[m] < rank || (m === 'pow' && pows > 0)) {
         throw new SyntaxMigrationError(
           `.${m}() after .${lastMethod}() was not read as written by the old compiler, so what it meant is unclear`
@@ -212,7 +220,7 @@ function parseLegacy(src) {
   return tree;
 }
 
-function sameBytecode(a, b) {
+function sameBytecode(a: BinaryExpression, b: BinaryExpression) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a.bytecode[i] !== b.bytecode[i]) return false;
   return true;
@@ -224,7 +232,7 @@ function sameBytecode(a, b) {
  * @returns {string} DSL text with the same meaning
  * @throws {SyntaxMigrationError} when the text cannot be converted exactly
  */
-export function legacyToDSL(text) {
+export function legacyToDSL(text: string) {
   let tree;
   try {
     tree = parseLegacy(String(text).trim());
@@ -240,7 +248,7 @@ export function legacyToDSL(text) {
   try {
     actual = compileDSL(dsl);
   } catch (e) {
-    throw new SyntaxMigrationError(`cannot convert "${text}": its DSL form "${dsl}" does not compile (${e.message})`);
+    throw new SyntaxMigrationError(`cannot convert "${text}": its DSL form "${dsl}" does not compile (${e instanceof Error ? e.message : String(e)})`);
   }
   if (!sameBytecode(expected, actual)) {
     throw new SyntaxMigrationError(`cannot convert "${text}": its DSL form "${dsl}" compiles to something else`);
@@ -258,8 +266,8 @@ export function legacyToDSL(text) {
  * @param {object} data - { baseNote, notes[] }
  * @returns {{ data: object, migrated: boolean, report: string[] }}
  */
-export function migrateSyntax(data) {
-  const copy = JSON.parse(JSON.stringify(data));
+export function migrateSyntax(data: InputScore) {
+  const copy: InputScore = JSON.parse(JSON.stringify(data));
   if (!copy || typeof copy !== 'object' || !copy.baseNote || !Array.isArray(copy.notes)) {
     return { data: copy, migrated: false, report: [] };
   }

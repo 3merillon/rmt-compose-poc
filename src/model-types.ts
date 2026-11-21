@@ -1,9 +1,8 @@
 import type Fraction from 'fraction.js';
-import type { BinaryExpression, ExpressionName } from './binary-note.ts';
+import type { BinaryExpression, ExpressionName, NoteId } from './binary-note.ts';
 import type { Irrational, Approx } from './value/exact.ts';
 
-export type { ExpressionName } from './binary-note.ts';
-export type NoteId = number;
+export type { ExpressionName, NoteId } from './binary-note.ts';
 
 /** New saves contain DSL source for each written variable. An omitted variable
  * is distinct from zero, a rest, or an inherited interpretation value. */

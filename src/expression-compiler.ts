@@ -1,3 +1,7 @@
+import type { BinaryExpression } from './binary-note.ts';
+
+interface CacheLink { next: CacheLink; prev: CacheLink }
+interface CacheEntry extends CacheLink { key: string; binary: BinaryExpression }
 /**
  * Expression compiler: text -> bytecode, with a cache.
  *
@@ -12,8 +16,8 @@
  * (src/migrate/legacy-syntax.js); typed now, it is refused with its DSL form.
  */
 
-import { compileDSL, decompileToDSL } from './dsl/index.js';
-import { isLegacyExpression, legacyToDSL } from './migrate/legacy-syntax.js';
+import { compileDSL, decompileToDSL } from './dsl/index.ts';
+import { isLegacyExpression, legacyToDSL } from './migrate/legacy-syntax.ts';
 
 // Cap the compile cache. Drag/resize commits generate a fresh fraction
 // string per commit, so an unbounded cache grows without limit over a long
@@ -21,7 +25,7 @@ import { isLegacyExpression, legacyToDSL } from './migrate/legacy-syntax.js';
 // while retaining the hot working set.
 const COMPILE_CACHE_MAX = 4000;
 
-function retiredSyntaxError(text) {
+function retiredSyntaxError(text: string) {
   let hint = '';
   try {
     hint = ` In the DSL this reads: ${legacyToDSL(text)}`;
@@ -32,9 +36,12 @@ function retiredSyntaxError(text) {
 }
 
 export class ExpressionCompiler {
+  declare cache: Map<string, CacheEntry>;
+  declare order: CacheLink;
+
   constructor() {
     this.cache = new Map();
-    this.order = {}; // sentinel between the newest and oldest entries
+    this.order = {} as CacheLink; // both links close the sentinel immediately below
     this.order.next = this.order.prev = this.order;
   }
 
@@ -44,7 +51,7 @@ export class ExpressionCompiler {
    * @returns {BinaryExpression} a fresh copy (callers may mutate it)
    * @throws {Error} on a syntax error, naming what is wrong
    */
-  compile(textExpr) {
+  compile(textExpr: string, _variableContext?: string | null): BinaryExpression {
     let entry = this.cache.get(textExpr);
     if (entry) {
       if (entry === this.order.prev) return entry.binary.clone();
@@ -54,12 +61,14 @@ export class ExpressionCompiler {
       if (isLegacyExpression(textExpr)) throw retiredSyntaxError(textExpr);
       const binary = compileDSL(textExpr);
       if (this.cache.size === COMPILE_CACHE_MAX) {
-        entry = this.order.next;
+        // A full cache always has an oldest entry after the sentinel.
+        entry = this.order.next as CacheEntry;
         this.order.next = entry.next;
         entry.next.prev = this.order;
         this.cache.delete(entry.key);
       } else {
-        entry = {};
+        // Complete the reused/new entry before exposing it to any caller.
+        entry = {} as CacheEntry;
       }
       entry.key = textExpr;
       entry.binary = binary;
@@ -86,7 +95,7 @@ export class ExpressionCompiler {
  * bytecode decompiles to when it has none.
  */
 export class ExpressionDecompiler {
-  decompile(binary) {
+  decompile(binary: BinaryExpression): string {
     if (binary && binary.sourceText) return binary.sourceText;
     return decompileToDSL(binary);
   }

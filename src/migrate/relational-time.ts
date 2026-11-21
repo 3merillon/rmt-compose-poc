@@ -24,9 +24,12 @@
  * than guessing.
  */
 import Fraction from 'fraction.js';
+import { isInputScore, type InputScore, type InputFields } from '../model-types.ts';
+
+type TimeVariable = 'tempo' | 'bpm' | 'ml' | 'unit';
 
 export class TimeMigrationError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'TimeMigrationError';
   }
@@ -56,7 +59,7 @@ const ANY_OLD_CONSTRUCT = new RegExp(
     .map(r => r.source).join('|')
 );
 
-function exprText(note, key) {
+function exprText(note: InputFields | undefined, key: string) {
   if (!note) return null;
   const s = note[key + 'String'] ?? note[key];
   if (typeof s !== 'string') return null;
@@ -65,7 +68,7 @@ function exprText(note, key) {
 }
 
 /** An old measure bar: a start time and neither duration nor frequency. */
-function isOldBar(note) {
+function isOldBar(note: InputFields) {
   return note && note.id !== 0 &&
     exprText(note, 'startTime') !== null &&
     exprText(note, 'duration') === null &&
@@ -78,8 +81,8 @@ function isOldBar(note) {
  * an old module, but in a relational one it is just a start (a marker), so it
  * is converted only along with the rest of an old module.
  */
-export function needsTimeMigration(data) {
-  if (!data || typeof data !== 'object' || !data.baseNote || !Array.isArray(data.notes)) return false;
+export function needsTimeMigration(data: unknown) {
+  if (!isInputScore(data)) return false;
   const all = [data.baseNote, ...data.notes];
   for (const n of all) {
     if (!n || typeof n !== 'object') continue;
@@ -99,8 +102,8 @@ export function needsTimeMigration(data) {
 // replaced by their values.
 // ---------------------------------------------------------------------------
 
-function evalConst(src, what) {
-  const toks = [];
+function evalConst(src: string, what: string): Fraction {
+  const toks: string[] = [];
   const re = /\s*(?:(\d+(?:\.\d+)?)|(new)\b|(Fraction)\b|(mul|div|add|sub|neg|pow)\b|([-+*\/^(),.]))/y;
   let i = 0;
   while (i < src.length) {
@@ -115,13 +118,13 @@ function evalConst(src, what) {
   }
   let p = 0;
   const peek = () => toks[p];
-  const eat = (t) => {
+  const eat = (t: string) => {
     if (toks[p] !== t) throw new TimeMigrationError(`${what}: cannot convert "${src}" (expected "${t}")`);
     p++;
   };
-  const isNum = (t) => t !== undefined && /^\d/.test(t);
+  const isNum = (t: string | undefined) => t !== undefined && /^\d/.test(t);
 
-  function expr() {
+  function expr(): Fraction {
     let v = term();
     while (peek() === '+' || peek() === '-') {
       const op = toks[p++];
@@ -130,7 +133,7 @@ function evalConst(src, what) {
     }
     return v;
   }
-  function term() {
+  function term(): Fraction {
     let v = unary();
     while (peek() === '*' || peek() === '/') {
       const op = toks[p++];
@@ -139,12 +142,12 @@ function evalConst(src, what) {
     }
     return v;
   }
-  function unary() {
+  function unary(): Fraction {
     if (peek() === '-') { p++; return unary().neg(); }
     if (peek() === '+') { p++; return unary(); }
     return power();
   }
-  function power() {
+  function power(): Fraction {
     const b = postfix();
     if (peek() === '^') {
       p++;
@@ -154,7 +157,7 @@ function evalConst(src, what) {
     }
     return b;
   }
-  function postfix() {
+  function postfix(): Fraction {
     let v = primary();
     while (peek() === '.') {
       p++;
@@ -174,7 +177,7 @@ function evalConst(src, what) {
     }
     return v;
   }
-  function primary() {
+  function primary(): Fraction {
     const t = peek();
     if (isNum(t)) { p++; return new Fraction(t); }
     if (t === '(') { p++; const v = expr(); eat(')'); return v; }
@@ -197,22 +200,22 @@ function evalConst(src, what) {
 // Formatting of exact factors
 // ---------------------------------------------------------------------------
 
-function isOne(f) { return f.n === 1n && f.d === 1n && f.s === 1n; }
+function isOne(f: Fraction) { return f.n === 1n && f.d === 1n && f.s === 1n; }
 
 /** `3`, `(3/4)`, `(-3/4)`: a factor that can follow `*` in either precedence. */
-function dslFactor(f) {
+function dslFactor(f: Fraction) {
   const s = f.s < 0n ? '-' : '';
   if (f.d === 1n) return f.s < 0n ? `(${s}${f.n})` : `${f.n}`;
   return `(${s}${f.n}/${f.d})`;
 }
 
-function legacyFraction(f) {
+function legacyFraction(f: Fraction) {
   const s = f.s < 0n ? '-' : '';
   return f.d === 1n ? `new Fraction(${s}${f.n})` : `new Fraction(${s}${f.n}, ${f.d})`;
 }
 
 /** A constant written as a top-level value (BaseNote duration): `1`, `3/5`. */
-function dslConstant(f) {
+function dslConstant(f: Fraction) {
   const s = f.s < 0n ? '-' : '';
   return f.d === 1n ? `${s}${f.n}` : `${s}${f.n}/${f.d}`;
 }
@@ -229,8 +232,8 @@ function dslConstant(f) {
  * @param {object} data - { baseNote, notes[] }
  * @returns {{ data: object, migrated: boolean, report: string[] }}
  */
-export function migrateTimeModel(data) {
-  const copy = JSON.parse(JSON.stringify(data));
+export function migrateTimeModel(data: InputScore) {
+  const copy: InputScore = JSON.parse(JSON.stringify(data));
   if (!needsTimeMigration(copy)) return { data: copy, migrated: false, report: [] };
 
   const report = [];
@@ -240,12 +243,12 @@ export function migrateTimeModel(data) {
   const bars = new Set(copy.notes.filter(isOldBar).map(n => Number(n.id)));
 
   // --- old values: tempo, beats per measure, measure length per note --------
-  const memo = new Map();
-  const visiting = new Set();
+  const memo = new Map<string, Fraction>();
+  const visiting = new Set<string>();
 
-  const valueOf = (kind, id) => {
+  const valueOf = (kind: TimeVariable, id: number): Fraction => {
     const key = `${kind}:${id}`;
-    if (memo.has(key)) return memo.get(key);
+    if (memo.has(key)) return memo.get(key)!;
     if (visiting.has(key)) throw new TimeMigrationError(`note ${id}: ${kind} depends on itself`);
     visiting.add(key);
     try {
@@ -257,7 +260,7 @@ export function migrateTimeModel(data) {
     }
   };
 
-  const computeValue = (kind, id) => {
+  const computeValue = (kind: TimeVariable, id: number): Fraction => {
     const note = byId.get(id);
     if (id !== 0 && !note) throw new TimeMigrationError(`a time expression names note ${id}, which does not exist`);
     let v;
@@ -272,7 +275,7 @@ export function migrateTimeModel(data) {
       if (s) v = constOf(s, `note ${id} measureLength`);
       else if (id === 0 || bars.has(id)) v = valueOf('bpm', id).mul(60).div(valueOf('tempo', id));
       else v = valueOf('ml', 0);
-    } else if (kind === 'unit') {
+    } else { // unit
       v = new Fraction(60).div(valueOf('tempo', id));
     }
     if (v.n === 0n && kind !== 'bpm') throw new TimeMigrationError(`note ${id}: ${kind} is zero`);
@@ -281,9 +284,9 @@ export function migrateTimeModel(data) {
 
   // Replace every time reference in a tempo/bpm/ml expression by its value,
   // then evaluate the arithmetic that is left.
-  function constOf(src, what) {
-    const lit = (f) => `(${dslConstant(f)})`;
-    const id = (g) => (g === undefined ? 0 : Number(g));
+  function constOf(src: string, what: string): Fraction {
+    const lit = (f: Fraction) => `(${dslConstant(f)})`;
+    const id = (g: string | undefined) => (g === undefined ? 0 : Number(g));
     let s = src
       .replace(RE.legacyBeat, (_, g) => lit(valueOf('unit', id(g))))
       .replace(RE.legacyTempo, (_, g) => lit(valueOf('tempo', id(g))))
@@ -299,11 +302,11 @@ export function migrateTimeModel(data) {
   // the BaseNote's, whatever that is. Absolute values are needed only when a
   // note sets its own tempo or a measure length is written out, and only then
   // must the BaseNote's tempo be a constant.
-  const ownTempo = (id) => id !== 0 && exprText(byId.get(id), 'tempo') !== null;
-  const ratioMemo = new Map();
-  const ratio = (kind, id) => {
+  const ownTempo = (id: number) => id !== 0 && exprText(byId.get(id), 'tempo') !== null;
+  const ratioMemo = new Map<string, Fraction>();
+  const ratio = (kind: TimeVariable, id: number): Fraction => {
     const key = `${kind}:${id}`;
-    if (ratioMemo.has(key)) return ratioMemo.get(key);
+    if (ratioMemo.has(key)) return ratioMemo.get(key)!;
     let r;
     if (kind === 'tempo') {
       r = ownTempo(id) ? valueOf('tempo', id).div(valueOf('tempo', 0)) : new Fraction(1);
@@ -338,33 +341,33 @@ export function migrateTimeModel(data) {
   const baseDValue = oldBaseD ? constOf(oldBaseD, 'BaseNote duration') : new Fraction(1);
 
   // --- replacement builders ---------------------------------------------------
-  const dslUnit = (k) => (isOne(k) ? 'base.d' : `(base.d * ${dslFactor(k)})`);
-  const legacyUnit = (k) => "module.baseNote.getVariable('duration')" + (isOne(k) ? '' : `.mul(${legacyFraction(k)})`);
+  const dslUnit = (k: Fraction) => (isOne(k) ? 'base.d' : `(base.d * ${dslFactor(k)})`);
+  const legacyUnit = (k: Fraction) => "module.baseNote.getVariable('duration')" + (isOne(k) ? '' : `.mul(${legacyFraction(k)})`);
 
   const dsl = {
-    unit: (id) => dslUnit(ratio('unit', id)),
-    tempo: (id) => {
+    unit: (id: number) => dslUnit(ratio('unit', id)),
+    tempo: (id: number) => {
       const k = ratio('tempo', id);
       return isOne(k) ? '(60 / base.d)' : `(60 / base.d * ${dslFactor(k)})`;
     },
-    ml: (id) => (bars.has(id) ? `[${id}].d` : dslUnit(ratio('ml', id))),
-    bpm: (id) => dslFactor(valueOf('bpm', id)),
+    ml: (id: number) => (bars.has(id) ? `[${id}].d` : dslUnit(ratio('ml', id))),
+    bpm: (id: number) => dslFactor(valueOf('bpm', id)),
   };
   const legacy = {
-    unit: (id) => legacyUnit(ratio('unit', id)),
-    tempo: (id) => {
+    unit: (id: number) => legacyUnit(ratio('unit', id)),
+    tempo: (id: number) => {
       const k = ratio('tempo', id);
       return "new Fraction(60).div(module.baseNote.getVariable('duration'))" + (isOne(k) ? '' : `.mul(${legacyFraction(k)})`);
     },
-    ml: (id) => (bars.has(id)
+    ml: (id: number) => (bars.has(id)
       ? `module.getNoteById(${id}).getVariable('duration')`
       : legacyUnit(ratio('ml', id))),
-    bpm: (id) => legacyFraction(valueOf('bpm', id)),
+    bpm: (id: number) => legacyFraction(valueOf('bpm', id)),
   };
-  const kindOfVar = (v) => (v === 'tempo' ? 'tempo' : (v === 'bpm' || v === 'beatsPerMeasure') ? 'bpm' : 'ml');
+  const kindOfVar = (v: string) => (v === 'tempo' ? 'tempo' : (v === 'bpm' || v === 'beatsPerMeasure') ? 'bpm' : 'ml');
 
-  function rewrite(src) {
-    const id = (g) => (g === undefined ? 0 : Number(g));
+  function rewrite(src: string) {
+    const id = (g: string | undefined) => (g === undefined ? 0 : Number(g));
     let s = src;
     // 1. Old reads of a duration that was never set (BaseNote, bars): pin the
     //    value they had, before `base.d` and `[bar].d` gain a meaning.
@@ -386,10 +389,10 @@ export function migrateTimeModel(data) {
 
   // Bar durations are computed before any expression is rewritten, from the
   // old start text (which names the previous bar).
-  const barDuration = new Map();
+  const barDuration = new Map<number, string>();
   for (const id of bars) {
     const note = byId.get(id);
-    const start = exprText(note, 'startTime');
+    const start = exprText(note, 'startTime')!;
     const ml = ratio('ml', id);
     let prev = null;
     let m = start.match(/^\[\s*(\d+)\s*\]\s*\.\s*(?:t|s|start|startTime)\s*\+\s*measure\s*\(\s*\[\s*(\d+)\s*\]\s*\)$/);
@@ -424,8 +427,8 @@ export function migrateTimeModel(data) {
   }
   for (const id of bars) {
     const note = byId.get(id);
-    note.duration = barDuration.get(id);
-    note.measure = true;
+    note!.duration = barDuration.get(id);
+    note!.measure = true;
   }
   delete base.durationString;
   base.duration = baseDuration;

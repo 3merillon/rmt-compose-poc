@@ -6,7 +6,24 @@
  */
 
 import Fraction from 'fraction.js';
-import { OP, VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR, getCorruptionFlag } from './binary-note.js';
+import type { BinaryExpression, VariableIndex } from './binary-note.ts';
+import type { ExpressionName, EvaluationRecord, EvaluationCache, ExpressionNote, NoteLookup } from './model-types.ts';
+import type { DependencyGraph } from './dependency-graph.ts';
+
+type ReadValues = Partial<Record<ExpressionName, X.ExactValue | null | undefined>> & { exact?: EvaluationRecord['exact'] };
+type ValueLookup = { get(id: number): ReadValues | null | undefined };
+type EvaluatorModule = { getNoteById?: NoteLookup };
+interface IncrementalModule {
+  getNoteById: NoteLookup;
+  notes: Record<number, ExpressionNote> | Map<number, ExpressionNote>;
+}
+type BigFractionParts = Pick<Fraction, 's' | 'n' | 'd'>;
+type FractionParts = BigFractionParts | {s: number; n: number; d: number};
+function hasBigIntFields(frac: FractionParts): frac is BigFractionParts {
+  return typeof frac.n === 'bigint';
+}
+
+import { OP, VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR, getCorruptionFlag } from './binary-note.ts';
 import {
   getVariableExpression,
   getVariableRefs,
@@ -14,8 +31,8 @@ import {
   resolveVariableRef,
   findVariableCycle,
   describeVariable,
-} from './variable-deps.js';
-import * as X from './value/exact.js';
+} from './variable-deps.ts';
+import * as X from './value/exact.ts';
 
 // Order in which a note's variables are visited when nothing forces another
 // one. Dependencies are pulled in ahead on demand, so this only breaks ties.
@@ -31,7 +48,7 @@ const UNRESOLVED_DEFAULTS = [0, 1, 440, 1, 0, 0];
 // Longest list of cycles / unresolved references written to the console
 const MAX_REPORTED_PROBLEMS = 10;
 
-function createEvaluationRecord() {
+export function createEvaluationRecord(): EvaluationRecord {
   return {
     startTime: null,
     duration: null,
@@ -57,10 +74,10 @@ function createEvaluationRecord() {
   };
 }
 
-const VAR_FIELDS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+const VAR_FIELDS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'] as const;
 
 /** What a reference to this variable of a record reads: the exact value, else the Fraction. */
-export function recordValue(rec, varIdx) {
+export function recordValue(rec: ReadValues | null | undefined, varIdx: number) {
   const name = VAR_FIELDS[varIdx];
   if (name === undefined || !rec) return null;
   const ex = rec.exact;
@@ -72,14 +89,14 @@ export function recordValue(rec, varIdx) {
 }
 
 /** The exact value of a record's variable by name (Fraction, Irrational or Approx), or null. */
-export function exactValue(rec, name) {
+export function exactValue(rec: ReadValues | null | undefined, name: ExpressionName) {
   if (!rec) return null;
   const v = rec.exact && rec.exact[name];
   return v != null ? v : (rec[name] ?? null);
 }
 
 /** A pooled stack Fraction copied out of the pool, so an exact value can keep it. */
-const own = (v) => (v.kind === undefined ? new Fraction(v.s * v.n, v.d) : v);
+const own = (v: X.ExactValue) => (v.kind === undefined ? new Fraction(v.s * v.n, v.d) : v);
 
 /**
  * The most Fractions the pool keeps. A pass of evaluateDirty() resets the pool
@@ -96,6 +113,9 @@ const POOL_MAX = 4096;
  * Fraction object pool to reduce GC pressure
  */
 class FractionPool {
+  declare pool: Fraction[];
+  declare index: number;
+
   constructor(size = 128) {
     this.pool = [];
     this.index = 0;
@@ -113,7 +133,7 @@ class FractionPool {
    * @param {bigint|number} n
    * @param {bigint|number} d
    */
-  alloc(n = 0n, d = 1n) {
+  alloc(n: bigint | number = 0n, d: bigint | number = 1n) {
     if (this.index >= this.pool.length && this.pool.length < POOL_MAX) {
       // Expand pool if needed, up to POOL_MAX
       const newSize = Math.min(this.pool.length * 2, POOL_MAX);
@@ -142,8 +162,8 @@ class FractionPool {
    * Tolerates duck-typed {s,n,d} values with Number fields (e.g. from the
    * older callers) by coercing them to BigInt.
    */
-  allocFrom(frac) {
-    if (typeof frac.n === 'bigint') {
+  allocFrom(frac: FractionParts) {
+    if (hasBigIntFields(frac)) {
       const f = this.alloc(0n, 1n);
       f.s = frac.s < 0n ? -1n : 1n;
       f.n = frac.n < 0n ? -frac.n : frac.n;
@@ -179,11 +199,23 @@ class FractionPool {
  * Stack-based evaluator for binary expressions
  */
 export class BinaryEvaluator {
-  constructor(module) {
+  declare module: EvaluatorModule | null | undefined;
+  declare stack: X.ExactValue[];
+  declare stackTop: number;
+  declare pool: FractionPool;
+  declare _poolPerVariable: boolean;
+  declare generation: number;
+  declare cache: EvaluationCache;
+  declare _lastEvalWasCorrupted: boolean;
+  declare _lastExact: X.Irrational | X.Approx | null;
+  declare _lastEvalUnresolved: number[] | null;
+  declare _unresolved: number[] | null;
+
+  constructor(module: EvaluatorModule | null | undefined) {
     this.module = module;
 
     // Evaluation stack
-    this.stack = new Array(32);
+    this.stack = new Array<X.ExactValue>(32);
     this.stackTop = 0;
 
     // Fraction pool for allocation-free evaluation
@@ -217,7 +249,7 @@ export class BinaryEvaluator {
   /**
    * Set the module reference
    */
-  setModule(module) {
+  setModule(module: EvaluatorModule | null | undefined) {
     this.module = module;
     this.invalidateAll();
   }
@@ -233,7 +265,7 @@ export class BinaryEvaluator {
   /**
    * Invalidate cache for a specific note and its dependents
    */
-  invalidate(noteId) {
+  invalidate(noteId: number) {
     this.cache.delete(noteId);
     this.generation++;
   }
@@ -248,14 +280,14 @@ export class BinaryEvaluator {
   /**
    * Read a 16-bit unsigned integer from bytecode (big-endian)
    */
-  readUint16(bytecode, offset) {
+  readUint16(bytecode: Uint8Array, offset: number) {
     return (bytecode[offset] << 8) | bytecode[offset + 1];
   }
 
   /**
    * Read a 32-bit unsigned integer from bytecode (big-endian)
    */
-  readUint32(bytecode, offset) {
+  readUint32(bytecode: Uint8Array, offset: number) {
     return ((bytecode[offset] << 24) |
             (bytecode[offset + 1] << 16) |
             (bytecode[offset + 2] << 8) |
@@ -265,7 +297,7 @@ export class BinaryEvaluator {
   /**
    * Read a 32-bit signed integer from bytecode (big-endian)
    */
-  readInt32(bytecode, offset) {
+  readInt32(bytecode: Uint8Array, offset: number) {
     const val = (bytecode[offset] << 24) |
                 (bytecode[offset + 1] << 16) |
                 (bytecode[offset + 2] << 8) |
@@ -279,7 +311,7 @@ export class BinaryEvaluator {
    * Format: [sign(1)] [len(2)] [bytes(n)]
    * @returns {{ value: bigint, bytesRead: number }}
    */
-  readBigIntSigned(bytecode, offset) {
+  readBigIntSigned(bytecode: Uint8Array, offset: number) {
     const sign = bytecode[offset];
     const { value: magnitude, bytesRead: magBytes } = this.readBigIntUnsigned(bytecode, offset + 1);
     const value = sign === 0x01 ? -magnitude : magnitude;
@@ -291,7 +323,7 @@ export class BinaryEvaluator {
    * Format: [len(2)] [bytes(n)]
    * @returns {{ value: bigint, bytesRead: number }}
    */
-  readBigIntUnsigned(bytecode, offset) {
+  readBigIntUnsigned(bytecode: Uint8Array, offset: number) {
     const len = (bytecode[offset] << 8) | bytecode[offset + 1];
     let value = 0n;
     for (let i = 0; i < len; i++) {
@@ -303,10 +335,10 @@ export class BinaryEvaluator {
   /**
    * Push a value onto the evaluation stack
    */
-  push(value) {
+  push(value: X.ExactValue) {
     if (this.stackTop >= this.stack.length) {
       // Expand stack if needed
-      const newStack = new Array(this.stack.length * 2);
+      const newStack = new Array<X.ExactValue>(this.stack.length * 2);
       for (let i = 0; i < this.stackTop; i++) {
         newStack[i] = this.stack[i];
       }
@@ -338,7 +370,7 @@ export class BinaryEvaluator {
   /**
    * The module's note with this id, or null
    */
-  lookupNote(noteId) {
+  lookupNote(noteId: number) {
     const module = this.module;
     if (!module || typeof module.getNoteById !== 'function') return null;
     return module.getNoteById(noteId) || null;
@@ -348,7 +380,7 @@ export class BinaryEvaluator {
    * Nothing defines the referenced variable: push its hard-coded default and
    * remember the reference, so whoever asked for the evaluation can name it.
    */
-  pushDefault(noteId, varIdx) {
+  pushDefault(noteId: number, varIdx: number) {
     if (varIdx === VAR.AMPLITUDE && this.amplitudeIsUnset(noteId)) {
       this.push(this.pool.alloc(1, 1));
       return;
@@ -365,7 +397,7 @@ export class BinaryEvaluator {
    * an amplitude that is set but lost to a cycle or a failed evaluation, is
    * an unresolved reference like any other.)
    */
-  amplitudeIsUnset(noteId) {
+  amplitudeIsUnset(noteId: number) {
     const note = this.lookupNote(noteId);
     if (!note || definesVariable(note, VAR.AMPLITUDE)) return false;
     const base = noteId === 0 ? note : this.lookupNote(0);
@@ -375,7 +407,7 @@ export class BinaryEvaluator {
   /**
    * Get cached value for a note variable, or null if not cached
    */
-  getCachedValue(noteId, varIndex) {
+  getCachedValue(noteId: number, varIndex: number) {
     const cached = this.cache.get(noteId);
     if (!cached) return null;
     return recordValue(cached, varIndex);
@@ -385,7 +417,7 @@ export class BinaryEvaluator {
    * Push a value read from a record or computed by src/value/exact.js: a
    * Fraction goes through the pool, an exact value (immutable) as it is.
    */
-  pushValue(v) {
+  pushValue(v: X.ExactValue) {
     if (v.kind === undefined) this.push(this.pool.allocFrom(v));
     else this.push(v);
   }
@@ -395,7 +427,7 @@ export class BinaryEvaluator {
    * operation made itself (not one it inherited from an operand) flags the
    * evaluation, like an irrational power does.
    */
-  pushResult(v, a, b) {
+  pushResult(v: X.ExactValue, a: X.ExactValue, b?: X.ExactValue) {
     if (v.kind === 'approx' && a.kind !== 'approx' && (b === undefined || b.kind !== 'approx')) {
       this._lastEvalWasCorrupted = true;
     }
@@ -409,7 +441,7 @@ export class BinaryEvaluator {
    * @param {Map} evalCache - Pre-evaluated note values (noteId -> {startTime, duration, ...})
    * @returns {Fraction} - The evaluated result
    */
-  evaluate(expr, evalCache = null) {
+  evaluate(expr: BinaryExpression, evalCache: ValueLookup | null = null) {
     // Reset corruption flag for this evaluation
     this._lastEvalWasCorrupted = false;
     // The exact value of the last evaluate() when it was not rational (src/value/exact.js)
@@ -647,7 +679,7 @@ export class BinaryEvaluator {
    * @param {Map} evalCache - Pre-evaluated dependencies
    * @returns {Object} - Evaluated values { startTime, duration, frequency, ... }
    */
-  evaluateNote(note, evalCache = null) {
+  evaluateNote(note: ExpressionNote, evalCache: EvaluationCache | null = null) {
     const result = createEvaluationRecord();
 
     // A variable must never read what this note evaluated to last time
@@ -657,7 +689,7 @@ export class BinaryEvaluator {
     // must contain this note's in-progress result during evaluation. Write it
     // into the shared cache directly instead of copying the whole cache per
     // note (the copy made every full evaluation O(N²)).
-    const workingCache = evalCache || new Map();
+    const workingCache = evalCache || new Map<number, EvaluationRecord>();
     workingCache.set(note.id, result);
 
     this.reportProblems(this.evaluateVariables([note], [result], workingCache));
@@ -690,15 +722,15 @@ export class BinaryEvaluator {
    * @param {Map} evalCache - noteId -> evaluated values
    * @returns {Array<number[]>|null} One loop per cycle, as packed (noteId << 3) | varIndex, or null
    */
-  evaluateVariables(notes, records, evalCache) {
+  evaluateVariables(notes: ExpressionNote[], records: EvaluationRecord[], evalCache: ValueLookup | null) {
     const count = notes.length;
 
     // Where each note of the group sits in `notes`
-    const position = new Map();
+    const position = new Map<number, number>();
     for (let i = 0; i < count; i++) {
       position.set(notes[i].id, i);
     }
-    const getNote = (noteId) => {
+    const getNote = (noteId: number) => {
       const p = position.get(noteId);
       return p !== undefined ? notes[p] : this.lookupNote(noteId);
     };
@@ -707,12 +739,12 @@ export class BinaryEvaluator {
     const reached = new Int32Array(count << 3); // when the walk first reached it (1, 2, ...); 0 = not yet
     const lowest = new Int32Array(count << 3);  // earliest still-open variable it leads back to
     const isOpen = new Uint8Array(count << 3);  // reached, not evaluated yet
-    const open = [];      // the open variables, in the order they were reached
-    const path = [];      // variables waiting on a dependency, outermost first
-    const pathRefs = [];  // what each of them reads
-    const pathNext = [];  // which of those reads comes next
+    const open: number[] = [];      // the open variables, in the order they were reached
+    const path: number[] = [];      // variables waiting on a dependency, outermost first
+    const pathRefs: (readonly number[])[] = [];  // what each of them reads
+    const pathNext: number[] = [];  // which of those reads comes next
     let reachedCount = 0;
-    let selfReading = null;
+    let selfReading: Set<number> | null = null;
     let cycles = null;
 
     for (let p = 0; p < count; p++) {
@@ -797,7 +829,7 @@ export class BinaryEvaluator {
               const members = [];
               let member;
               do {
-                member = open.pop();
+                member = open.pop()!;
                 isOpen[member] = 0;
                 members.push(member);
               } while (member !== current);
@@ -833,7 +865,7 @@ export class BinaryEvaluator {
    * @param {Object} record - The note's evaluated values; must already be in evalCache
    * @param {Map} evalCache - noteId -> evaluated values of everything it reads
    */
-  evaluateVariable(note, varIndex, record, evalCache) {
+  evaluateVariable(note: ExpressionNote, varIndex: number, record: EvaluationRecord, evalCache: ValueLookup | null) {
     const expr = getVariableExpression(note, varIndex);
 
     if (expr !== null) {
@@ -873,7 +905,7 @@ export class BinaryEvaluator {
           }
         }
       } catch (e) {
-        console.warn(`Failed to evaluate ${VAR_NAMES[varIndex]} for note ${note.id}:`, e);
+        console.warn(`Failed to evaluate ${VAR_NAMES[varIndex as VariableIndex]} for note ${note.id}:`, e);
       }
     }
   }
@@ -886,12 +918,12 @@ export class BinaryEvaluator {
    *
    * @param {Array<number[]>|null} cycles - As returned by evaluateVariables()
    */
-  reportProblems(cycles) {
+  reportProblems(cycles: number[][] | null) {
     const unresolved = this._unresolved;
     if (cycles === null && unresolved === null) return;
     this._unresolved = null;
 
-    const limit = (lines) => {
+    const limit = (lines: string[]) => {
       if (lines.length <= MAX_REPORTED_PROBLEMS) return lines;
       const extra = lines.length - MAX_REPORTED_PROBLEMS;
       return lines.slice(0, MAX_REPORTED_PROBLEMS).concat(`… and ${extra} more`);
@@ -907,7 +939,7 @@ export class BinaryEvaluator {
 
     if (unresolved !== null) {
       const lines = [];
-      const seen = new Set();
+      const seen = new Set<string>();
       for (let i = 0; i < unresolved.length; i += 2) {
         const line = this.describeUnresolved(unresolved[i], unresolved[i + 1]);
         if (!seen.has(line)) {
@@ -929,10 +961,10 @@ export class BinaryEvaluator {
    * @param {number} ref - Packed variable it referenced
    * @returns {string}
    */
-  describeUnresolved(reader, ref) {
+  describeUnresolved(reader: number, ref: number) {
     const varIndex = ref & 7;
     const noteId = ref >> 3;
-    const name = VAR_NAMES[varIndex];
+    const name = VAR_NAMES[varIndex as VariableIndex];
     const note = this.lookupNote(noteId);
 
     let reason;
@@ -967,7 +999,14 @@ export class BinaryEvaluator {
  * Incremental evaluator that tracks dirty notes and evaluates in dependency order
  */
 export class IncrementalEvaluator {
-  constructor(module, dependencyGraph, evaluator) {
+  declare module: IncrementalModule;
+  declare graph: DependencyGraph;
+  declare evaluator: BinaryEvaluator;
+  declare dirty: Set<number>;
+  declare cache: EvaluationCache;
+  declare generation: number;
+
+  constructor(module: IncrementalModule, dependencyGraph: DependencyGraph, evaluator: BinaryEvaluator) {
     this.module = module;
     this.graph = dependencyGraph;
     this.evaluator = evaluator;
@@ -985,7 +1024,7 @@ export class IncrementalEvaluator {
   /**
    * Set the module reference
    */
-  setModule(module) {
+  setModule(module: IncrementalModule) {
     this.module = module;
     this.evaluator.setModule(module);
     this.invalidateAll();
@@ -998,7 +1037,7 @@ export class IncrementalEvaluator {
    * @param {Set<number>} [dependents] - graph.getEvaluationDependents(noteId),
    *   when the caller has already computed it
    */
-  invalidate(noteId, dependents = null) {
+  invalidate(noteId: number, dependents: Iterable<number> | null = null) {
     this.dirty.add(noteId);
 
     // Also invalidate all dependents, including the ones reached through the
@@ -1017,7 +1056,7 @@ export class IncrementalEvaluator {
    * for baseNote dependents and batch updates; without it those notes were
    * silently never re-evaluated on the JS path.)
    */
-  markDirtyOnly(noteId) {
+  markDirtyOnly(noteId: number) {
     this.dirty.add(noteId);
   }
 
@@ -1105,7 +1144,7 @@ export class IncrementalEvaluator {
   /**
    * Get evaluation result for a note
    */
-  getEvaluatedNote(noteId) {
+  getEvaluatedNote(noteId: number) {
     return this.cache.get(noteId) || null;
   }
 
