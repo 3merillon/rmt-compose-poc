@@ -22,6 +22,8 @@ import Fraction from 'fraction.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const { Module } = await import('../src/module.js');
+const { history } = await import('../src/store/history.js');
+const { eventBus } = await import('../src/utils/event-bus.js');
 const { compiler } = await import('../src/expression-compiler.js');
 const { EXPRESSION_VARS } = await import('../src/note.js');
 const S = await import('../src/utils/simplify.js');
@@ -163,11 +165,66 @@ const modules = [];
       'patched text and exact frequencies match a fresh load');
   }
   m.notes[129].setVariable('frequency', '[1].f');
-  m.historySnapshot(true);
+  const rewired = m.historySnapshot(true);
   check(!m.restoreHistoryVersion(initial.version), 'a changed variable dependency asks for a full restore');
   delete m.notes[127];
   m.notes[511].properties.instrument = 'triangle';
-  check(m.historySnapshot().snapshotStr === m.createModuleJSONString(), 'unscoped checkpoints include direct field writes and removed notes');
+  const full = m.historySnapshot();
+  check(full.snapshotStr === m.createModuleJSONString(), 'unscoped checkpoints include direct field writes and removed notes');
+  check(full.version.pages.get(1) === rewired.version.pages.get(1), 'unscoped checkpoint reuses an unchanged page');
+  delete m.notes[129];
+  const removed = m.historySnapshot();
+  check(!removed.version.pages.has(1) && removed.snapshotStr === m.createModuleJSONString(),
+    'removing the last note on a page disappears from the full checkpoint');
+}
+
+{
+  const m = await load({ baseNote: {}, notes: [1, 130].map(id => ({
+    id, startTime: 'base.t', duration: 'base.d', frequency: 'base.f'
+  })) });
+  m.notes[130].properties.color = 'x'.repeat(10000); // A large, unchanged page.
+  const budget = history._maxBytes;
+  history._maxBytes = 4096;
+  let request;
+  const off = eventBus.on('history:requestRestore', event => { request = event; });
+  const initial = m.historySnapshot();
+  history.seedIfEmpty(initial);
+  for (let i = 1; i <= 3; i++) {
+    m.notes[1].setVariable('color', 'blue' + i);
+    history.capture({ label: 'edit ' + i, ...m.historySnapshot(true) });
+  }
+  check(history.size().undo === 4, 'a large shared current checkpoint leaves room for small edits');
+  history.undo();
+  check(m.restoreHistoryVersion(request.version) && m.notes[1].properties.color === 'blue2',
+    'undo reaches the preceding paged edit');
+  m.notes[1].setVariable('color', 'green');
+  history.capture({ label: 'branch', ...m.historySnapshot(true) });
+  check(!history.canRedo() && history.size().undo === 4, 'editing after undo replaces the redo branch');
+  history.setMaxSize(3);
+  m.notes[1].setVariable('color', 'red');
+  history.capture(m.historySnapshot(true));
+  check(history.size().undo === 3, 'the entry count cap evicts the oldest state');
+  m.notes[130].setVariable('color', 'orange');
+  history.capture(m.historySnapshot(true));
+  check(history.size().undo === 2, 'a uniquely retained large page triggers byte eviction, preserving one undo');
+  history.undo();
+  const first = request.snapshot;
+  first.notes[0].color = 'changed by consumer';
+  history.redo();
+  history.undo();
+  check(request.snapshot.notes[0].color === 'red' && request.snapshot.notes[1].color.length === 10000,
+    'full restore of an evicted chain reconstructs independent JSON from its surviving pages');
+  history.clear();
+  history.seedIfEmpty({ snapshot: { n: 0 } });
+  history.capture({ snapshotStr: '{"n":1}' });
+  history.undo();
+  const from = request.snapshot.n;
+  history.redo();
+  check(from === 0 && request.snapshot.n === 1, 'raw objects and pre-serialized strings round-trip');
+  history.clear();
+  off();
+  history._maxBytes = budget;
+  history.setMaxSize(50);
 }
 
 {

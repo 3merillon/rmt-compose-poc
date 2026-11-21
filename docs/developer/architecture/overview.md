@@ -161,7 +161,7 @@ exception is `audio.defaultInstrument`, which `player.js` reads and pushes into
 | Module | Role |
 |---|---|
 | `src/store/app-state.js` | `setModule()` / `getModule()` / `setEvaluatedNotes()`. Retires the old `window.*` globals. |
-| `src/store/history.js` | Undo/redo. Snapshots are **minified JSON strings**; 50 entries or 12 MB, whichever binds first (never below 2). Restore goes through `Module.loadFromJSON`. |
+| `src/store/history.js` | Undo/redo with shared pages. Up to 50 states and a 12 MiB budget for older checkpoints. Compatible edits restore changed rows. Structural edits go through `Module.loadFromJSON`. |
 | `src/utils/event-bus.js` | The pub/sub bus. 25 event names in the app today. |
 | `src/settings/settings-store.js` | Validated, persisted settings (`rmt:settings:v1`). Broadcasts `settings:changed`. |
 

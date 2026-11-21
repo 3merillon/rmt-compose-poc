@@ -66,7 +66,7 @@ There is also **no double-click gesture** anywhere in the app, and **no right-cl
 
 | | |
 |---|---|
-| **Depth** | Up to 50 states — fewer for a very large module, because retained snapshots are also capped at 12 MB in total. |
+| **Depth** | Up to 50 states. Small edits share the rest of the score, so you can undo a series of changes even in a large piece. Edits that replace many notes can exhaust the history budget sooner. |
 | **Tracked** | Note creation, deletion, moves, resizes, transposes, expression edits, group moves and deletes, module loads, Reset Default Module. |
 | **Not tracked** | Camera (pan/zoom), playback position, the lock, playhead tracking, loop mode, and the **module library**. |
 

@@ -1,12 +1,17 @@
 import { eventBus } from '../utils/event-bus.js';
+import { PagedSnapshot } from './snapshot-pages.js';
+
+// The string supplied to autosave can become a flat, score-sized allocation.
+// Keep only the page version in history and assemble text for a full restore.
+function pagedEntry(label, version) {
+  return { label, version, get snapshot() { return this.version.text; } };
+}
 
 class HistoryManager {
   constructor(maxSize = 50) {
     this._maxSize = maxSize;
-    // Hard cap on total retained snapshot bytes (Phase 8). Snapshots are stored as
-    // minified JSON STRINGS (see capture()), which are ~3-5x more heap-compact than
-    // the old parsed object graphs; this bound stops a very large module (e.g. 1000
-    // notes ~130KB/snapshot) from growing the undo stack without limit.
+    // Budget history beyond the current paged checkpoint. Standalone strings
+    // still use the original serialized-length budget.
     this._maxBytes = 12 * 1024 * 1024; // 12 MB
     this._undo = [];
     this._redo = [];
@@ -30,15 +35,42 @@ class HistoryManager {
     try { return JSON.parse(str); } catch { return null; }
   }
 
-  // Enforce the count cap and the byte cap (drop oldest). Keeps >=2 entries so undo
-  // stays possible even when a single snapshot is very large.
+  _entry(label, snapshot, snapshotStr, version) {
+    if (version instanceof PagedSnapshot) return pagedEntry(label, version);
+    const text = typeof snapshotStr === 'string' ? snapshotStr : this._serialize(snapshot);
+    return text == null ? null : { label, version, snapshot: text };
+  }
+
+  // Called on a new capture after dropping any redo branch. Undo and redo only
+  // move entries between stacks; neither operation allocates historical pages.
   _enforceCaps() {
-    while (this._undo.length > this._maxSize) this._undo.shift();
+    const entries = this._undo;
+    while (entries.length > this._maxSize) entries.shift();
+    if (entries.length <= 2) return;
+    const versions = new Set();
+    const pages = new Set();
     let bytes = 0;
-    for (const e of this._undo) bytes += (e.snapshot ? e.snapshot.length : 0);
-    while (this._undo.length > 2 && bytes > this._maxBytes) {
-      const dropped = this._undo.shift();
-      bytes -= (dropped && dropped.snapshot ? dropped.snapshot.length : 0);
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      const v = entry.version;
+      if (!(v instanceof PagedSnapshot)) {
+        bytes += entry.snapshot.length;
+      } else if (!versions.has(v)) {
+        versions.add(v);
+        // A directory per version, one copy of each distinct page. Allow for
+        // Map slots, up to two bytes per code unit, and the packed row offsets.
+        let cost = 32 * v.pages.size + 2 * (v.baseText.length + (v.ruleText?.length || 0));
+        for (const page of v.pages.values()) {
+          if (pages.has(page)) continue;
+          pages.add(page);
+          cost += 2 * page.text.length + page.ends.byteLength;
+        }
+        if (i !== entries.length - 1) bytes += cost;
+      }
+      if (bytes > this._maxBytes && i < entries.length - 2) {
+        entries.splice(0, i + 1);
+        break;
+      }
     }
   }
 
@@ -70,19 +102,11 @@ class HistoryManager {
     const normalized = String(label || '').trim().toLowerCase();
     if (normalized === 'initial') return;
 
-    // Store the snapshot as a minified JSON STRING. Callers may pass a pre-serialized
-    // `snapshotStr` (Phase 8 dedupe: captureSnapshot serializes once and shares it with
-    // the localStorage autosave) to avoid a second JSON.stringify here.
-    const str = (typeof snapshotStr === 'string') ? snapshotStr : this._serialize(snapshot);
-    if (str == null) return;
-
-    this._undo.push({ label: String(label || 'Change'), snapshot: str, version });
+    const entry = this._entry(String(label || 'Change'), snapshot, snapshotStr, version);
+    if (!entry) return;
+    this._redo.length = 0;
+    this._undo.push(entry);
     this._enforceCaps();
-
-    // Any new capture invalidates/clears the redo stack
-    if (this._redo.length) {
-      this._redo.length = 0;
-    }
 
     this._emitStackChanged();
   }
@@ -140,9 +164,9 @@ class HistoryManager {
 
   seedIfEmpty({ label = 'Initial', snapshot, snapshotStr, version }) {
     if (this._undo.length === 0 && (snapshot != null || snapshotStr != null)) {
-      const str = (typeof snapshotStr === 'string') ? snapshotStr : this._serialize(snapshot);
-      if (str == null) return;
-      this._undo.push({ label: String(label || 'Initial'), snapshot: str, version });
+      const entry = this._entry(String(label || 'Initial'), snapshot, snapshotStr, version);
+      if (!entry) return;
+      this._undo.push(entry);
       this._emitStackChanged();
     }
   }

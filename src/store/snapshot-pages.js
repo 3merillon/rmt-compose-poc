@@ -19,9 +19,45 @@ function pack(rows) {
   return { ends, text: rows.filter(row => row !== undefined).join(',') };
 }
 
-export function snapshotPages(previous, ids, rowFor, baseText, ruleText) {
-  const pages = new Map(previous?.pages);
+export class PagedSnapshot {
+  constructor(pages, baseText, ruleText) {
+    this.pages = pages;
+    this.baseText = baseText;
+    this.ruleText = ruleText;
+  }
+
+  // Autosave and legacy restores consume a single canonical string. Never cache
+  // it on a version: consumers can flatten the rope into a score-sized buffer.
+  get text() {
+    let text = '{"baseNote":' + this.baseText + ',"notes":[';
+    let separator = '';
+    for (const id of [...this.pages.keys()].sort((a, b) => a - b)) {
+      text += separator + this.pages.get(id).text;
+      separator = ',';
+    }
+    return text + ']' + (this.ruleText === undefined ? '' : ',"instrumentRule":' + this.ruleText) + '}';
+  }
+}
+
+export function snapshotPages(previous, ids, rowFor, baseText, ruleText, complete = !previous) {
+  const pages = complete ? new Map() : new Map(previous.pages);
   const touched = new Map();
+  function writePage(id, rows) {
+    const page = pack(rows);
+    if (!page.text) {
+      pages.delete(id);
+      return;
+    }
+    // A full checkpoint also covers arbitrary additions and deletions. Reuse a
+    // matching old page even though we had to inspect every note in this pass.
+    const old = complete && previous?.pages.get(id);
+    if (old && old.text === page.text && old.ends.length === page.ends.length &&
+        old.ends.every((end, slot) => end === page.ends[slot])) {
+      pages.set(id, old);
+    } else {
+      pages.set(id, page);
+    }
+  }
   let lastId;
   for (const id of ids) {
     if (id === 0) continue;
@@ -34,8 +70,8 @@ export function snapshotPages(previous, ids, rowFor, baseText, ruleText) {
     if (!rows) {
       // A complete checkpoint visits numeric object keys in order. Release
       // each page's temporary row strings before serializing the next page.
-      if (!previous && lastId !== undefined && pageId > lastId) {
-        pages.set(lastId, pack(touched.get(lastId)));
+      if (complete && lastId !== undefined && pageId > lastId) {
+        writePage(lastId, touched.get(lastId));
         touched.delete(lastId);
       }
       rows = old ? Array.from(old.ends, (_, i) => rowAt(old, i)) : [];
@@ -44,20 +80,11 @@ export function snapshotPages(previous, ids, rowFor, baseText, ruleText) {
     }
     rows[slot] = row;
   }
-  if (!touched.size && previous?.baseText === baseText && previous.ruleText === ruleText) return previous;
+  if (!complete && !touched.size && previous.baseText === baseText && previous.ruleText === ruleText) return previous;
   for (const [id, rows] of touched) {
-    const page = pack(rows);
-    if (page.text) pages.set(id, page);
-    else pages.delete(id);
+    writePage(id, rows);
   }
-  let text = '{"baseNote":' + baseText + ',"notes":[';
-  let separator = '';
-  for (const id of [...pages.keys()].sort((a, b) => a - b)) {
-    text += separator + pages.get(id).text;
-    separator = ',';
-  }
-  text += ']' + (ruleText === undefined ? '' : ',"instrumentRule":' + ruleText) + '}';
-  return { pages, baseText, ruleText, text };
+  return new PagedSnapshot(pages, baseText, ruleText);
 }
 
 export function changedRows(current, target) {

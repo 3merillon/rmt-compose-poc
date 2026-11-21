@@ -310,11 +310,11 @@ any committing edit
   → captureSnapshot(label, tracked)     player.js:5621
       → module.historySnapshot(tracked) → snapshotStr, version   module.js:1052
           (= JSON.stringify(createModuleJSON()); tracked edits serialize the changed rows)
-      → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
-      → eventBus.emit('history:capture',     { label, snapshotStr })
-          → HistoryManager stores the STRING (≈3–5× less retained heap than an object graph)
+      → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr, version })
+      → eventBus.emit('history:capture',     { label, snapshotStr, version })
+          → HistoryManager retains version and its shared note pages
           → clears the redo stack
-          → _enforceCaps(): 50 entries / 12 MB, never below 2
+          → _enforceCaps() retains up to 50 states and budgets 12 MiB for older pages and directories
       → player.js hands snapshotStr to the autosave                    autosave.js:128
           (IndexedDB, after the frame that shows the edit; the latest text only)
 ```

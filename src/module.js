@@ -1086,8 +1086,8 @@ export class Module {
           (color !== null && !color) || (instrument !== null && !instrument)) this._canPatchHistory = false;
       return JSON.stringify(noteJSON(note));
     };
-    const version = snapshotPages(partial ? prior : null, ids, row,
-      JSON.stringify(this._baseNoteJSON()), JSON.stringify(INSTRUMENT_RULE));
+    const version = snapshotPages(prior, ids, row,
+      JSON.stringify(this._baseNoteJSON()), JSON.stringify(INSTRUMENT_RULE), !partial);
     version.origin = this._historyOrigin || (this._historyOrigin = Symbol());
     this._historyVersion = version;
     this._historyIds = new Set();

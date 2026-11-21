@@ -113,10 +113,10 @@ This is every topic in `src/` at the current commit. Payloads are exact.
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `history:capture` | `{ label, snapshotStr }` (the module's JSON text, `Module.createModuleJSONString()`), or `{ label, snapshot }` (the object, serialized by each consumer) | every undoable action | `store/history.js` (push) **and** `player.js` (hand the text to the autosave, `src/store/autosave.js`) |
-| `history:seedIfEmpty` | `{ label: 'Initial', snapshotStr }` or `{ label: 'Initial', snapshot }` | the same call sites, just before `history:capture` | `store/history.js` |
+| `history:capture` | `{ label, snapshotStr, version }` for editor checkpoints. Standalone `snapshotStr` or `snapshot` payloads are also accepted. | every undoable action | `store/history.js` retains the version. `player.js` passes the string to autosave. |
+| `history:seedIfEmpty` | The same checkpoint or standalone payload with `label: 'Initial'` | the same call sites, just before `history:capture` | `store/history.js` |
 | `history:undo` / `history:redo` | — | the module-bar buttons, the + menu buttons, Ctrl/⌘+Z and Ctrl/⌘+Y | `store/history.js` |
-| `history:requestRestore` | `{ snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` — rebuilds the module from the snapshot; also clears the selection |
+| `history:requestRestore` | `{ version, snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` patches compatible versions in place. A full restore reads the lazy `snapshot` and reloads the module. |
 | `history:stackChanged` | `{ undo, redo, canUndo, canRedo }` | `HistoryManager`, after every push/undo/redo | the undo/redo buttons in the module bar and the + menu |
 
 ### workspace (canvas gestures → authoritative commit)

@@ -126,7 +126,7 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | `src/player/reverb.js` | Algorithmic impulse-response generator. |
 | `src/settings/settings-store.js` | The `settingsStore` singleton (`rmt:settings:v1`). |
 | `src/theme/theme-manager.js` | `appearance.*` → CSS custom properties + `renderer.setConfig` / `setThemeColors`. |
-| `src/store/history.js` | Undo/redo. String snapshots, 50 entries, 12 MB cap. |
+| `src/store/history.js` | Undo/redo with shared checkpoint pages, up to 50 states and a 12 MiB history budget. |
 | `src/utils/event-bus.js` | The pub/sub bus every subsystem talks over. |
 | `src/utils/simplify.js` | Value-checked simplification and the arrow-interval coefficient fold (the algebra is `src/dsl/simplify.js`). |
 
