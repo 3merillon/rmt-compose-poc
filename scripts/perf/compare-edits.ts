@@ -53,7 +53,12 @@ async function run(browser: Browser, base: string) {
     const tsEntry = !!document.querySelector('script[type="module"][src*="main.ts"]');
     const { history } = tsEntry ? await import('/src/store/history.ts') : await import('/src/store/history.js');
     let A: typeof import('../../src/store/autosave.ts') | null = null;
-    try { A = tsEntry ? await import('/src/store/autosave.ts') : await import('/src/store/autosave.js'); } catch {}
+    const autosavePath = tsEntry ? '/src/store/autosave.ts' : '/src/store/autosave.js';
+    const autosaveSource = await fetch(autosavePath, { method: 'HEAD', headers: { Accept: 'text/javascript' } });
+    if (autosaveSource.status !== 404) {
+      if (!autosaveSource.ok) throw new Error(`Autosave module request failed: ${autosaveSource.status} ${autosavePath}`);
+      A = tsEntry ? await import('/src/store/autosave.ts') : await import('/src/store/autosave.js');
+    }
     const readSaved = async () => {
       if (A && typeof A.readSavedModuleText === 'function') { await A.whenSaved(); return (await A.readSavedModuleText()) || ''; }
       return localStorage.getItem('rmt:moduleSnapshot:v1') || '';
