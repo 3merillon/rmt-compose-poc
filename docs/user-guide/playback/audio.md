@@ -25,9 +25,10 @@ A note's end is a note-off: its sound rings briefly after it, as a key lifted or
 (see [Instruments](/user-guide/playback/instruments)). When the playhead reaches the end of the module,
 the last notes therefore ring out to silence instead of being cut. **Stop**, **Pause** and a new
 **Play** still silence everything at once. When a loop is switched off, the last pass ends the same
-way. At most 256 voices sound at once by default (Settings → Audio → **Most voices at once**, up to
-4096); beyond that, the quietest note already ringing after its end fades out first, and a note is never
-cut before its end.
+way. **Most voices at once** defaults to 256 and can be set as high as 4096 in
+Settings → Audio. When more notes arrive, the player fades older release tails
+first. Held notes play through their written ends, even in a chord larger than
+the selected limit.
 
 ## Where the controls are
 

@@ -35,6 +35,11 @@ const EPS_GAIN = 0.0001; // the envelope's floor (instrument-manager.js EPS)
 // A live tempo change takes effect this far ahead of the audio clock, so no voice
 // is ever rescheduled into the past (the pump runs on a 100 ms timer).
 const RATE_CHANGE_LEAD = 0.05; // seconds
+// Sparse scores can be queued well ahead. In a dense passage each future
+// voice is another connected Web Audio graph until its source ends.
+const DENSE_WINDOW_NOTES = 128;
+const DENSE_LOOKAHEAD = 0.4;
+const PUMP_BUDGET_MS = 5;
 
 /**
  * The same pitch on the nearest key of a keyboard tuned from the BaseNote:
@@ -340,7 +345,7 @@ export class AudioEngine {
    * note's release and its reverb tail ring on across the boundary exactly as
    * they would mid-module. That is what makes the loop seamless, and it is why
    * looping cannot be done by calling play() again from the playhead (that path
-   * re-anchors at currentTime + 0.1 and stopAll()s the tail: a ≥100 ms hole).
+   * re-anchors after the startup lead and stopAll()s the tail: a ≥100 ms hole).
    *
    * Time is measured three ways here, and mixing them up is the easy bug:
    *   - clock rel    playback-relative clock seconds (ctx.currentTime - baseStartTime)
@@ -357,8 +362,6 @@ export class AudioEngine {
    * @returns {number} baseStartTime
    */
   play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null, transpose = null } = {}) {
-    const baseStartTime = this.audioContext.currentTime + 0.1;
-
     // Stop any existing streaming
     this._stopStreaming();
 
@@ -371,7 +374,7 @@ export class AudioEngine {
     const s = {
       stopped: false,
       timerId: null,
-      baseStartTime,
+      baseStartTime: 0,
       initialVolume,
       list: noteDataList, // notes of the pass currently being scheduled
       firstList: noteDataList, // pass 0's notes (setRate() may rewind into it)
@@ -400,13 +403,36 @@ export class AudioEngine {
 
     if (loop) this._applyLoop(s, loop);
     this._prepareTransposed(s, noteDataList);
+    // Seeking into a chord restarts every held voice together. Budget time
+    // to build the opening in slices before its common audio-clock start.
+    let openingVoices = 0;
+    for (const note of noteDataList) {
+      if (note.startTime > 0.1 * this.rate) break;
+      if (note.frequency && note.instrument && note.amplitude !== 0) openingVoices++;
+    }
+    const baseStartTime = this.audioContext.currentTime + Math.max(0.1, openingVoices * 0.0005);
+    s.baseStartTime = baseStartTime;
 
     const pump = () => {
       if (this._streamingState !== s || s.stopped) return;
       s.timerId = null;
 
-      const clockRel = this.audioContext.currentTime - s.baseStartTime;
-      const targetTime = s.map.scoreAt(clockRel + LOOKAHEAD); // score time
+      const clockRel = Math.max(0, this.audioContext.currentTime - s.baseStartTime);
+      const horizon = s.map.scoreAt(clockRel + LOOKAHEAD);
+      const laterNote = s.list[s.nextIndex + DENSE_WINDOW_NOTES];
+      const nextPass = s.firstLen + s.cycle * s.period;
+      const repeatsInWindow = s.looping ? Math.max(0, (horizon - nextPass) / s.period) : 0;
+      const dense = (laterNote && s.cycleStart + laterNote.startTime <= horizon)
+        || (repeatsInWindow > 0 && repeatsInWindow * s.loopNotes.length >= DENSE_WINDOW_NOTES);
+      // Hold fewer clock seconds of nodes when the score is running faster.
+      // Wake at least four times per window to leave room for a late timer.
+      const windowSeconds = dense ? Math.max(0.18, DENSE_LOOKAHEAD / Math.max(1, s.map.rate)) : LOOKAHEAD;
+      const interval = Math.min(BATCH_INTERVAL, windowSeconds * 250);
+      const targetTime = s.map.scoreAt(clockRel + windowSeconds);
+      const deadline = performance.now() + PUMP_BUDGET_MS;
+      let examined = 0;
+      let yielded = false;
+      const room = {};
 
       // `more` = this playback still has notes to schedule at some point.
       let more = true;
@@ -425,6 +451,12 @@ export class AudioEngine {
 
           // Not due yet.
           if (at > targetTime) { horizonReached = true; break; }
+          // Give the UI a turn between bursts. Resume promptly, keeping the
+          // same ordered cursor even when a chord spans more than one batch.
+          if (examined && examined % 32 === 0 && performance.now() >= deadline) {
+            yielded = horizonReached = true;
+            break;
+          }
 
           // Skip notes without frequency (measure markers) and silent notes
           // (amplitude 0): there is nothing to hear, so no voice is built.
@@ -437,9 +469,10 @@ export class AudioEngine {
             // passStartTime keeps its contract (passStartTime + noteData.startTime is
             // the note's absolute start) at any rate.
             const transpose = this._passFactor(s, s.cycle);
-            this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at, transpose });
+            this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at, transpose, room });
           }
           s.nextIndex++;
+          examined++;
         }
         if (!more || horizonReached) break;
 
@@ -462,7 +495,7 @@ export class AudioEngine {
       // pre-loop version stopped the moment the last note was SCHEDULED, which is up
       // to LOOKAHEAD before it sounds — with a loop that would end playback after
       // exactly one pass (and immediately, for a module shorter than the lookahead).
-      if (more) s.timerId = setTimeout(pump, BATCH_INTERVAL);
+      if (more) s.timerId = setTimeout(pump, yielded ? 0 : interval);
     };
     s.pump = pump;
 
@@ -491,8 +524,8 @@ export class AudioEngine {
 
     const notes = loop.notes;
     if (!Array.isArray(notes) || notes.length === 0) return false;
-    // All-measure-marker modules would schedule nothing, forever.
-    if (!notes.some(n => n && n.frequency && n.instrument)) return false;
+    // A score of measure markers, rests or muted notes has nothing to repeat.
+    if (!notes.some(n => n && n.frequency && n.instrument && n.amplitude !== 0)) return false;
 
     let firstLen = Number(loop.firstCycleAudioLength);
     if (!Number.isFinite(firstLen) || firstLen <= 0) firstLen = period;
@@ -603,7 +636,7 @@ export class AudioEngine {
   }
 
   /**
-   * Score seconds elapsed in the playback in flight (negative during the 0.1 s
+   * Score seconds elapsed in the playback in flight (negative during the startup
    * lead-in), through the same map the voices were scheduled with: the playhead
    * follows this, so it moves with the sound at any rate. null when nothing plays.
    */
@@ -766,7 +799,7 @@ export class AudioEngine {
     } catch (e) {
       console.warn('applyEnvelope failed', e);
     }
-    this._makeRoomAt(start);
+    this._makeRoomAt(start, timing?.room);
     // The voice this one takes over from (a slur, a new stroke, a re-struck pitch)
     // fades from the level it has at this note's start.
     const faded = [];
@@ -834,12 +867,16 @@ export class AudioEngine {
     };
     // Prefer the node's own 'ended' event; fall back to a timer for wrappers
     // that don't forward onended.
-    let ended = false;
-    try {
-      voice.onended = () => { ended = true; cleanup(); };
-    } catch {}
-    const ms = Math.max(0, (start + length - ctx.currentTime) * 1000) + 60;
-    setTimeout(() => { if (!ended) cleanup(); }, ms);
+    if ('onended' in voice) {
+      try { voice.onended = cleanup; return; } catch {}
+    }
+    const cleanupWhenEnded = () => {
+      if (!this.activeOscillators.has(entry)) return;
+      const remaining = entry.endTime - ctx.currentTime;
+      if (remaining <= 0 || ctx.state === 'closed') cleanup();
+      else setTimeout(cleanupWhenEnded, Math.max(100, remaining * 1000 + 60));
+    };
+    setTimeout(cleanupWhenEnded, Math.max(0, (entry.endTime - ctx.currentTime) * 1000) + 60);
   }
 
   /**
@@ -849,18 +886,26 @@ export class AudioEngine {
    * own release up to `at` (the exponential is rebuilt through that point), so the
    * fade starts from the level it has there. A voice before its note-off is left.
    */
-  _makeRoomAt(at) {
+  _makeRoomAt(at, room = {}) {
     const limit = (this.graph && this.graph.maxVoices > 0) ? this.graph.maxVoices : MAX_VOICES;
-    let sounding = 0;
-    // A voice already being stolen no longer counts: it is fading out.
-    for (const e of this.activeOscillators) if (!e.stolen && e.startTime <= at && e.endTime > at) sounding++;
-    while (sounding >= limit) {
-      let victim = null;
+    if (this.activeOscillators.size < limit) return;
+    // All voices of a chord see the same existing releases. Reserve capacity
+    // in score order, sharing the census only within this synchronous pump.
+    if (room.at !== at) {
+      room.at = at;
+      room.sounding = 0;
+      room.victims = [];
       for (const e of this.activeOscillators) {
-        if (!(e.offTime <= at && e.endTime > at + STEAL_FADE) || !e.levelAt || e.stolen) continue;
-        if (!victim || e.offTime < victim.offTime) victim = e;
+        if (e.stolen || e.startTime > at || e.endTime <= at) continue;
+        room.sounding++;
+        if (e.offTime <= at && e.endTime > at + STEAL_FADE && e.levelAt) room.victims.push(e);
       }
-      if (!victim) return;
+      room.victims.sort((a, b) => a.offTime - b.offTime);
+      room.next = 0;
+    }
+    while (room.sounding >= limit && room.next < room.victims.length) {
+      const victim = room.victims[room.next++];
+      if (victim.endTime <= at + STEAL_FADE) continue;
       victim.stolen = true;
       victim.fade = victim.fade || { at, origEnd: victim.endTime };
       try {
@@ -872,8 +917,9 @@ export class AudioEngine {
         victim.endTime = at + STEAL_FADE + 0.005;
       } catch {}
       this.voiceStats.stolen++;
-      sounding--;
+      room.sounding--;
     }
+    room.sounding++;
   }
 
   /** The voice of note `noteId` sounding at `at` (the latest that began before it), or null. */

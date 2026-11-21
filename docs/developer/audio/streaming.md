@@ -1,13 +1,13 @@
 ---
 title: Streaming Scheduler
-description: The just-in-time note pump inside AudioEngine.play() — a sorted list, a 2 s lookahead, 100 ms batches, and a cycle-aware loop that never tears anything down at the seam.
+description: How AudioEngine schedules sparse and dense passages, changes tempo, and repeats a score on the audio clock.
 ---
 
 # Streaming Scheduler
 
-The scheduler creates Web Audio voices about **2 seconds** before they sound, in **100 ms** batches,
-instead of building every oscillator up front. A ten-minute piece costs the same at press-Play as a
-ten-second one.
+The scheduler creates voices up to two seconds before they sound. It shortens that
+window in dense passages to reduce the number of connected Web Audio nodes. A
+large opening chord gets extra preparation time before its common attack.
 
 ::: warning There is no `StreamingScheduler` class
 Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
@@ -24,7 +24,7 @@ outside. It is exposed as `audioEngine._streamingState` for the test harness.
 |---|---|
 | `stopped` | Set by `_stopStreaming()`. The pump checks it and bails. |
 | `timerId` | The pending `setTimeout` handle. |
-| `baseStartTime` | Absolute ctx time at which pass 0 begins — `ctx.currentTime + 0.1`. |
+| `baseStartTime` | Absolute audio-clock time at which pass 0 begins, with at least 100 ms of preparation time. |
 | `initialVolume` | Per-note envelope peak. |
 | `list` | The note array of the pass **currently being scheduled**. |
 | `firstList` | Pass 0's note array (the list `play()` was given), kept so `setRate()` can rewind into it. |
@@ -59,52 +59,12 @@ note's clock length through the map and its score position.
 
 ## The pump
 
-```javascript
-const pump = () => {
-  if (this._streamingState !== s || s.stopped) return;
-  s.timerId = null;
-
-  const clockRel = this.audioContext.currentTime - s.baseStartTime;
-  const targetTime = s.map.scoreAt(clockRel + LOOKAHEAD);   // the horizon, in score time
-  let more = true;
-
-  for (let guard = 0; guard < MAX_CYCLES_PER_BATCH; guard++) {
-    let horizonReached = false;
-
-    // Drain the current pass up to the horizon.
-    while (s.nextIndex < s.list.length) {
-      const noteData = s.list[s.nextIndex];
-      const at = s.cycleStart + noteData.startTime;
-
-      if (s.cutRel != null && at >= s.cutRel - SEAM_EPS) { more = false; break; }
-      if (at > targetTime) { horizonReached = true; break; }
-
-      if (noteData.frequency && noteData.instrument) {          // skip measure markers
-        const startClock = s.map.clockAt(at);
-        const duration = s.map.clockAt(at + noteData.duration) - startClock;
-        this._scheduleNote(noteData, s.baseStartTime + startClock - noteData.startTime,
-                           s.initialVolume, { duration, scoreStart: at });
-      }
-      s.nextIndex++;
-    }
-    if (!more || horizonReached) break;
-    if (!s.looping) { more = false; break; }
-
-    // Advance to the next pass.
-    const nextStart = s.firstLen + s.cycle * s.period;
-    if (nextStart > targetTime) break;      // beyond the horizon; pick it up next batch
-
-    s.cycle++;
-    s.cycleStart = nextStart;
-    s.list = s.loopNotes;
-    s.nextIndex = 0;
-  }
-
-  if (more) s.timerId = setTimeout(pump, BATCH_INTERVAL);
-};
-```
-
-Three things in there are load-bearing.
+Each pump checks upcoming density, including repeats that fall inside the
+window. In dense passages it schedules up to 400 ms ahead at normal tempo,
+shortening that to a minimum of 180 ms at faster tempos. It checks its time
+budget every 32 score entries. After about 5 ms of work it yields, then resumes
+at the same score entry. Notes in a simultaneous chord keep their shared time
+even when they are submitted in different batches.
 
 **The list is sorted and consumed by index.** `preparePlayback()` sorts by `startTime`, so the inner
 `while` can break the moment it finds a note past the horizon — everything after it is later still.
@@ -116,7 +76,7 @@ Three things in there are load-bearing.
 const nextStart = s.firstLen + s.cycle * s.period;   // NOT cycleStart += period
 ```
 
-An accumulator drifts, and it must agree *exactly* with the `nextStart > targetTime` test below it.
+An accumulator drifts, and it must agree *exactly* with the scheduler’s `nextStart > targetTime` test.
 If it doesn't, a whole pass lands in the past and every note of it fires at once.
 
 **`more` tracks "this playback still has notes at some point", not "still has notes right now".** A
@@ -131,6 +91,9 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 |---|---|---|
 | `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:367`) |
 | `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:368`) — not `SCHEDULE_INTERVAL` |
+| `DENSE_WINDOW_NOTES` | **128** | Density threshold inside the sparse lookahead |
+| `DENSE_LOOKAHEAD` | **0.4 s** | Maximum dense lookahead at normal speed |
+| `PUMP_BUDGET_MS` | **5 ms** | Work budget per turn, checked every 32 entries |
 | `FALLBACK_TAIL` | **0.15 s** | module-level (`:22`); the voice's tail past the note only if its envelope cannot be computed |
 | `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:13`) |
 | `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:17`) |
@@ -289,19 +252,11 @@ playhead), the loop seam across a change, and the commit.
 
 ## Voice teardown
 
-Each scheduled voice is tracked as `{ voice, gainNode, panner, startTime }` in the
-`activeOscillators` `Set`. Cleanup is **dual**:
-
-```javascript
-voice.onended = () => { ended = true; cleanup(); };
-setTimeout(() => { if (!ended) cleanup(); },
-           (start + length - ctx.currentTime) * 1000 + 60);   // length = voiceLength(...)
-```
-
-The `onended` path is preferred; the timer is a backstop for wrapper voices that do not forward
-`onended`. `cleanup()` checks Set membership first, so exactly one teardown runs no matter which
-fires — and so a voice already removed by `stopAll()` or `_cancelScheduledFrom()` is not torn down
-twice.
+Built-in voices disconnect when the source fires `ended`. A wrapper without
+that event uses a timer that checks the audio clock before disconnecting. A
+suspended context can therefore resume a note whose wall-clock timer has fired.
+Both paths check membership in `activeOscillators` so stop or cancellation can
+release a voice exactly once.
 
 ## Pause, resume and seek
 

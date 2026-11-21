@@ -251,6 +251,14 @@ export class SynthInstrument {
     createOscillator(frequency) {
         const ctx = this.audioContext;
         const count = Math.max(1, this.unisonCount | 0);
+        // An unfiltered single oscillator already implements the voice contract.
+        if (count === 1 && this.filterTrackMul <= 0) {
+            const osc = ctx.createOscillator();
+            if (this.periodicWave) osc.setPeriodicWave(this.periodicWave);
+            else osc.type = this.waveType || 'sine';
+            osc.frequency.value = frequency;
+            return osc;
+        }
         const oscs = [];
         const sum = ctx.createGain();
         // Keep perceived level ~constant regardless of the unison count.
