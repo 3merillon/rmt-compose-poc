@@ -264,7 +264,7 @@ Note 2 is a major third above note 1 — defined against *note 1*, not against t
 
 ### The module library
 
-Drag a module tile onto the BaseNote to hear it in your workspace’s tuning and pace. Drop it onto a sounding note to make that note its pitch anchor. The module keeps its internal intervals and its rhythm in BaseNote time units. For example, a ii–V–I dropped onto a note a fourth higher moves up a fourth.
+Drag a module tile onto the BaseNote to hear it in your workspace’s tuning and pace. For a sounding target, choose **Start** to begin with the target or **End** to follow it. Drop the tile on the target to use its pitch as the anchor. The module keeps its internal intervals and its rhythm in BaseNote time units. For example, a ii–V–I dropped onto a note a fourth higher moves up a fourth.
 
 Use **+ → Save Module** to download the workspace. Use **Copy to Modules** in the group widget to keep a selected passage in **Custom**. The [module library](/user-guide/modules/module-library) describes the shipped collections. [Reading the canon and its cadences](/tutorials/workflows/canon-and-cadences) shows how to follow a pitch through two voices and trace the bass of a progression.
 

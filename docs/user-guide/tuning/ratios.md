@@ -61,12 +61,12 @@ Each tile draws its ratio as a stacked fraction, with the interval's size in cen
 To find one fast, click the **magnifier** in the library toolbar and type into **Search name, ratio, tag…**. It matches the display name, the ratio, the family, the cents value and the tags — so `3/2`, `fifth`, `septimal` and `comma` all work, and matches surface even inside collapsed sections.
 
 ::: warning A module must land on a note
-Drag the tile onto an existing note or onto the BaseNote circle. Dropping it on empty canvas is rejected with *"Drop onto a note or the BaseNote circle to import a module."*, and dropping it on a silence is rejected with *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."*
+Choose **Start** to stack the interval on its target or **End** to hear the two in sequence. Drag the tile onto an existing note or onto the BaseNote circle. Dropping it on empty canvas is rejected with *"Drop onto a note or the BaseNote circle to import a module."*, and dropping it on a silence is rejected with *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."*
 :::
 
 ## The Chords section
 
-The **Chords** section ships 11 chords, each written as a ratio over its own root. The root is `base.f`; every chord tone is a ratio of the root, so the chord is a subtree, not three loose pitches. Move or retune the root and the whole chord follows.
+The **Chords** section ships 11 chords, each written as a ratio over its own root. In the Major module all three pitches refer to `base.f`. After a drop onto a note, all three follow that target note when you retune it.
 
 | Chord | Ratio | Tones above the root |
 |---|---|---|

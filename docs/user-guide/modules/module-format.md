@@ -317,8 +317,8 @@ node scripts/migrate-modules.mjs <file-or-folder> --dry-run   # list what would 
 
 It uses the same conversion as the app, keeps line endings and indentation, and leaves files already in the new form untouched. The library in `public/modules/` is already converted.
 
-::: warning Files saved by this version do not open in the published editor
-The conversion goes one way. A module saved from this version carries `duration` on the BaseNote and `"measure": true` on its bars, and the published editor on `main` does not read them. Keep a copy of any file you still need there.
+::: warning Keeping an older-format copy
+The conversion goes one way. A module saved from this version carries `duration` on the BaseNote and `"measure": true` on its bars, and earlier editors using the tempo/meter format cannot read those fields. Keep a copy of any file you still need there.
 :::
 
 If a saved session cannot be loaded at startup, the app keeps it beside the autosave (IndexedDB `rmt-compose`, store `autosave`, key `unloadable`) and opens the default module.

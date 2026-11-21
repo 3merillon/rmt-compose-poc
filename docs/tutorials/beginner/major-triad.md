@@ -39,7 +39,7 @@ base.f
 
 Both sound identical. But in the second, the chord is a *structure*: retune or transpose Note 1 and the third and fifth follow it, staying a chord. In the first, they do not — they are three independent pitches that happen to line up.
 
-Every chord module shipped in the library uses the second form. So will you.
+Use the second form here so you can later move the chord by editing note 1.
 
 ## Step 1: Clear the workspace
 
@@ -119,10 +119,10 @@ The arrow interval is **not fixed to the octave**. It defaults to ×2 up and ×1
 The chord you just built ships as a module.
 
 1. In the module library, expand **Chords** (11 modules).
-2. Check that the drop mode is **Start** — the ⇤ button next to Undo/Redo in the module bar's toolbar should be filled (it is by default). **Start** makes the chord land *at* the note you drop on rather than after it.
+2. Check that the drop mode is **Start** — the ⇤ button next to Undo/Redo in the module bar's toolbar should be filled. **Start** makes the chord land *at* the note you drop on rather than after it.
 3. Drag **Major** onto any note.
 
-The module is exactly the structure you built: a root on `base.f`, and tones written `(5/4) * [1].f` and `(3/2) * [1].f`. Dropping it on a note re-roots the whole chord onto that note.
+The shipped chord sounds the same three pitches. All three frequency expressions in its file use `base.f`. After the drop, retune the target note to move the entire chord. In the handmade version above, retune note 1.
 
 ## Chord reference
 

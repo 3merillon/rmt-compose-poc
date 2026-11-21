@@ -27,6 +27,8 @@ While you are there:
 | **Limiter** | on (default) | Stops a stack of sustained sines from clipping |
 | **Default instrument** | `sine-wave` | A pure tone shows the beat rate between fundamentals most cleanly |
 
+**Set the library drop mode to Start** before stacking an interval or chord onto a sounding note. Choose **End** when you want to hear a scale after the target.
+
 **Use long notes.** Beating takes time to become audible. `base.d * 4` is a sensible minimum.
 
 **Loop it.** Shift-click (or long-press) the **Play** button. The play icon's bars become dashes

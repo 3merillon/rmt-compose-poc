@@ -318,8 +318,7 @@ rewrites such a module into the relational form:
   duration of `60/T`, and an old bar becomes a silent note with a duration and `"measure": true`.
 
 On disk, `node scripts/migrate-modules.mjs <file-or-folder> [--dry-run]` applies the same conversion
-to files in place. The library in `public/modules/` is already converted. A module saved by this
-version does not load in the published editor.
+to files in place. The library in `public/modules/` is already converted. Earlier editors using the tempo/meter format cannot load the new time representation.
 
 The user-facing translation table is under
 [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).

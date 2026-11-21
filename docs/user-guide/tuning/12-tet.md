@@ -84,7 +84,7 @@ The library's **Scale Systems** section ships a **12-TET** module. (The file is 
 
 Note 1 is `base.f`. Every later note is the previous note times one semitone, so the scale is a chain — lift note 1 and all thirteen move with it.
 
-To load it, drag the tile from **Scale Systems** (or search `12` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The module's `base` references are rewritten to your drop target, so the scale re-roots onto that note. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
+For a melodic continuation, choose **End** in the module bar. To compare against a sustained target, choose **Start**. Drag the tile from **Scale Systems** (or search `12` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The scale takes its pitch from the target and its time unit from the workspace BaseNote. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
 Once loaded, the notes are cross-hatched and each label shows its exact step above the BaseNote: `2^(1/12)`, `2^(1/6)`, `2^(1/4)` … `2^(11/12)` (the exponents are reduced, so the third step reads `2^(1/4)`). That is correct: `2^(1/12)` is irrational, and the app keeps it as the power it is. The octave note's label reads `2/1`, exactly. Only note 1 — plain `base.f` — is unhatched.
 

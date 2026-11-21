@@ -218,7 +218,7 @@ This is why most scale-system modules pin `"instrument": "sine-wave"` on their B
 2. **Expression source text is preserved verbatim.** A module that was loaded from the retired method-chain syntax has already been converted to DSL on load, so it is saved in the DSL (see [The retired method-chain syntax](/reference/expressions/syntax#the-retired-method-chain-syntax)).
 3. **Nothing is added.** `amplitude`, `attack` and `release` are written only for the notes (and the BaseNote) that define one, and `measure` only on a bar, so a file that never used them is saved without them. A pure-DSL source file round-trips as pure DSL.
 
-Files saved by this version do not load in the published editor.
+Keep the original file when exchanging work with earlier editors using the tempo/meter format. They cannot read the new time representation.
 
 ## Limits and validation
 

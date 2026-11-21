@@ -85,7 +85,7 @@ The colored line drawn between a selected note and the notes it is related to. T
 A **thick** line points at something the selected note depends on. A **thin** line points at something that depends on the selected note.
 
 ### Drop mode
-**Start** (the default) or **End**, set by the two drop-mode buttons in the [module bar](#module-bar)'s toolbar — ⇤ for **Start**, ⇥ for **End**, just left of **Undo**/**Redo**; exactly one is lit at a time. It decides whether a module you drag onto a note anchors its imported start times to that note's **start** or to its **end**.
+**Start** or **End** (the initial setting for a new library), set by the two drop-mode buttons in the [module bar](#module-bar)'s toolbar — ⇤ for **Start**, ⇥ for **End**, just left of **Undo**/**Redo**; exactly one is lit at a time. It decides whether a module you drag onto a note anchors its imported start times to that note's **start** or to its **end**.
 
 ### DSL
 The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `base.d * (1/2)`, `2^(7/12)`. Infix operators and note references in square brackets; it has no functions. Every shipped module uses it. Edits the app performs for you — a drag, a resize, an arrow press — rewrite the expression in the DSL. See the [syntax reference](/reference/expressions/syntax).

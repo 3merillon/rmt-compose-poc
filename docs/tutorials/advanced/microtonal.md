@@ -175,7 +175,7 @@ decide where a dropped module lands relative to the target note. Exactly one is 
 - **End** (⇥) — the module's notes are pushed past the target note's end. Chains scales and melodies.
 - **Start** (⇤) — the module's notes share the target's start time. Stacks chords.
 
-Default is **Start**. Note that dropping onto the **BaseNote** ignores the drop mode entirely.
+A new library starts in **End** mode. A saved library restores its chosen mode. Dropping onto the BaseNote starts at the BaseNote in either mode.
 :::
 
 ### A 19-TET melody, by hand
