@@ -9,7 +9,7 @@ import { DependencyGraph } from './dependency-graph.js';
 import { inheritsFromBase } from './variable-deps.js';
 import { BinaryEvaluator, IncrementalEvaluator } from './binary-evaluator.js';
 import { compiler } from './expression-compiler.js';
-import { compare as compareExact } from './value/exact.js';
+import { add as addExact, compare as compareExact, toNumber as exactToNumber } from './value/exact.js';
 import { MAX_NOTE_ID } from './binary-note.js';
 import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.js';
 
@@ -1399,9 +1399,9 @@ export class Module {
         }
       }
 
-      const lastMeasureLength = lastMeasure.getVariable('duration');
+      const lastMeasureLength = lastMeasure.getExactVariable('duration');
       if (lastMeasureStart && lastMeasureLength) {
-        measureEnd = toNumber(lastMeasureStart.add(lastMeasureLength));
+        measureEnd = exactToNumber(addExact(lastMeasureStart, lastMeasureLength));
       }
     }
 

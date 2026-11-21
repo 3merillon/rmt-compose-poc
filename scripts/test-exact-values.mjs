@@ -91,6 +91,16 @@ console.log('\nExact values: the algebra');
   }
 }
 
+// Transport end includes silent measure bars with any supported time value.
+for (const startTime of ['2^(1/12)', '~1']) {
+  const m = await Module.loadFromJSON({ baseNote: {}, notes: [
+    { id: 1, measure: true, startTime, duration: 'base.d' },
+  ] });
+  const bar = m.getNoteById(1);
+  const end = X.toNumber(X.add(bar.getExactVariable('startTime'), bar.getExactVariable('duration')));
+  check(m.getModuleEndTime() === end, 'measure end with start ' + startTime);
+}
+
 console.log('\nExact values: the evaluator');
 {
   const notes = [{ id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f' }];
