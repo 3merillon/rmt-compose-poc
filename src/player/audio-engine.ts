@@ -12,7 +12,7 @@ import type { ExactValue } from '../value/exact.ts';
 import type { InstrumentClasses, Voice } from '../instruments/instrument-manager.ts';
 
 export interface PlaybackNote {
-  id: number;
+  id?: number;
   startTime: number;
   duration: number;
   frequency: number | null;
@@ -27,6 +27,7 @@ export interface PlaybackNote {
   panPos?: number | null;
 }
 
+export type PreparedNote = PlaybackNote & { id: number };
 type SoundingNote = PlaybackNote & { frequency: number; instrument: string };
 function sounds(note: PlaybackNote): note is SoundingNote {
   return !!note.frequency && !!note.instrument && note.amplitude !== 0;
@@ -55,7 +56,7 @@ interface ScheduledVoice {
   panner: StereoPannerNode | null;
   startTime: number;
   scoreStart: number | null | undefined;
-  noteId: number;
+  noteId: number | undefined;
   frequency: number;
   instrument: string;
   slur: boolean;
@@ -282,7 +283,7 @@ export class AudioEngine {
    * Prepares note data for playback without creating oscillators upfront.
    * Oscillators are created just-in-time during play() to avoid blocking.
    */
-  preparePlayback(module: Module, fromTime: number): Promise<PlaybackNote[]> {
+  preparePlayback(module: Module, fromTime: number): Promise<PreparedNote[]> {
     return new Promise((resolve) => {
       const resumePromise = this.audioContext.state === 'suspended'
         ? this.audioContext.resume()
@@ -337,7 +338,7 @@ export class AudioEngine {
         const share = (v: Parameters<typeof toNumber>[0]) => (v ? toNumber(v) : null);
 
         // Build note data list (no oscillators yet)
-        const noteDataList: PlaybackNote[] = [];
+        const noteDataList: PreparedNote[] = [];
         for (const id in module.notes) {
           // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
           if (Number(id) === 0) continue;

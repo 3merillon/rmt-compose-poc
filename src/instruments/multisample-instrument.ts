@@ -72,7 +72,7 @@ export const LOOP_XFADE = 0.12;
  * @param {AudioBuffer} buf
  * @param {{start:number, end:number}} loop seconds
  */
-export function bakeLoopCrossfade(buf: AudioBuffer, loop: Loop) {
+export function bakeLoopCrossfade(buf: Pick<AudioBuffer, 'sampleRate' | 'length' | 'numberOfChannels'> & { getChannelData(channel: number): Float32Array }, loop: Loop) {
   const sr = buf.sampleRate, L = Math.round(LOOP_XFADE * sr);
   const s = Math.round(loop.start * sr), e = Math.round(loop.end * sr);
   if (!(s - L >= 0 && e <= buf.length && e - L > s)) return false;
