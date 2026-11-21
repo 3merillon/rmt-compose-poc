@@ -1,17 +1,8 @@
----
-title: Settings Reference
-description: Every RMT Compose setting — path, type, default, range and UI control — plus the theme token tables, the localStorage envelope, and the coercion rules.
----
+# Settings reference
 
-# Settings Reference
-
-The exhaustive companion to [Settings](/user-guide/interface/settings). Every setting the app stores, what it is called, what it accepts, and what happens when you give it something it does not accept.
-
-Settings are opened from the **gear in the top bar** — there is no menu entry. They are stored per browser origin under the `localStorage` key **`rmt:settings:v1`**. Every change applies immediately: there is no OK/Apply/Cancel, and the app's Undo/Redo does **not** cover settings. The only way back is a reset.
+Use this table to look up a control’s default or its saved value. Open the gear in the top bar to change a preference. [Settings walkthrough](/user-guide/interface/settings)
 
 ## Every setting, in one table
-
-Five sections, one per panel tab. A tab's id is also its section name.
 
 | Path | Type | Default | Range / values | Control |
 |---|---|---|---|---|
@@ -26,8 +17,8 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `appearance.showTails` | boolean | `false` | — | Tails after the note's end |
 | `arrows.enabled` | boolean | `true` | — | Show note arrows |
 | `arrows.mode` | string | `'reciprocal'` | `reciprocal`, `independent` | Arrow mode |
-| `arrows.up` | `{n, d, label}` | `{n: 2, d: 1, label: null}` | positive integers; `1/16 ≤ n/d ≤ 16`; `n/d ≠ 1` | Up interval + quick-pick chips |
-| `arrows.down` | `{n, d, label}` | `{n: 1, d: 2, label: null}` | same; derived from `up` in reciprocal mode | Down interval — shown in independent mode only |
+| `arrows.up` | `{n, d, label}` | `{n: 2, d: 1, label: null}` | positive integers, `1/16 ≤ n/d ≤ 16`, excluding unison | Up interval + quick-pick chips |
+| `arrows.down` | `{n, d, label}` | `{n: 1, d: 2, label: null}` | same, derived from `up` in reciprocal mode | Down interval — shown in independent mode only |
 | `audio.masterVolume` | number | `1` | 0 – 1, step 0.01 | Master volume (and the transport slider) |
 | `audio.defaultInstrument` | string | `'sine-wave'` | the eleven [instrument names](#instrument-names) | Default instrument |
 | `audio.maxVoices` | number | `256` | `128`, `256`, `512`, `1024`, `2048`, `4096` | Most voices at once |
@@ -45,7 +36,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `audio.tempoRange` | `{min, max}` | `{min: 20, max: 300}` | whole BPM, 1 – 1000, `min < max` (an inverted pair resets to the default) | Tempo range |
 | `library.iconSizePx` | number | `56` | 32 – 96, step 4 | Icon size |
 | `library.showCents` | boolean | `true` | — | Show cents |
-| `library.layoutVersion` | number | `2` | any number | **no UI, no consumer** |
+| `library.layoutVersion` | number | `2` | any number | Reserved layout version |
 | `scale.x` | number | `1` | clamped into `scale.limits.xMin … xMax` | Horizontal (time) |
 | `scale.y` | number | `1` | clamped into `scale.limits.yMin … yMax` | Vertical (pitch) |
 | `scale.limits.xMin` | number | `0.3` | 0.001 – 1000 | Horizontal range |
@@ -53,32 +44,9 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `scale.limits.yMin` | number | `0.3` | 0.001 – 1000 | Vertical range |
 | `scale.limits.yMax` | number | `5` | 0.001 – 1000 | Vertical range |
 
-Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate exception: **reverb now defaults on**. Stereo and tempered playback default off; the limiter defaults on.
+## Theme tokens
 
-## Appearance
-
-![Appearance settings for theme, note geometry, detail cutoff, envelope display and release tails](/img/settings-appearance.png)
-
-| Control | Type | Range | Default | Hint shown |
-|---|---|---|---|---|
-| **Theme** | dropdown | 4 presets | Classic Orange | "Presets apply a full color set and note geometry; pick one, then customize below." |
-| **Note height** | slider, `N wu` | 8 – 60, step 1 | 22 wu | "Bar thickness in world units." |
-| **Border thickness** | slider, `N px` | 0 – 6, step 0.5 | 1 px | — |
-| **Corner radius** | slider, `N px` | 0 – 20, step 1 | 6 px | — |
-| **Envelope inside notes** | select | Notes that set attack or release / Every note / None | Notes that set attack or release | "The envelope each note sounds with, drawn inside it on a loudness (dB) scale: its own attack and release, else its instrument's." |
-| **Reduce detail above** | number + Never checkbox | 1–500,000 visible notes or Never | 1,536 | Above this count, controls and labels appear only for the selected or hovered note. Never keeps details wherever they fit. |
-| **Tails after the note's end** | toggle | on / off | off | "Draws the release that rings after each note's end, as a key lifted or a bow leaving the string. Display only: picking, dragging and snapping use the note itself." |
-| **Reset colors to theme** | button | — | — | Disabled while you have no overrides |
-
-Then fifteen color pickers (a native swatch plus an uppercase hex readout), in three groups.
-
-::: danger Choosing a preset discards your color overrides — and re-seeds the geometry sliders
-The theme dropdown clears `appearance.overrides` before it applies the preset, with no confirmation, and writes the preset's declared note geometry into `appearance.note` — picking High Contrast lands border 2 px / corner 4 px, overwriting whatever the sliders held. Only the **Reset colors to theme** button asks first (and it, unlike the dropdown, leaves geometry alone).
-:::
-
-### Theme tokens
-
-The fifteen tokens with a picker, and their value in each preset:
+These are the fifteen colours exposed by the Appearance tab.
 
 | Group | Picker label | Token | Classic Orange | Slate Cyan | Mono Light | High Contrast |
 |---|---|---|---|---|---|---|
@@ -98,216 +66,16 @@ The fifteen tokens with a picker, and their value in each preset:
 | Dependency highlights | Start time | `depStartTime` | `#00ffff` | `#22d3ee` | `#0088aa` | `#00ffff` |
 | Dependency highlights | Duration | `depDuration` | `#9d00ff` | `#a78bfa` | `#7a2fd0` | `#c46bff` |
 
-Each token is also published as a CSS custom property on `<html>`: `--rmt-accent`, `--rmt-bg`, `--rmt-surface`, `--rmt-surface-border`, `--rmt-text-primary`, `--rmt-text-secondary`, `--rmt-danger`, `--rmt-note-border`, `--rmt-playhead`, `--rmt-measure-bar`, `--rmt-selection-ring`, `--rmt-hover-ring`, `--rmt-dep-frequency`, `--rmt-dep-start-time`, `--rmt-dep-duration`, plus `--rmt-accent-text`, `--rmt-note-default-saturation`, and the RGB triplets `--rmt-accent-rgb`, `--rmt-bg-rgb`, `--rmt-surface-rgb`, `--rmt-danger-rgb` for `rgba(var(--x), α)` forms — `--rmt-surface-rgb` is what drives every 0.88-alpha panel background.
+The theme chooser applies a preset’s geometry and clears colour overrides. **Reset colors to theme** clears just the overrides. [Themes and appearance](/user-guide/interface/themes) · [Theme implementation](/developer/theming)
 
-Every preset also carries three values with **no picker**: `accentText`, `noteDefaultSaturation` and `newNoteColorMode`. `noteDefaultSaturation` *is* consumed — published as `--rmt-note-default-saturation`, it sets the saturation of the random colour a new note gets — but you can only change it by picking a different preset. `accentText` and `newNoteColorMode` are declared and read by nothing.
-
-What each workspace picker reaches:
-
-- **Selection ring** colours the ring around a selected note, the selection wash, the group (multi-select) ring, and the outline of a selected BaseNote or measure triangle. The rubber-band **marquee rectangle follows the Accent picker**, not this one.
-- **Hover ring** colours the hover ring on notes, the BaseNote and measure triangles.
-- **Frequency / Start time / Duration** (Dependency highlights) colour both the dependency rings and the dependency link lines.
-- **Text** (`textPrimary`) also recolours all on-note glyph text — fraction labels, the word "silence", the octave arrows, and the BaseNote fraction.
-- **Panel surface** drives the translucent panel backgrounds via `rgba(var(--rmt-surface-rgb), 0.88)`.
-
-Selecting a preset also applies its **declared note geometry**, re-seeding the three sliders — High Contrast lands border 2 px / corner 4 px. The sliders remain the way to fine-tune afterwards, and **Reset colors to theme** never touches geometry.
-
-## Arrows
-
-| Control | Type | Range / options | Default | Hint shown |
-|---|---|---|---|---|
-| **Show note arrows** | checkbox | — | on | "Turn the ▲/▼ interval arrows on notes off entirely." |
-| **Arrow mode** | dropdown | `Reciprocal (up ×r, down ÷r)`, `Independent up/down` | Reciprocal | — |
-| **Up interval (ratio)** | two number fields `n` `/` `d` + a live cents readout | positive integers; `1/16 ≤ n/d ≤ 16`; `≠ 1` | `2 / 1` (`1200.0¢`) | "Down applies the reciprocal in reciprocal mode." |
-| **Quick pick** | six chips | see below | — | — |
-
-Quick-pick chips and the cents they show:
-
-| Chip | Ratio | Cents |
-|---|---|---|
-| `Octave 2/1` | 2/1 | 1200.0¢ |
-| `Fifth 3/2` | 3/2 | 702.0¢ |
-| `Fourth 4/3` | 4/3 | 498.0¢ |
-| `Major 3rd 5/4` | 5/4 | 386.3¢ |
-| `Whole tone 9/8` | 9/8 | 203.9¢ |
-| `Syntonic comma 81/80` | 81/80 | 21.5¢ |
-
-Rules:
-
-- In **reciprocal** mode, `arrows.down` is re-derived as `d/n` on every write of `arrows.up`. Set up to `3/2` and down becomes `2/3`.
-- An **invalid ratio heals to your previous value**, per field: a bad numerator or denominator restores just that field from the ratio you had, while a wholly out-of-range ratio (`17/1`, `1/20`) or one equal to 1 (`3/3`) reverts wholesale. Only a corrupt store loaded fresh — with no previous value to heal from — falls back to the default `2/1`. The number fields carry a `min` of 1 but no `max`, so the browser lets you type 100; the store is what corrects it, and it visibly rewrites the fields with the healed value.
-- Nothing forbids an "up" ratio below 1. Set `arrows.up` to `1/2` and ▲ transposes downward.
-- Unchecking **Show note arrows** dims the ratio editor and the chips but leaves them editable. The values take effect when you switch arrows back on.
-
-In **Independent up/down** mode a **Down interval (ratio)** row renders below the up editor — the same two number fields and live cents readout, hinted "Only used in independent mode". (It is hidden in reciprocal mode, where `down` auto-derives.)
-
-## Audio
-
-| Control | Type | Range | Default | Hint shown |
-|---|---|---|---|---|
-| **Master volume** | slider, `%` | 0 – 1, step 0.01 | 100% | — |
-| **Default instrument** | dropdown | eleven names | `sine-wave` | — |
-| **Transpose each repeat by** | ratio editor (n / d, with cents) | 1/16 – 16 | the module's | Not a setting: the current module's own repeat (its BaseNote's `repeat`), saved with the module, written as `n/d` (1/1 removes it). Clean Slate and a new composition start at 1/1. A tempered repeat is shown here and edited in the BaseNote's REPEAT row. |
-| **Keep within an octave** | toggle | on / off | on | "Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing." |
-| **Most voices at once** | dropdown | 128 / 256 / 512 / 1024 / 2048 / 4096 | 256 | "Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer)." |
-| *Pure / Tempered* | | | | |
-| **Play tempered (12-TET)** | checkbox | — | **off** | "Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed." |
-| *Room / Reverb* | | | | |
-| **Enable reverb** | checkbox | — | **on** | "Adds spatial ambience to the output." |
-| **Room size** | slider | 0 – 1, step 0.01 | 0.5 | — |
-| **Decay** | slider, `N.N s` | 0.1 – 12, step 0.1 | 1.8 s | — |
-| **Damping** | slider | 0 – 1, step 0.01 | 0.5 | — |
-| **Pre-delay** | slider, `N ms` | 0 – 200, step 1 | 20 ms | — |
-| **Reverb amount** | slider, `%` | 0 – 1, step 0.01 | 25% | "How much reverb is mixed in on top of the dry signal (0% = dry, 100% = fully wet)." |
-| *Stereo width* | | | | |
-| **Spread notes by pitch** | checkbox | — | **off** | "Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position)." |
-| **Amount** | slider, `%` | 0 – 1, step 0.01 | 60% | — |
-| *Live tempo* | | | | |
-| **Tempo range** | two number fields, `min – max` | 1 – 1000 BPM, step 1 | 20 – 300 | "The span of the live-tempo slider in the module bar, in BPM. It always reaches the tempo the piece is written at." |
-| *Master* | | | | |
-| **Limiter** | checkbox | — | **on** | "Gentle output limiting to avoid clipping." |
-
-The live-tempo slider spans the **Tempo range**, kept within 0.1× to 10× of the written tempo (the
-engine's rate limits) and always reaching the written tempo itself: a piece written at 10 BPM gets a
-slider from 10 to 100. Editing one end so that it passes the other moves the other end by 1 BPM.
-The tab's footer reads: *"Tempered playback, reverb, stereo and the limiter apply live during playback."*
-
-### Instrument names
+## Instrument names
 
 `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`.
 
-`audio.defaultInstrument` is the **fallback**, not an override: a note uses it only when neither the note, nor its player, nor the BaseNote sets an `instrument`. See [Instruments](/user-guide/playback/instruments#players).
-
-### Behaviour worth knowing
-
-- **Master volume is two-way bound** to the transport volume slider in the top bar. Dragging either moves the other. The transport slider only *persists* on release; while you drag it, it emits a live echo the panel follows.
-- **Play tempered changes what a note sounds at, and nothing else.** With it on, a note of frequency `f` sounds at `base × 2^(round(12 × log2(f / base)) / 12)`, where `base` is the BaseNote's frequency: the nearest of twelve equal steps to the octave, counted from the BaseNote. The BaseNote and its octaves never move; `5/4` moves up 13.7 cents, `3/2` down 2.0, `7/4` up 31.2. The module's expressions, its fraction labels and a saved file are untouched.
-- **Play tempered is applied when a note is scheduled**, like stereo, so it changes newly-started voices, not ones already sounding. It is stored like every other setting: it stays on across reloads until you turn it off.
-- **Room size, Decay and Damping re-render the reverb impulse response**, debounced by 250 ms. Reverb amount, pre-delay and the enable toggle are live parameters.
-- **Stereo width is applied when a note is scheduled**, so it changes newly-started voices, not ones already sounding.
-- The limiter is a peak catcher: −6 dB threshold, knee 6, ratio 12, attack 0.003 s, release 0.25 s.
-
-## Library
-
-| Control | Type | Range | Default | Hint shown |
-|---|---|---|---|---|
-| **Icon size** | slider, `N px` | 32 – 96, step 4 | 56 px | — |
-| **Show cents** | checkbox | — | on | "Display cents alongside ratios in the module library." |
-
-Both apply live to the [module bar](/user-guide/interface/module-bar).
-
-`library.layoutVersion` is stored and validated but has no control and no consumer. It is not a user setting.
-
-## Scale
-
-This tab and the small accent dot at the bottom-left of the screen are two views of the same two numbers. Touch either and the other follows.
-
-| Control | Type | Range | Default | Hint shown |
-|---|---|---|---|---|
-| **Horizontal (time)** | slider + editable number | spans the horizontal limits | 1 | "How far apart notes sit along the time axis." |
-| **Vertical (pitch)** | slider + editable number | spans the vertical limits | 1 | "How far apart octaves sit along the frequency axis." |
-| *Slider limits* | | | | |
-| **Horizontal range** | two number boxes, `min – max` | each 0.001 – 1000 | 0.3 – 2 | — |
-| **Vertical range** | two number boxes, `min – max` | each 0.001 – 1000 | 0.3 – 5 | — |
-
-Rules:
-
-- **Scale persists across reloads.** You come back at the density you left.
-- The **number box** is how you land on an exact value. It **clamps into the current limits** — widen the limits first to go further.
-- The slider's detent is derived from its range: about a fiftieth of the span, snapped to a 1/2/5 ladder. At the default limits that is **0.02** horizontally and **0.1** vertically — both keep exactly 1.0 reachable by dragging.
-- Editing the limits retunes both this tab's sliders and the bottom-left widget's sliders, live.
-- If you type a `min` that is not below the `max`, **the field you just edited wins** and the other gives way by a factor of ten, rather than the edit being rejected.
-- Narrowing the limits pulls an out-of-range scale value back in with them.
-
-## Resets
-
-Every tab ends with two buttons, at the bottom of its scroll flow.
-
-| Button | Resets | Confirm button |
-|---|---|---|
-| **Reset this tab** | the section of the same name as the tab | `Yes, Reset Tab` |
-| **Reset all** | all five sections | `Yes, Reset All` |
-| **Reset colors to theme** (Appearance only) | `appearance.overrides` only — geometry is untouched | `Yes, Reset Colors` |
-
-All three ask first. The confirmation dialog focuses **Cancel**, and is dismissed by Cancel, by Escape, or by clicking outside it.
-
-Settings changes are **not undoable** — the app's Undo/Redo covers the module, not the settings. A reset is the only way back.
+The default instrument sounds when a note, its player and the BaseNote all leave the instrument open. [Instruments and players](/user-guide/playback/instruments#players)
 
 ## The stored envelope
 
-Everything lives in one `localStorage` key.
+The settings store writes schema version 1 under `rmt:settings:v1` in localStorage for the browser origin. It validates fields on load and on write. A missing field takes its default, scale values clamp to the validated limits and reciprocal mode derives the down interval from the up interval. An invalid ratio entered during an edit can retain the last valid ratio. A blocked or full store leaves preferences available for the current session.
 
-| | |
-|---|---|
-| Key | `rmt:settings:v1` |
-| Schema version | `1` |
-| Scope | per browser origin |
-
-```json
-{
-  "version": 1,
-  "appearance": {
-    "themeId": "classic-orange",
-    "overrides": {},
-    "note": { "heightWU": 22, "borderPxAtZoom1": 1, "roundedCornerPxAtZoom1": 6 }
-  },
-  "arrows": {
-    "enabled": true,
-    "mode": "reciprocal",
-    "up":   { "n": 2, "d": 1, "label": null },
-    "down": { "n": 1, "d": 2, "label": null }
-  },
-  "audio": {
-    "masterVolume": 1,
-    "defaultInstrument": "sine-wave",
-    "tempered": { "enabled": false },
-    "reverb": { "enabled": true, "roomSize": 0.5, "decaySec": 1.8, "damping": 0.5, "preDelayMs": 20, "wet": 0.25 },
-    "stereo": { "enabled": false, "width": 0.6 },
-    "limiter": { "enabled": true },
-    "tempoRange": { "min": 20, "max": 300 }
-  },
-  "library": { "iconSizePx": 56, "showCents": true, "layoutVersion": 2 },
-  "scale": {
-    "x": 1,
-    "y": 1,
-    "limits": { "xMin": 0.3, "xMax": 2, "yMin": 0.3, "yMax": 5 }
-  }
-}
-```
-
-Paths are dot-delimited: `arrows.up`, `audio.reverb.wet`, `appearance.themeId`, `scale.limits`.
-
-### How a bad value is handled
-
-The **whole tree is re-validated on every single write**, then persisted. That is what keeps derived invariants (the reciprocal `down`) true and what makes a hand-edited storage entry safe. `validateSettings(raw, prev)` takes an optional second parameter — the pre-edit tree — and the store passes it on every `set`/`setSection`, which is what lets an invalid arrow ratio heal to the value you previously had instead of a schema default. Load and migrate paths pass no `prev`. The envelope, key and version are unchanged.
-
-| Situation | Result |
-|---|---|
-| Key missing | Defaults |
-| Corrupt JSON | Warn to the console, then defaults |
-| A number out of range | Clamped into range |
-| A field of the wrong type | Replaced by its default |
-| An invalid arrow ratio | Healed to your previous ratio (per-field); only a fresh load with nothing to heal from falls back to `2/1` |
-| An inverted scale range (`min ≥ max`) | That axis's limits fall back to their defaults wholesale |
-| Scale limits narrowed around a far-off value | The limits are validated **first**, then the value is clamped into them |
-| `localStorage` full, or private mode | Non-fatal: settings work for the session but are not saved |
-
-There is no migration code. `v1` is the first and only version — the versioned envelope is scaffolding for a future one. Partial or corrupt stored settings are healed by validation, not by migration.
-
-## What is *not* a setting
-
-- **No import/export of settings**, no settings file, no cloud or account sync.
-- **No per-module settings** — settings belong to the browser, not to the composition.
-- **No undo** for a settings change.
-- **No OS light/dark detection.** `mono-light` is a preset you pick by hand; there is no `prefers-color-scheme` handling.
-- **No custom named themes.** Four presets plus a flat override map is the whole story.
-- The panel's **position is not persisted** across reloads (it does survive close → reopen).
-- The instrument dropdown is a fixed list. A newly registered instrument would not appear in it automatically.
-
-## See also
-
-- [Settings](/user-guide/interface/settings) — the walkthrough
-- [Themes & Appearance](/user-guide/interface/themes)
-- [Transposing with Arrows](/user-guide/notes/transposing)
-- [Audio & Reverb](/user-guide/playback/audio)
-- [Module JSON Schema](/reference/module-schema)
+The composition carries musical choices such as its written BaseNote duration, repeat interval and explicitly assigned instruments. The browser separately keeps display preferences, audio settings and the module-bar layout, including its Start/End drop choice. [Score format](/reference/module-schema) · [Module bar](/user-guide/interface/module-bar)

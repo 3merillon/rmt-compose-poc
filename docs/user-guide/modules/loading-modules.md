@@ -1,160 +1,36 @@
----
-title: Loading Modules
-description: Load a module file into the workspace, drop a library module onto a note, or upload one into the module library — and what the app rejects on the way in.
----
+# Open a score or add a phrase
 
-# Loading Modules
+## Reset Default Module
 
-There are three different ways a module gets into RMT Compose, and they do three different things.
+To hear the eight-bar canon from a saved session, choose **+ → Save Module** if you want a file copy of your work. Then open **+ → Load Module ▾ → Reset Default Module** and confirm **Yes, Reset**. Press **Play**. Undo brings back the previous score during this session. **Reload Defaults** in the library footer affects the library layout.
 
-| What you do | What happens |
-|---|---|
-| **+ menu → Load Module from file…** | The **entire workspace is replaced** by the file. |
-| **Drag a library icon onto a note** | The module is **grafted into** your composition, re-anchored to that note. |
-| **Module bar → the `+` tile** | The file is **added to the library** as an icon. The workspace is untouched. |
+The startup score opens at 263 Hz and 100 BPM. Its note numbers match the [first composition tutorial](/getting-started/first-composition). A full canon and two individual parts also appear under **Custom**. Library files have their own note numbers. [Read the canon and its cadences](/tutorials/workflows/canon-and-cadences)
 
 ## Load a module from a file
 
-This replaces everything.
-
-1. Open the **+** menu (the plus/minus button at the right of the top bar).
-2. Click **Load Module ▾**.
-3. Click **Load Module from file…** and pick a `.json`.
-4. The workspace is replaced. A toast confirms: `Module loaded successfully`.
-
-::: tip Loading is undoable
-The load is pushed onto the history stack as **Load Module**. `Ctrl/Cmd + Z` brings your previous composition back — from the keyboard, from **Undo** in the **+** menu, or from the **Undo** button in the module bar's toolbar.
-:::
-
-### Reset Default Module
-
-The other entry in that dropdown restores the composition the app ships with.
-
-1. **+ menu → Load Module ▾ → Reset Default Module**.
-2. Confirm: *"This will reset the workspace to the default module. This action can be undone/redone via History. Proceed?"* → **Yes, Reset**.
-3. Toast: `Default module reset`. Undoable, like any other load.
-
-The default module, `public/modules/defaultModule.json`, opens the eight-bar canon per tonos at 263 Hz and 100 BPM. The second bass enters one bar after the first. It answers 57 notes at the fifth. In bar 5, startup note 81 takes its A from the following E. The full score is also available as **Custom → canon**.
+Choose **+ → Load Module ▾ → Load Module from file…** and select your score JSON. This replaces the workspace and creates an undo step. The loader converts supported older expressions and the older tempo and measure representation. Keep the original if you also work in an older editor. [Module format and compatibility](/user-guide/modules/module-format#modules-from-earlier-versions)
 
 ## Drop a library module onto a note
 
-![The module bar, showing sections of procedurally drawn module tiles that can be dragged into the workspace](/img/module-library-icons.png)
-
-Open the module bar (drag the pull tab hanging below it), then drag a tile out of the bar and drop it **on a note**. The module's notes are added to your composition with their internal relationships intact, re-anchored to whatever you dropped them on — every `base.f` in the module becomes `[target].f`, every `base.t` becomes `[target].t`, and its internal ids are renumbered so they do not collide with yours.
-
-That is the whole idea: drop the **Perfect 5th** interval on note 7 and you get a fifth above note 7, not a fifth above A440.
-
-`base.d` is **not** remapped: the module keeps its rhythm in time units and plays at your workspace's pace (your BaseNote's duration), whatever the length of the note you drop it on.
+Pull down the module bar, find a tile by name and drag it onto the score. This adds a copy and gives its notes new IDs. Internal references point to the new notes. To play an isolated example, start with a clean score and drop the tile on the BaseNote circle. To play a phrase in a new key, drop it onto a pitched note.
 
 ### Where you can drop
 
-| Target | Result |
+| Target | Pitch and placement |
 |---|---|
-| **A note** | Imported. Start time, duration and frequency all re-anchor to that note: `base.t`, `base.d` and `base.f` become the note's `t`, `d` and `f`. |
-| **The BaseNote** | Imported. Expressions keep their `base.*` anchors. |
-| **A measure bar** | Imported. `startTime` and `duration` anchor to the bar (`base.t` and `base.d` become the bar's `t` and `d`), but frequency, amplitude, attack and release stay with the BaseNote — a measure bar has no pitch to inherit. |
-| **A silence** | **Rejected.** `Cannot drop onto a silence. Drop on a note or the BaseNote instead.` |
-| **Empty background** | **Rejected.** `Drop onto a note or the BaseNote circle to import a module.` |
+| Pitched note | `base.f` follows the target pitch. An entrance at `base.t` follows the target’s end in **End** mode or its onset in **Start** mode. Explicit `base.a`, `base.attack` and `base.release` references follow the target too. |
+| Measure | `base.t` in an entrance follows the bar’s end or start. Pitch and interpretation references to the BaseNote stay with the workspace BaseNote. |
+| BaseNote circle | Both modes preserve the module’s `base.*` references to the workspace BaseNote. |
+| Rest or empty background | The app rejects the drop. Choose a note, a measure or the BaseNote. |
 
-There is no fallback: dropping on empty space does not import the module at the BaseNote or at your selection. It does nothing but show the error.
+**Time unit.** `base.d` stays the workspace time unit for every target. A phrase written in eight eighth notes keeps that rhythm when dropped on a short note or a long bar. Expressions explicitly reading another imported note’s `.d` still follow that note.
 
-### Drop mode: Start / End
-
-The drop mode is set by two icon buttons pinned at the right end of the module bar's toolbar, just left of **Undo** / **Redo**: **⇤** (an arrow pushed against a left bar) for **Start**, **⇥** (against a right bar) for **End** — hover them for *Drop modules at note start* / *at note end*. They work as a radio pair: the active mode is filled solid, and clicking it again does nothing. The default is **Start**, and the choice is remembered across sessions as part of the saved UI state.
-
-| Mode | Where the module lands |
-|---|---|
-| **Start** | Aligned with the target note's **start**. |
-| **End** | Aligned with the target note's **end** — the target's duration is added to the imported start times. |
-
-::: warning End mode is ignored on the BaseNote
-The End adjustment only applies when the target is a real note. Drop a module on the BaseNote and it lands at the BaseNote's start time no matter which button is lit.
-:::
-
-### Other things a drop does
-
-- If playback is running, importing **pauses it** first.
-- The import is captured in history as **Import Module at &lt;id&gt;**, so `Ctrl/Cmd + Z` undoes it.
-
-See [Module Bar](/user-guide/interface/module-bar) for dragging, reordering and organizing the library itself.
-
-## Find a module in the library
-
-The library ships 81 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (3). Scrolling for one is slow.
-
-Click the **magnifier** at the left of the module bar's toolbar. A search field unfolds; type into it and the library filters live. A module matches if your text appears in its **name**, **ratio**, **family**, **cents**, **tags**, or its file path — so `3-limit`, `701`, `fifth` and `3/2` all find the Perfect 5th.
-
-The match is a plain substring test against those fields as they are written in the manifest, so it is literal: the Perfect 5th's cents are `701.955`, and searching `702` finds nothing.
-
-Matches are revealed even inside collapsed sections. Closing the field (click the magnifier again, or press **Escape**) clears the query.
+**Mode.** The two arrow-and-bar buttons beside Undo set **Drop modules at note end** (⇥) or **Drop modules at note start** (⇤). The filled button shows the active choice. New layouts start at **End**. Saved layouts restore their choice. Select **Start** to layer a harmony under an existing entrance.
 
 ## Add a module to the library
 
-Uploading a file puts an icon in the module bar without touching your composition.
+Press the dashed **+** tile at the end of a library section and pick a module JSON. The file becomes a tile in that section. You can also [copy a selection](/user-guide/notes/selection) from the workspace. **Save UI** exports a layout containing your custom modules. [Saving modules](/user-guide/modules/saving-modules)
 
-1. Open the module bar.
-2. Click the dashed **`+`** tile at the end of the section you want it in.
-3. Pick a `.json`.
-4. Toast: `Module "<name>" uploaded successfully`. The icon takes the file's name.
+## Import limits
 
-Uploads are stored **inside the library layout in your browser** (the `ui-state` localStorage entry, which carries the full module JSON for anything with no file path on disk). They survive a reload, and they come back with **Load UI** if you exported the layout. They are not written to the repo.
-
-An upload is validated before it is accepted — see below. On failure you get `Invalid module: <errors>` or `Invalid JSON file: <message>`, and no icon appears.
-
-## What the app rejects
-
-::: info Expressions are not executed as code
-Expression strings are compiled to **bytecode** and run on a stack machine. Nothing in the load path uses `eval()` or `new Function()`, so a module file cannot run JavaScript in your browser. Load modules from sources you trust anyway — a module can still be musically hostile, and nothing stops it from being 10 000 notes of noise.
-:::
-
-Loading a module from a **file** enforces:
-
-| Condition | Toast |
-|---|---|
-| File larger than **120 MB** | `Module file too large (max 120 MB)` |
-| Not an object, or no `baseNote` object, or `notes` is not an array, or more than **500 000** notes, or JSON nested deeper than **20** levels | `Invalid module file structure` |
-| The module passes those checks but fails to build (for example, it has no `notes` key at all) | A red banner: `Error loading module: <message>` |
-| **The file is not valid JSON** | A red toast: `Error loading module: <message>` |
-
-**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 120 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 16777215`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
-
-::: warning Loading a file does not check its expressions
-The **Load Module from file…** path checks size and shape only. A malformed expression does not stop the load: the compiler refuses it with a `console.error` and the affected property is left **unset**, so the note falls back to its defaults rather than loading at a silent zero. Likewise, a reference to a note that does not exist (`[99].f`) and a dependency cycle both load without an error message. If a load "succeeded" but the result looks wrong, open the browser console.
-:::
-
-## Troubleshooting
-
-### The module would not load
-
-- **`[RMT] Autosave failed (…)` in the console** — the browser refused to store the module. The autosave keeps it in IndexedDB, which holds far more than any module the app opens; this means the disk is full, or the browser offers no IndexedDB (some private modes), where the autosave falls back to `localStorage` and its 5 MB or so. The module loads and plays, but a reload will not bring it back: save it to a file.
-
-- **`Module file too large (max 120 MB)`** — the hard cap. Split the module.
-- **`Invalid module file structure`** — most often a missing `baseNote` object or a `notes` key that is not an array. Note that a file with *no* `notes` key passes this check and then fails in the loader with a red `Error loading module: data.notes is not iterable` banner. Always include `notes`.
-- **`Invalid module: …`** on an upload — the expression or color validator rejected something. The toast names the first three problems; the full list is in the browser console.
-
-### `Error loading module: …` in red
-
-The file could not be read or parsed — a trailing comma, a smart quote, a truncated download. The toast carries the parser's message; validate the file in an editor.
-
-### Notes are missing or in the wrong place
-
-Open the browser console. The failures that do not surface in the UI all log there:
-
-- `Failed to compile expression: …` — the expression was refused; the property was left unset and the note fell back to its default.
-- `Dependency cycle detected! …` — a property that depends on itself, with the loop spelled out (`[1].frequency → [2].frequency → [1].frequency`).
-- `Unresolved reference! …` — a reference to a note or property that does not exist. It resolves to a default (440 Hz, 0 s, 1 s), and the message names both ends: `[7].frequency reads [99].frequency, but note 99 does not exist (used 440)`.
-- `[RMT Security] Invalid note ID: … (must be 0-16777215), skipping` — an id outside `0 … 16777215`, or not an integer.
-
-### No sound when playing
-
-- Browsers will not start audio without a user gesture. If nothing plays on the very first click, click **Play** again.
-- Check the notes actually have a `frequency`. A note with `startTime` and `duration` but no `frequency` is a **silence**, by design.
-- A note with a `startTime` and a `duration`, no `frequency` and `"measure": true` is a **measure bar**, not a note.
-
-## See also
-
-- [Saving Modules](/user-guide/modules/saving-modules) — export, Save UI, and getting your work into the library
-- [Module Format](/user-guide/modules/module-format) — what is actually in the file
-- [Module Bar](/user-guide/interface/module-bar) — organizing the library
-- [The Module Library](/user-guide/modules/module-library) — what the 81 shipped modules are and how they are built
-- [Creating Modules](/user-guide/modules/creating-modules) — designing a module that drops well
+A module may contain up to 500,000 entries in its `notes` array. **Load Module from file…** also checks the file size (120 MiB). Keep `baseNote` as an object and `notes` as an array. Library uploads validate expressions and report invalid data. Browser storage and device capacity affect how large a score can be saved and played. [Supported limits and measurements](/developer/performance#limits)

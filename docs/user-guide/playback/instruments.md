@@ -200,7 +200,7 @@ Both are mono. If you want them placed across the stereo field, that comes from 
 
 ### Where they come from
 
-The samples are cut from **[VSCO-2 Community Edition](https://github.com/sgossner/VSCO-2-CE)**, released under **CC0 1.0** (public domain dedication) by **Versilian Studios** — recorded by Sam Gossner and Simon Dalzell, sample cutting by Elan Hickler / Soundemote. The piano is "Upright Nr1"; the violin is "Solo Violin — Arco Vib". They were downmixed to mono and encoded as AAC so every browser can decode them.
+The samples are cut from **[VSCO-2 Community Edition](https://github.com/sgossner/VSCO-2-CE)**, released under **CC0 1.0** (public domain dedication) by **Versilian Studios** — recorded by Sam Gossner and Simon Dalzell, sample cutting by Elan Hickler / Soundemote. The piano is "Upright Nr1"; the violin is "Solo Violin — Arco Vib". They were downmixed to mono and encoded as AAC for playback in browsers with AAC decoding.
 
 CC0 requires no attribution. The credit is here because it should be.
 
@@ -225,7 +225,7 @@ Every instrument gets its own mix bus internally, but there are **no per-instrum
 1. **Start with `sine-wave`.** Use two nearby sine pitches to hear beats between their fundamentals.
 2. **Switch to `harmonium` to make the difference louder.** Compare a just fifth with a tempered fifth over the same root. The third partial of the lower note and second partial of the upper note coincide at 3/2 and separate slightly in 12-TET.
 3. **Pin the instrument high in the chain.** Choose the first note of the line that should change instrument.
-4. **Use synths for long notes.** The sample cap makes drones a poor fit for `piano` and `violin`; `harmonium` holds its level for as long as the note lasts.
+4. **Compare three kinds of sustain.** Hold the same pitch on `piano`, `violin` and `harmonium`. The piano decays, the violin sustains with a looped bowed sound, and the harmonium holds a steady reed tone.
 5. **An unknown instrument name is silently ignored.** A module saved with `"instrument": "cello"` loads fine and plays as `sine-wave`.
 
 ## See also
