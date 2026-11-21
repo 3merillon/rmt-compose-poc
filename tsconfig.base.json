@@ -8,6 +8,6 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "erasableSyntaxOnly": true
   }
 }
