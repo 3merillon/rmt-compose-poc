@@ -17,6 +17,45 @@
  * start, the release from its end.
  */
 
+export interface Envelope {
+    attack?: number;
+    decay?: number;
+    sustain?: number;
+    t60?: number;
+    release?: number;
+    drawT60?: number;
+}
+
+export interface NoteShape {
+    attack?: number | null;
+    release?: number | null;
+}
+
+export interface Voice {
+    frequency: { value: number };
+    bowOffset?: number;
+    start(when: number, offset?: number): void;
+    stop(when: number): void;
+    connect(destination: AudioNode): AudioNode;
+    disconnect(): void;
+    onended: AudioScheduledSourceNode['onended'];
+}
+
+export interface Instrument {
+    name: string;
+    type: string;
+    articulation: string;
+    zones?: {rootHz: number}[];
+    prepare?(frequencies: number[]): Promise<void>;
+    waitForLoad?(): Promise<void>;
+    getEnvelopeSettings(duration: number, frequency?: number | null): Envelope;
+    createOscillator(frequency: number): Voice;
+    applyEnvelope(gain: GainNode, start: number, duration: number, peak?: number, shape?: NoteShape | null, frequency?: number | null): void;
+    voiceLength?(duration: number, shape?: NoteShape | null, frequency?: number | null): number;
+}
+
+export type InstrumentClasses = Readonly<Record<string, new (context: BaseAudioContext) => Instrument>>;
+
 const ATTACK_FLOOR = 0.003;   // 3 ms — kills attack clicks on very short notes
 const RELEASE_FLOOR = 0.015;  // 15 ms — kills release clicks
 const EPS = 0.0001;           // exponential ramps can't touch 0 (-80 dB re a peak of 1)
@@ -42,8 +81,8 @@ export const MAX_RELEASE_SHARE = 4;
  * @param {[number, number]} lo [f1, v1]
  * @param {[number, number]} hi [f2, v2]
  */
-export function byPitch(freq, [f1, v1], [f2, v2]) {
-  if (!(freq > 0)) return v1;
+export function byPitch(freq: number | null | undefined, [f1, v1]: [number, number], [f2, v2]: [number, number]) {
+  if (freq == null || !(freq > 0)) return v1;
   const x = Math.min(1, Math.max(0, Math.log(freq / f1) / Math.log(f2 / f1)));
   return v1 * Math.pow(v2 / v1, x);
 }
@@ -60,11 +99,11 @@ export function byPitch(freq, [f1, v1], [f2, v2]) {
  *   attack and release, as shares of its duration (the interpretation variables
  *   `attack` and `release`); each replaces the instrument's when given.
  */
-export function applyVoiceEnvelope(gainNode, startTime, duration, peak, env = {}, shape = null) {
+export function applyVoiceEnvelope(gainNode: GainNode, startTime: number, duration: number, peak: number, env: Envelope = {}, shape: NoteShape | null = null) {
   const g = gainNode.gain;
   const T = envelopeTimes(env, duration, shape);
   const p = Math.max(EPS, peak);
-  const level = (share) => Math.max(EPS, p * share);
+  const level = (share: number) => Math.max(EPS, p * share);
   const t0 = startTime;
 
   g.cancelScheduledValues(t0);
@@ -102,10 +141,10 @@ export function applyVoiceEnvelope(gainNode, startTime, duration, peak, env = {}
  *   the note), `levelAtEnd` the level there (share of the peak), `end` the end
  *   of the release (silence).
  */
-export function envelopeTimes(env = {}, duration, shape = null) {
+export function envelopeTimes(env: Envelope = {}, duration: number, shape: NoteShape | null = null) {
   const dur = Math.max(0.001, Number.isFinite(duration) ? duration : 0.001);
   const own = noteShape(shape);
-  const num = (v, d) => (v != null && Number.isFinite(+v) && +v >= 0 ? +v : d);
+  const num = (v: number | undefined, d: number) => (v != null && Number.isFinite(+v) && +v >= 0 ? +v : d);
 
   // The attack fits inside the note (a note shorter than its instrument's attack
   // is attacked over its whole length); the floor keeps it from clicking.
@@ -130,7 +169,7 @@ export function envelopeTimes(env = {}, duration, shape = null) {
  * @param {number} peak
  * @param {number} t seconds from the note's start
  */
-export function envelopeGainAt(T, peak, t) {
+export function envelopeGainAt(T: ReturnType<typeof envelopeTimes> | null, peak: number, t: number) {
   const p = Math.max(EPS, peak);
   if (!T || !(t > 0)) return EPS;
   if (t < T.attack) return EPS + (p - EPS) * (t / T.attack);
@@ -138,7 +177,7 @@ export function envelopeGainAt(T, peak, t) {
     // The exponential ramps applyVoiceEnvelope schedules, between the same points
     // (their targets floored at EPS, as there)
     const u = t - T.attack;
-    const ramp = (to, over) => (over > 0 ? p * Math.pow(Math.max(EPS, to) / p, Math.min(1, u / over)) : p);
+    const ramp = (to: number, over: number) => (over > 0 ? p * Math.pow(Math.max(EPS, to) / p, Math.min(1, u / over)) : p);
     if (T.t60 > 0) return ramp(p * T.levelAtEnd, T.off - T.attack);
     if (T.decay > 0) {
       if (T.attack + T.decay < T.off) return u >= T.decay ? Math.max(EPS, p * T.sustain) : ramp(p * T.sustain, T.decay);
@@ -157,7 +196,7 @@ export function envelopeGainAt(T, peak, t) {
  * How long after its start a voice must sound: to the end of its release, plus
  * the step to zero and a margin. The AudioEngine stops the voice there.
  */
-export function envelopeLength(env = {}, duration, shape = null) {
+export function envelopeLength(env: Envelope = {}, duration: number, shape: NoteShape | null = null) {
   return envelopeTimes(env, duration, shape).end + ZERO_RAMP + STOP_MARGIN;
 }
 
@@ -169,10 +208,10 @@ export function envelopeLength(env = {}, duration, shape = null) {
  * share of the duration (it may exceed 1).
  * @returns {{attack:number, decay:number, sustain:number, release:number}}
  */
-export function envelopeShares(env = {}, duration, shape = null) {
+export function envelopeShares(env: Envelope = {}, duration: number, shape: NoteShape | null = null) {
   // A recording that dies away by itself (env.drawT60: the piano's measured decay)
   // is drawn dying away; the audio's envelope does not apply it twice.
-  const t = envelopeTimes(env.drawT60 > 0 && !(env.t60 > 0) ? { ...env, t60: env.drawT60 } : env, duration, shape);
+  const t = envelopeTimes((env.drawT60 ?? 0) > 0 && !((env.t60 ?? 0) > 0) ? { ...env, t60: env.drawT60 } : env, duration, shape);
   const body = t.off - t.attack;
   let decay = 0, sustain = 1;
   if (t.t60 > 0 || (t.decay > 0 && t.decay > body)) { decay = body; sustain = t.levelAtEnd; }
@@ -187,8 +226,8 @@ export function envelopeShares(env = {}, duration, shape = null) {
  * @param {{attack?:number|null, release?:number|null}|null} shape
  * @returns {{attack:number|null, release:number|null}}
  */
-export function noteShape(shape) {
-  const clamp = (v, hi) => (v == null || !Number.isFinite(v) ? null : Math.min(hi, Math.max(0, v)));
+export function noteShape(shape: NoteShape | null | undefined) {
+  const clamp = (v: number | null | undefined, hi: number) => (v == null || !Number.isFinite(v) ? null : Math.min(hi, Math.max(0, v)));
   return { attack: clamp(shape && shape.attack, 1), release: clamp(shape && shape.release, MAX_RELEASE_SHARE) };
 }
 
@@ -199,9 +238,9 @@ export function noteShape(shape) {
  * @param {number} frequency
  * @param {(when:number)=>void} [onStart] extra scheduling at start() (e.g. FM index)
  */
-export function makeVoice(sources, output, frequency, onStart) {
+export function makeVoice(sources: AudioScheduledSourceNode[], output: AudioNode, frequency: number, onStart?: (when: number) => void): Voice {
   const last = sources[sources.length - 1];
-  let onendedCb = null;
+  let onendedCb: Voice['onended'] = null;
   return {
     frequency: { value: frequency },
     start(when) {
@@ -221,8 +260,19 @@ export function makeVoice(sources, output, frequency, onStart) {
   };
 }
 
-export class SynthInstrument {
-    constructor(audioContext) {
+export class SynthInstrument implements Instrument {
+    declare audioContext: BaseAudioContext;
+    declare name: string;
+    declare type: string;
+    declare waveType: OscillatorType;
+    declare periodicWave: PeriodicWave | null;
+    declare unisonCount: number;
+    declare detuneCents: number;
+    declare filterTrackMul: number;
+    declare filterQ: number;
+    declare articulation: string;
+
+    constructor(audioContext: BaseAudioContext) {
         this.audioContext = audioContext;
         this.name = 'base';
         this.type = 'synth';
@@ -244,11 +294,11 @@ export class SynthInstrument {
      * depend on the note's length and pitch.
      * @param {number} [duration] @param {number} [frequency]
      */
-    getEnvelopeSettings(duration, frequency) {
+    getEnvelopeSettings(duration: number, frequency?: number | null): Envelope {
         return { attack: 0.015, release: 0.1 };
     }
 
-    createOscillator(frequency) {
+    createOscillator(frequency: number): Voice {
         const ctx = this.audioContext;
         const count = Math.max(1, this.unisonCount | 0);
         // An unfiltered single oscillator already implements the voice contract.
@@ -278,7 +328,7 @@ export class SynthInstrument {
             oscs.push(osc);
         }
 
-        let output = sum;
+        let output: AudioNode = sum;
         if (this.filterTrackMul > 0) {
             const lp = ctx.createBiquadFilter();
             lp.type = 'lowpass';
@@ -292,24 +342,28 @@ export class SynthInstrument {
         return makeVoice(oscs, output, frequency);
     }
 
-    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null, frequency = null) {
+    applyEnvelope(gainNode: GainNode, startTime: number, duration: number, initialVolume = 1.0, shape: NoteShape | null = null, frequency: number | null = null) {
         applyVoiceEnvelope(gainNode, startTime, duration, initialVolume, this.getEnvelopeSettings(duration, frequency), shape);
     }
 
     /** Seconds from the note's start until the voice can be stopped. */
-    voiceLength(duration, shape = null, frequency = null) {
+    voiceLength(duration: number, shape: NoteShape | null = null, frequency: number | null = null) {
         return envelopeLength(this.getEnvelopeSettings(duration, frequency), duration, shape);
     }
 }
 
 export class InstrumentManager {
-    constructor(audioContext) {
+    declare audioContext: BaseAudioContext;
+    declare instruments: Map<string, Instrument>;
+    declare defaultInstrument: string;
+
+    constructor(audioContext: BaseAudioContext) {
         this.audioContext = audioContext;
         this.instruments = new Map();
         this.defaultInstrument = 'sine-wave';
     }
 
-    registerBuiltInInstruments(SynthInstruments, SampleInstruments) {
+    registerBuiltInInstruments(SynthInstruments?: InstrumentClasses | null, SampleInstruments?: InstrumentClasses | null) {
         if (SynthInstruments) {
             Object.values(SynthInstruments).forEach(InstrumentClass => {
                 if (typeof InstrumentClass === 'function') {
@@ -327,7 +381,7 @@ export class InstrumentManager {
         }
     }
 
-    registerInstrument(instrument) {
+    registerInstrument(instrument: Instrument | null) {
         if (!instrument || !instrument.name) {
             console.error('Invalid instrument provided to register');
             return false;
@@ -337,7 +391,7 @@ export class InstrumentManager {
         return true;
     }
 
-    getInstrument(name) {
+    getInstrument(name?: string | null) {
         const instrumentName = (name || this.defaultInstrument).toLowerCase();
 
         if (this.instruments.has(instrumentName)) {
@@ -352,8 +406,9 @@ export class InstrumentManager {
         return Array.from(this.instruments.keys());
     }
 
-    createOscillator(instrumentName, frequency) {
+    createOscillator(instrumentName: string | null, frequency: number) {
         const instrument = this.getInstrument(instrumentName);
+        if (!instrument) throw new TypeError('No instrument registered for playback');
         return instrument.createOscillator(frequency);
     }
 
@@ -362,13 +417,14 @@ export class InstrumentManager {
      *   attack and release (shares of its duration); null keeps the instrument's.
      * @param {number|null} [frequency] the pitch that sounds (some envelopes follow it)
      */
-    applyEnvelope(instrumentName, gainNode, startTime, duration, initialVolume = 1.0, shape = null, frequency = null) {
+    applyEnvelope(instrumentName: string | null, gainNode: GainNode, startTime: number, duration: number, initialVolume = 1.0, shape: NoteShape | null = null, frequency: number | null = null) {
         const instrument = this.getInstrument(instrumentName);
+        if (!instrument) throw new TypeError('No instrument registered for playback');
         instrument.applyEnvelope(gainNode, startTime, duration, initialVolume, shape, frequency);
     }
 
     /** The envelope times (envelopeTimes) a note of this instrument sounds with. */
-    envelopeTimesFor(instrumentName, duration, shape = null, frequency = null) {
+    envelopeTimesFor(instrumentName: string | null, duration: number, shape: NoteShape | null = null, frequency: number | null = null) {
         const instrument = this.getInstrument(instrumentName);
         const env = instrument && instrument.getEnvelopeSettings ? instrument.getEnvelopeSettings(duration, frequency) : {};
         return envelopeTimes(env, duration, shape);
@@ -378,7 +434,7 @@ export class InstrumentManager {
      * Seconds from a note's start until its voice is silent and may be stopped:
      * its length, its release after the note-off, and a margin.
      */
-    voiceLength(instrumentName, duration, shape = null, frequency = null) {
+    voiceLength(instrumentName: string | null, duration: number, shape: NoteShape | null = null, frequency: number | null = null) {
         const instrument = this.getInstrument(instrumentName);
         if (instrument && typeof instrument.voiceLength === 'function') return instrument.voiceLength(duration, shape, frequency);
         const env = instrument && instrument.getEnvelopeSettings ? instrument.getEnvelopeSettings(duration, frequency) : {};

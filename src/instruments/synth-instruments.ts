@@ -1,10 +1,12 @@
-import { SynthInstrument, makeVoice, applyVoiceEnvelope, byPitch } from './instrument-manager.js';
+import { SynthInstrument, makeVoice, applyVoiceEnvelope, byPitch } from './instrument-manager.ts';
+
+import type { NoteShape } from './instrument-manager.ts';
 
 // Envelopes are in seconds (design/phase-i-instruments.md §3): the attack from the
 // note's start, the release after its end.
 
 export class SineInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'sine-wave';
         this.waveType = 'sine';
@@ -17,7 +19,7 @@ export class SineInstrument extends SynthInstrument {
 }
 
 export class SquareInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'square-wave';
         this.waveType = 'square';
@@ -37,7 +39,7 @@ export class SquareInstrument extends SynthInstrument {
 }
 
 export class SawtoothInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'sawtooth-wave';
         this.waveType = 'sawtooth';
@@ -54,7 +56,7 @@ export class SawtoothInstrument extends SynthInstrument {
 }
 
 export class TriangleInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'triangle-wave';
         this.waveType = 'triangle';
@@ -66,7 +68,7 @@ export class TriangleInstrument extends SynthInstrument {
 }
 
 export class OrganInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'organ';
         this.periodicWave = this.createOrganWave();
@@ -112,7 +114,10 @@ export class OrganInstrument extends SynthInstrument {
  * phase), scaled so that at the strike their sum is exactly the old wave.
  */
 export class VibraphoneInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    declare waveBody: PeriodicWave;
+    declare waveMode4: PeriodicWave;
+    declare waveMode10: PeriodicWave;
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'vibraphone';
         this.articulation = 'struck';   // one bar per pitch: struck again, it is damped first
@@ -135,7 +140,7 @@ export class VibraphoneInstrument extends SynthInstrument {
             peak = Math.max(peak, Math.abs(v));
         }
         const k = peak > 0 ? 1 / peak : 1;
-        const group = (pick) => {
+        const group = (pick: (partial: number) => boolean) => {
             const r = new Float32Array(N), im = new Float32Array(N);
             for (let n = 1; n < N; n++) if (pick(n)) { r[n] = real[n] * k; im[n] = imag[n] * k; }
             return this.audioContext.createPeriodicWave(r, im, { disableNormalization: true });
@@ -146,11 +151,11 @@ export class VibraphoneInstrument extends SynthInstrument {
         this.periodicWave = this.waveBody;
     }
 
-    t60For(frequency) { return byPitch(frequency, [65, 6], [2000, 2]); }
+    t60For(frequency?: number | null) { return byPitch(frequency, [65, 6], [2000, 2]); }
 
-    createOscillator(frequency) {
+    createOscillator(frequency: number) {
         const ctx = this.audioContext;
-        const make = (wave) => { const o = ctx.createOscillator(); o.setPeriodicWave(wave); o.frequency.value = frequency; return o; };
+        const make = (wave: PeriodicWave) => { const o = ctx.createOscillator(); o.setPeriodicWave(wave); o.frequency.value = frequency; return o; };
         const body = make(this.waveBody), m4 = make(this.waveMode4), m10 = make(this.waveMode10);
         const g4 = ctx.createGain(), g10 = ctx.createGain(), out = ctx.createGain();
         body.connect(out); m4.connect(g4); g4.connect(out); m10.connect(g10); g10.connect(out);
@@ -158,7 +163,7 @@ export class VibraphoneInstrument extends SynthInstrument {
         // Beyond the envelope's decay (t60), partial 4 falls a further 6/t60 decades a
         // second (3× the rate in all) and partials 10–15 a further 15/t60 (6×), from the
         // strike, until they are 140 dB down.
-        const decay = (g, extra, when) => {
+        const decay = (g: GainNode, extra: number, when: number) => {
             try {
                 g.gain.cancelScheduledValues(when);
                 g.gain.setValueAtTime(1, when);
@@ -170,7 +175,7 @@ export class VibraphoneInstrument extends SynthInstrument {
 
     // A struck bar: no sustain, a natural decay (longer for the low bars) until
     // the note-off, then a soft damper.
-    getEnvelopeSettings(duration, frequency) {
+    getEnvelopeSettings(duration: number, frequency?: number | null) {
         return { attack: 0.002, t60: this.t60For(frequency), release: 0.4 };
     }
 }
@@ -183,7 +188,11 @@ export class VibraphoneInstrument extends SynthInstrument {
  * the voice's start() so it locks to the note's absolute start time.
  */
 export class FMEPianoInstrument extends SynthInstrument {
-    constructor(audioContext) {
+    declare modRatio: number;
+    declare indexStart: number;
+    declare indexEnd: number;
+    declare indexDecay: number;
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext);
         this.name = 'fm-epiano';
         this.articulation = 'struck';   // one tine per pitch
@@ -194,11 +203,11 @@ export class FMEPianoInstrument extends SynthInstrument {
     }
 
     // A struck tine: natural decay until the note-off, then its damper.
-    getEnvelopeSettings(duration, frequency) {
+    getEnvelopeSettings(duration: number, frequency?: number | null) {
         return { attack: 0.002, t60: byPitch(frequency, [65, 5], [2000, 1.5]), release: 0.25 };
     }
 
-    createOscillator(frequency) {
+    createOscillator(frequency: number) {
         const ctx = this.audioContext;
         const modFreq = frequency * this.modRatio;
 
@@ -218,7 +227,7 @@ export class FMEPianoInstrument extends SynthInstrument {
         const out = ctx.createGain();
         carrier.connect(out);
 
-        const scheduleIndex = (when) => {
+        const scheduleIndex = (when: number) => {
             const g = modGain.gain;
             try {
                 g.cancelScheduledValues(when);
@@ -274,12 +283,16 @@ export class FMEPianoInstrument extends SynthInstrument {
 const HARMONIC_VOICE_PARTIALS = 16;
 
 class HarmonicVoice extends SynthInstrument {
+    declare partials: number[];
+    declare attackSec: number;
+    declare releaseSec: number;
+    declare level: number;
     /**
      * @param {BaseAudioContext} audioContext
      * @param {{name:string, knee:number, attackSec:number, releaseSec:number, level:number}} voice
      *   knee: the partial above which the roll-off steepens; level: scales the per-note peak
      */
-    constructor(audioContext, { name, knee, attackSec, releaseSec, level }) {
+    constructor(audioContext: BaseAudioContext, { name, knee, attackSec, releaseSec, level }: { name: string; knee: number; attackSec: number; releaseSec: number; level: number }) {
         super(audioContext);
         this.name = name;
         this.attackSec = attackSec;
@@ -307,7 +320,7 @@ class HarmonicVoice extends SynthInstrument {
         return { attack: this.attackSec, release: this.releaseSec };
     }
 
-    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
+    applyEnvelope(gainNode: GainNode, startTime: number, duration: number, initialVolume = 1.0, shape: NoteShape | null = null) {
         applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.level, this.getEnvelopeSettings(), shape);
     }
 }
@@ -319,7 +332,7 @@ class HarmonicVoice extends SynthInstrument {
  * note of the organ (A-weighted, at 263 Hz).
  */
 export class HarmoniumInstrument extends HarmonicVoice {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext, { name: 'harmonium', knee: 8, attackSec: 0.03, releaseSec: 0.08, level: 0.6 });
     }
 }
@@ -330,7 +343,7 @@ export class HarmoniumInstrument extends HarmonicVoice {
  * partials are still there, 24.5 dB and 32 dB under the fundamental.
  */
 export class SoftHarmoniumInstrument extends HarmonicVoice {
-    constructor(audioContext) {
+    constructor(audioContext: BaseAudioContext) {
         super(audioContext, { name: 'harmonium-soft', knee: 3, attackSec: 0.06, releaseSec: 0.12, level: 0.42 });
     }
 }

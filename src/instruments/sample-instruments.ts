@@ -1,5 +1,5 @@
-import { MultisampleInstrument } from './multisample-instrument.js';
-import { byPitch } from './instrument-manager.js';
+import { MultisampleInstrument } from './multisample-instrument.ts';
+import { byPitch } from './instrument-manager.ts';
 
 /** F#6: the highest strings of a piano have no damper. */
 const PIANO_UNDAMPED_HZ = 1480;
@@ -15,7 +15,7 @@ const PIANO_UNDAMPED_RING = 1.5;
  */
 
 export class PianoInstrument extends MultisampleInstrument {
-  constructor(audioContext) {
+  constructor(audioContext: BaseAudioContext) {
     super(audioContext, 'piano', '/samples/piano/manifest.json');
     this.articulation = 'struck';   // one string (set of strings) per pitch
   }
@@ -26,8 +26,8 @@ export class PianoInstrument extends MultisampleInstrument {
    * (0.30 s at C1) than in the treble (0.10 s at C6). A piano's top strings have
    * no damper, so above F#6 a note rings its natural decay after the key is up.
    */
-  getEnvelopeSettings(duration, frequency) {
-    const release = frequency > PIANO_UNDAMPED_HZ
+  getEnvelopeSettings(duration: number, frequency?: number | null) {
+    const release = frequency != null && frequency > PIANO_UNDAMPED_HZ
       ? PIANO_UNDAMPED_RING
       : byPitch(frequency, [32.703, 0.3], [1046.5, 0.1]);
     const drawT60 = super.getEnvelopeSettings(duration, frequency).drawT60;
@@ -36,7 +36,7 @@ export class PianoInstrument extends MultisampleInstrument {
 }
 
 export class ViolinInstrument extends MultisampleInstrument {
-  constructor(audioContext) {
+  constructor(audioContext: BaseAudioContext) {
     super(audioContext, 'violin', '/samples/violin/manifest.json');
     this.articulation = 'bowed';    // slurred within a line
   }

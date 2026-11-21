@@ -33,7 +33,29 @@
  * its end (the note's end is a note-off; see instrument-manager.js).
  */
 
-import { applyVoiceEnvelope, envelopeLength } from './instrument-manager.js';
+import { applyVoiceEnvelope, envelopeLength } from './instrument-manager.ts';
+import type { Envelope, Instrument, NoteShape, Voice } from './instrument-manager.ts';
+
+type Loop = { start: number; end: number };
+
+export interface SampleZone {
+  root: string | null;
+  rootHz: number;
+  playedHz: number;
+  lowHz: number;
+  highHz: number;
+  loop: Loop | null;
+  decayT60: number | null;
+  bowOffset?: number;
+  url: string;
+  buffer: AudioBuffer | null;
+  decoding: Promise<AudioBuffer | null> | null;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 
 /** The crossfade length baked before a loop's end (seconds). */
 export const LOOP_XFADE = 0.12;
@@ -50,7 +72,7 @@ export const LOOP_XFADE = 0.12;
  * @param {AudioBuffer} buf
  * @param {{start:number, end:number}} loop seconds
  */
-export function bakeLoopCrossfade(buf, loop) {
+export function bakeLoopCrossfade(buf: AudioBuffer, loop: Loop) {
   const sr = buf.sampleRate, L = Math.round(LOOP_XFADE * sr);
   const s = Math.round(loop.start * sr), e = Math.round(loop.end * sr);
   if (!(s - L >= 0 && e <= buf.length && e - L > s)) return false;
@@ -68,13 +90,26 @@ export function bakeLoopCrossfade(buf, loop) {
   return true;
 }
 
-export class MultisampleInstrument {
+export class MultisampleInstrument implements Instrument {
+  declare audioContext: BaseAudioContext;
+  declare name: string;
+  declare type: string;
+  declare manifestUrl: string;
+  declare baseDir: string;
+  declare zones: SampleZone[];
+  declare gain: number;
+  declare envelope: Envelope;
+  declare manifestLoaded: boolean;
+  declare articulation: string;
+  declare manifestPromise: Promise<void>;
+  declare displayName?: string;
+  declare license?: unknown;
   /**
    * @param {AudioContext} audioContext
    * @param {string} name registered instrument name (e.g. 'piano')
    * @param {string} manifestUrl absolute URL to the instrument manifest
    */
-  constructor(audioContext, name, manifestUrl) {
+  constructor(audioContext: BaseAudioContext, name: string, manifestUrl: string) {
     this.audioContext = audioContext;
     this.name = name;
     this.type = 'sample';
@@ -94,25 +129,30 @@ export class MultisampleInstrument {
     try {
       const res = await fetch(this.manifestUrl);
       if (!res.ok) throw new Error(`manifest ${res.status}`);
-      const m = await res.json();
-      this.displayName = m.displayName || this.name;
+      const m: unknown = await res.json();
+      if (!record(m)) throw new Error('Invalid sample manifest');
+      this.displayName = typeof m.displayName === 'string' && m.displayName || this.name;
       this.license = m.license || null;
-      if (m.gainDb != null && isFinite(m.gainDb)) this.gain = Math.pow(10, m.gainDb / 20);
-      if (m.envelope) this.envelope = { ...this.envelope, ...m.envelope };
-      const zones = Array.isArray(m.zones) ? m.zones : [];
+      if (m.gainDb != null && Number.isFinite(Number(m.gainDb))) this.gain = Math.pow(10, Number(m.gainDb) / 20);
+      if (record(m.envelope)) {
+        for (const key of ['attack', 'release'] as const) {
+          if (key in m.envelope) this.envelope[key] = m.envelope[key] == null ? undefined : Number(m.envelope[key]);
+        }
+      }
+      const zones: unknown[] = Array.isArray(m.zones) ? m.zones : [];
       this.zones = zones
-        .filter((z) => z && isFinite(z.rootHz) && z.rootHz > 0 && z.url)
-        .map((z) => ({
-          root: z.root || null,
-          rootHz: +z.rootHz,
+        .filter((z): z is Record<string, unknown> & { url: string } => record(z) && Number.isFinite(Number(z.rootHz)) && Number(z.rootHz) > 0 && typeof z.url === 'string' && !!z.url)
+        .map((z): SampleZone => ({
+          root: typeof z.root === 'string' && z.root || null,
+          rootHz: Number(z.rootHz),
           // A loop (seconds into the recording) repeated while a note is held: the violin's
-          loop: z.loop && isFinite(z.loop.start) && isFinite(z.loop.end) && z.loop.end > z.loop.start + 0.2 ? { start: +z.loop.start, end: +z.loop.end } : null,
+          loop: record(z.loop) && Number.isFinite(Number(z.loop.start)) && Number.isFinite(Number(z.loop.end)) && Number(z.loop.end) > Number(z.loop.start) + 0.2 ? { start: Number(z.loop.start), end: Number(z.loop.end) } : null,
           // How fast the recording dies away (s to fall 60 dB; measured, for the drawing)
-          decayT60: isFinite(z.decayT60) && +z.decayT60 > 0 ? +z.decayT60 : null,
+          decayT60: Number.isFinite(Number(z.decayT60)) && Number(z.decayT60) > 0 ? Number(z.decayT60) : null,
           // The pitch the recording actually has (rootHz corrected by its measured tuneCents)
-          playedHz: +z.rootHz * Math.pow(2, (isFinite(z.tuneCents) ? +z.tuneCents : 0) / 1200),
-          lowHz: isFinite(z.lowHz) ? +z.lowHz : 0,
-          highHz: isFinite(z.highHz) ? +z.highHz : Infinity,
+          playedHz: Number(z.rootHz) * Math.pow(2, (Number.isFinite(Number(z.tuneCents)) ? Number(z.tuneCents) : 0) / 1200),
+          lowHz: Number.isFinite(Number(z.lowHz)) ? Number(z.lowHz) : 0,
+          highHz: Number.isFinite(Number(z.highHz)) ? Number(z.highHz) : Infinity,
           url: /^https?:|^\//.test(z.url) ? z.url : this.baseDir + z.url,
           buffer: null,
           decoding: null,
@@ -132,7 +172,7 @@ export class MultisampleInstrument {
   }
 
   // Pick the zone whose [lowHz, highHz] contains freq; else the nearest root.
-  _zoneFor(freq) {
+  _zoneFor(freq: number) {
     if (!this.zones.length) return null;
     for (const z of this.zones) {
       if (freq >= z.lowHz && freq <= z.highHz) return z;
@@ -146,7 +186,7 @@ export class MultisampleInstrument {
     return best;
   }
 
-  async _decodeZone(zone) {
+  async _decodeZone(zone: SampleZone) {
     if (zone.buffer) return zone.buffer;
     if (zone.decoding) return zone.decoding;
     zone.decoding = (async () => {
@@ -172,10 +212,10 @@ export class MultisampleInstrument {
    * playback). Ensures createOscillator() finds decoded buffers.
    * @param {number[]} frequencies
    */
-  async prepare(frequencies) {
+  async prepare(frequencies: number[]) {
     await this.waitForLoad();
     if (!this.zones.length) return; // fallback mode
-    const needed = new Set();
+    const needed = new Set<SampleZone>();
     for (const f of frequencies || []) {
       const z = this._zoneFor(f);
       if (z && !z.buffer) needed.add(z);
@@ -183,14 +223,14 @@ export class MultisampleInstrument {
     await Promise.all(Array.from(needed).map((z) => this._decodeZone(z)));
   }
 
-  _fallbackOscillator(frequency) {
+  _fallbackOscillator(frequency: number) {
     const osc = this.audioContext.createOscillator();
     osc.type = 'sine';
     osc.frequency.value = frequency;
     return osc;
   }
 
-  createOscillator(frequency) {
+  createOscillator(frequency: number): Voice {
     const zone = this._zoneFor(frequency);
     if (!zone || !zone.buffer) {
       // Not decoded yet / no zones — kick off a decode for next time, use a
@@ -225,10 +265,11 @@ export class MultisampleInstrument {
       source.loopEnd = zone.loop.end;
     }
 
+    const buffer = zone.buffer;
     return {
       frequency: { value: frequency },
       // `offset` (seconds into the recording) lets a slurred note enter past its onset
-      start: (when, offset = 0) => { try { source.start(when, Math.max(0, Math.min(offset, zone.buffer.duration * 0.5))); } catch {} },
+      start: (when, offset = 0) => { try { source.start(when, Math.max(0, Math.min(offset, buffer.duration * 0.5))); } catch {} },
       // Where a slur enters this recording: past the bow's onset (its own peak, at most 0.25 s)
       bowOffset: zone.bowOffset != null ? zone.bowOffset : 0.15,
       stop: (when) => { try { source.stop(when); } catch {} },
@@ -246,23 +287,23 @@ export class MultisampleInstrument {
    * @param {number} [duration] note length in seconds
    * @param {number} [frequency] the pitch that sounds
    */
-  getEnvelopeSettings(duration, frequency) {
+  getEnvelopeSettings(duration: number, frequency?: number | null): Envelope {
     const e = this.envelope || {};
-    const sec = (v, d) => (v != null && isFinite(v) && v >= 0 ? +v : d);
+    const sec = (v: number | undefined, d: number) => (v != null && isFinite(v) && v >= 0 ? +v : d);
     // drawT60: the recording's own decay, which the workspace draws; the audio does
     // not apply it (the recording already decays).
-    const z = isFinite(frequency) && frequency > 0 ? this._zoneFor(frequency) : null;
-    const env = { attack: sec(e.attack, 0.005), release: sec(e.release, 0.12) };
-    if (z && z.decayT60) env.drawT60 = z.decayT60 * (z.playedHz ? z.playedHz / frequency : 1);
+    const z = frequency != null && isFinite(frequency) && frequency > 0 ? this._zoneFor(frequency) : null;
+    const env: Envelope = { attack: sec(e.attack, 0.005), release: sec(e.release, 0.12) };
+    if (z && z.decayT60 && frequency != null) env.drawT60 = z.decayT60 * (z.playedHz ? z.playedHz / frequency : 1);
     return env;
   }
 
-  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null, frequency = null) {
+  applyEnvelope(gainNode: GainNode, startTime: number, duration: number, initialVolume = 1.0, shape: NoteShape | null = null, frequency: number | null = null) {
     applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration, frequency), shape);
   }
 
   /** Seconds from the note's start until the voice can be stopped. */
-  voiceLength(duration, shape = null, frequency = null) {
+  voiceLength(duration: number, shape: NoteShape | null = null, frequency: number | null = null) {
     return envelopeLength(this.getEnvelopeSettings(duration, frequency), duration, shape);
   }
 }
