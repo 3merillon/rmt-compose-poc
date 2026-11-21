@@ -105,7 +105,7 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 
 ## `POW` and corruption
 
-`OP.POW` (`src/binary-evaluator.js:584`) is the only place a value can leave the rationals, and it does so **exactly**. It calls `pow()` in `src/value/exact.js` (`src/value/exact.js:345`), which returns one of three kinds of value:
+`OP.POW` (`src/binary-evaluator.js:584`) raises the base on the stack to the given exponent. It calls `pow()` in `src/value/exact.js` (`src/value/exact.js:345`), which returns one of three kinds of value:
 
 | Kind | What it is | Example |
 |---|---|---|
@@ -113,7 +113,7 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 | irrational | an `Irrational` (`src/value/exact.js:49`): a sum of terms `c × Π b^e`, canonical | `2^(1/12)`, `263 * 2^(7/12)` |
 | approximate | an `Approx` (`src/value/exact.js:57`): a Fraction that stands for a number it is not exactly | a division by a sum, a value past the caps |
 
-The stack holds pooled `Fraction`s for rational values and these immutable objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational and the exact module otherwise, so twelve steps of `2^(1/12)` multiply to exactly 2. A rational power is exact as before (integer powers, perfect roots, the DoS caps `MAX_POW_EXPONENT` and `MAX_POW_RESULT_BITS`); an irrational one is factored into primes and kept symbolic (`rationalPow`, `src/value/exact.js:306`). `MusicValue` and `SymbolicPower` below are no longer used by `POW`.
+The stack holds pooled `Fraction`s for rational values and these immutable objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational and the exact module otherwise, so twelve steps of `2^(1/12)` multiply to exactly 2. For a rational base and exponent, integer powers and perfect roots return a fraction. A non-perfect root such as `2^(1/12)` has a symbolic representation. Exceeding the arithmetic limits can produce an approximation. See [Exact Values](/developer/core/symbolic-power#what-is-closed-and-what-falls-back).
 
 `_lastEvalWasCorrupted` is set when the power is irrational (the note's own expression makes a tempered value) and when the evaluation makes an approximation itself (a division by zero, which also evaluates to 1 as before). It becomes the variable's `corruptionFlags` bit, as before, so the hatching is unchanged. A note that only *reads* a tempered value gets no bit of its own; the dependency graph reports it transitively, as before.
 

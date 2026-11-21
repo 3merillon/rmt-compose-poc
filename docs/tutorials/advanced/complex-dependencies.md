@@ -246,8 +246,11 @@ duration, and two notes may depend on each other — note 1 taking its pitch fro
 takes its timing from note 1 — because no single property ends up reading itself:
 
 ```
-# note 1 frequency          # note 2 start time
-(3/2) * [2].f               [1].t + [1].d
+# Note 1, Frequency
+(3/2) * [2].f
+
+# Note 2, Start Time
+[1].t + [1].d
 ```
 
 If a real cycle does get into a module (via a hand-edited JSON file), the evaluator logs

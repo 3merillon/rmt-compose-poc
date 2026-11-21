@@ -236,7 +236,8 @@ The translations:
 
 | Old | New |
 |---|---|
-| `beat(base)`, `beat([N])` | `base.d` |
+| `beat(base)` or a beat on a note inheriting the BaseNote tempo | `base.d` |
+| `beat([N])` on a note with its own constant tempo | `base.d` scaled by the old base tempo divided by the note’s tempo. At base tempo 100 and note tempo 150, the beat becomes `(2/3) * base.d`. |
 | `beat(base) * (1/2)` | `base.d * (1/2)` |
 | `measure([N])`, on a measure bar | `[N].d` |
 | a tempo T | `base.d = 60/T` (see [the time unit](/reference/properties/duration#the-time-unit)) |

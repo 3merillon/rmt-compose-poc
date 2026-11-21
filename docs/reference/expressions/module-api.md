@@ -112,7 +112,8 @@ removed, and typing one is refused with the replacement:
 
 | Old | New |
 |---|---|
-| `beat(base)`, `beat([N])` | `base.d` |
+| `beat(base)` or a beat on a note inheriting the BaseNote tempo | `base.d` |
+| `beat([N])` on a note with its own constant tempo | `base.d` scaled by the old base tempo divided by the note’s tempo. At base tempo 100 and note tempo 150, the beat becomes `(2/3) * base.d`. |
 | `measure([N])` on a bar | `[N].d` |
 
 ```

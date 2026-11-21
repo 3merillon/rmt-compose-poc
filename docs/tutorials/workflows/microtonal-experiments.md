@@ -125,8 +125,7 @@ Neutral intervals that ship as modules:
 | 4 | `[1].f * (7/4)` | 968.83 | harmonic 7th |
 
 **The barbershop seventh.** Compare `[1].f * (7/4)` (968.83¢) against `[1].f * 2^(10/12)` (1000¢) —
-31 cents apart. The 7/4 *locks*; the tempered one grinds. This is the interval barbershop quartets
-tune by ear and no keyboard can play.
+about 31 cents apart. With a sustained harmonium root, listen for the seventh partial of the root meeting the fourth partial of the upper note at 7/4. Switching the upper note to the tempered seventh separates those partials.
 
 Then drop the shipped **Harmonic 7th** chord (4:5:6:7) onto a note and hear all four tones lock at
 once. Note that the **Dominant 7th** chord module is a different thing — its seventh is 16/9, not

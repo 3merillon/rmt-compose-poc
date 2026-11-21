@@ -277,7 +277,7 @@ The [module bar](/user-guide/interface/module-bar) under the top bar ships **81 
 
 Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` and `base.t` references become that note's frequency and start time, and the internal structure survives intact. Its `base.d` stays `base.d`: the module keeps its rhythm in time units and plays at your workspace's pace, whatever the length of the note you drop it on. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
 
-[The Module Library](/user-guide/modules/module-library) lists every module and how to search them.
+[The Module Library](/user-guide/modules/module-library) lists every module and how to search them. [Reading the canon and its cadences](/tutorials/workflows/canon-and-cadences) traces one pitch through two voices and shows how octave placement shapes the library progressions.
 
 ### Getting your work into the library
 
@@ -299,7 +299,7 @@ Equal temperament produces irrational values. A 12-TET semitone is:
 2^(1/12)            # 1.0594630943...
 ```
 
-There is no fraction that equals it, so RMT Compose keeps it as the power it is. Everything computed from it stays exact: twelve semitones multiply to exactly 2, so the 12-TET octave is exactly 2. A value becomes approximate only when you write it with `~`, or when an operation cannot be kept exact (a division by a sum of irrational terms, a division by zero). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
+There is no fraction that equals it, so RMT Compose keeps it as the power it is. Twelve such semitones multiply to exactly 2, so the 12-TET octave is exact. A value becomes approximate only when you write it with `~`, or when an operation cannot be kept exact (a division by a sum of irrational terms, a division by zero). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
 ### How it is shown
 

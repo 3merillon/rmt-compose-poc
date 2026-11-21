@@ -298,7 +298,8 @@ Earlier versions stored a tempo and a number of beats per measure on the BaseNot
 
 | Old | New |
 |---|---|
-| `beat(base)`, `beat([N])` | `base.d` |
+| `beat(base)` or a beat on a note inheriting the BaseNote tempo | `base.d` |
+| `beat([N])` on a note with its own constant tempo | `base.d` scaled by the old base tempo divided by the note’s tempo. At base tempo 100 and note tempo 150, the beat becomes `(2/3) * base.d`. |
 | `measure([N])` on a bar | `[N].d` |
 | a tempo T | `base.d = 60/T` |
 | beats per measure B | a measure bar of `base.d * B` |
