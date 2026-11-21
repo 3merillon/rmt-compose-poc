@@ -120,14 +120,13 @@ const selection = (page: Page) => page.evaluate(() => (window.__rmtRenderer!.get
 
 const starts = (page: Page, ids: number[]) => page.evaluate((ids) => {
   const mod = window.__rmtWorkspace!._module!;
-  const out: Record<number, { t: number; raw: string }> = {};
+  const out: Record<number, { t: number; raw: string } | null> = {};
   for (const id of ids) {
     const n = mod.getNoteById(Number(id));
-    if (!n) throw new Error('Missing selected note ' + id);
-    out[id] = {
+    out[id] = n ? {
       t: Number(n.getVariable('startTime')!.valueOf()),
       raw: n.variables.startTimeString || ''
-    };
+    } : null;
   }
   return out;
 }, ids);
@@ -197,7 +196,7 @@ console.log('\n== dependency algebra (the part a screenshot cannot confirm)');
   const u1 = await undoDepth(page);
   console.log('  after  ' + JSON.stringify(after));
 
-  const moved = (id: number) => after[id].t - before[id].t;
+  const moved = (id: number) => after[id]!.t - before[id]!.t;
   const near = (v: number, target: number, eps = 1e-3) => Math.abs(v - target) < eps;
 
   check(`A (the mover) moved by exactly D=${D}`, near(moved(A), D), `ΔA = ${moved(A).toFixed(6)}`);
@@ -225,7 +224,7 @@ console.log('\n== dependency algebra (the part a screenshot cannot confirm)');
   await emitEditorEvent(page, 'workspace:groupMoveCommit', { ids: [A, C], deltaSec: D2 });
   await page.waitForTimeout(500);
   const after2 = await starts(page, [A, B, C]);
-  const moved2 = (id: number) => after2[id].t - before2[id].t;
+  const moved2 = (id: number) => after2[id]!.t - before2[id]!.t;
   console.log(`  trap: ΔA=${moved2(A).toFixed(4)} ΔB=${moved2(B).toFixed(4)} ΔC=${moved2(C).toFixed(4)} (D=${D2}, 2D=${2 * D2})`);
 
   check(`DOUBLE-MOVE TRAP: C moved by exactly D=${D2}, NOT 2D=${2 * D2}`,
@@ -399,7 +398,7 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
   await shoot(page, '06-group-after-drop');
 
   const afterDrag = await starts(page, sel3);
-  const deltas = sel3.map((id: number) => afterDrag[id].t - beforeDrag[id].t);
+  const deltas = sel3.map((id: number) => afterDrag[id]!.t - beforeDrag[id]!.t);
   const d0 = deltas[0];
   const allSame = deltas.every((d: number) => Math.abs(d - d0) < 1e-3);
   check('group drag moved EVERY selected note by the SAME delta',
@@ -617,7 +616,7 @@ console.log('\n== group drag: glyphs follow the notes, and the ghost clamps at t
   await page.waitForTimeout(600);
 
   const dropped = await starts(page, sel2);
-  const minDropped = Math.min(...sel2.map((id: number) => dropped[id].t));
+  const minDropped = Math.min(...sel2.map((id: number) => dropped[id]!.t));
   check('...and the DROP lands where the ghost was (no jump)',
     minDropped >= baseT - 1e-3 && Math.abs(minDropped - ghost.minPreviewStart) < 0.05,
     `earliest dropped start = ${minDropped.toFixed(4)} vs ghost ${ghost.minPreviewStart.toFixed(4)}`);
