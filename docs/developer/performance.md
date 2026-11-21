@@ -372,6 +372,24 @@ Drags only shift x and width, so the vertical bound needs no slack.
 The horizontal index also limits the slots submitted for instanced note bodies. The per-note
 rectangle test handles partially visible groups and the vertical bounds.
 
+### Playback with the entire score visible
+
+The overview still draws every visible note body. At high density the renderer skips controls
+that cannot fit inside their note. When too many controls occupy the view it gives priority to
+the selected and hovered notes. Panning reuses the visible controls until the camera leaves
+their cached bounds. Large groups also reuse their ring geometry between frames.
+
+The playback benchmark fits 500,000 notes on a 1280 × 800 viewport, presses Play, and records
+frame intervals and Web Audio scheduling lead. On Edge with an RTX 3080, the previous tracking
+view took 5.86 s for a frame and submitted starts as much as 6.71 s late. With the same short-note
+score, tracking and panning both measured 8.4 ms at the 95th percentile with zero late starts.
+An overlapping-note fixture and a fixture with a long note in every block of 64 also measured
+8.4 ms while panning. The runner separately forces GPU completion with a pixel readback.
+
+```sh
+node scripts/perf/bench-dense-playback.mjs 500000 http://localhost:3000 short --pointer --marquee
+```
+
 ## Mid-drag GC hitches
 
 Dragging a hub note (a measure bar with ~5,000 dependents) used to be smooth and then *hitch*
@@ -415,32 +433,37 @@ Per-frame allocations removed from the drag render path:
 actually passed in. The pixel diff caught this; eyeballing would not have.
 :::
 
-## Picking is 100% CPU
+## Hover and marquee selection
 
-- `Workspace.pickAt(clientX, clientY, expandCssPx = 2)` (`workspace.js:1931`) tries
-  `renderer.pickAllAt()` first, which always exists.
-- `RendererAdapter.pickAllAt` (`renderer.js:9640`) resolves measure triangles (top) → base circle →
-  note stack.
-- `RendererAdapter.pickAt` (`renderer.js:3844`) is a **reverse linear scan** over `_instanceNoteIds`
-  (last-drawn is top-most), with a fast world-space AABB reject followed by a precise rounded-rect
-  test so corners do not select.
-- `hitTestSubRegion` (`renderer.js:3907`) resolves *which* sub-region of a note was hit (pull tab,
-  arrow column), and only runs once a body hit is confirmed.
+Point picking uses the bounds of consecutive groups of note instances in both axes. It tests
+candidate notes in reverse draw order and checks the rounded corners. Hover can stop at the
+top hit. Cycling through overlapping notes can request the stack. See [Picking](/developer/rendering/picking).
 
-The CPU point pick took 1.16 ms per call at 500,000 notes in the initial Edge profile.
-The measured drag and marquee costs were dominated by other work, so picking still uses the scan. See [Picking](/developer/rendering/picking).
+With all 500,000 notes visible, 80 pointer moves over notes and 80 over the background took
+0.1 ms at the 95th percentile to handle. Previously the same sweeps took 4.3 and 5.9 ms.
+Successive clicks cycled through the expected notes in a stack 695 notes deep.
+
+During a marquee drag the ring shader tests each visible note against the rectangle. The
+CPU collects note IDs once on release. The preview and the commit both use inclusive rectangle
+intersection. An additive drag keeps the existing group, and cancellation restores its display.
+On the 500,000-note overview, 75 pointer moves took 0.1 ms at the 95th percentile to update
+the preview. A full-view drag selected all 500,000 notes. Collecting and committing that group
+took 85 ms on release. The first selection of a note with 499,999 dependents took 145 ms
+through GPU readback, down from 488 ms before sharing the dependency traversal. Subsequent
+playback frames while tracking or panning measured 8.4 ms at the 95th percentile. Across
+30 additional pan frames a group of 500,000 selected notes reused its uploaded ring geometry.
 
 ## Cheap history
 
 `src/store/history.js`.
 
-- Each history entry keeps the canonical minified module text. The history manager and autosave
-  share that string. Editor checkpoints also retain 128-ID pages of note text and row offsets.
-  A move, resize or octave step serializes its changed rows, then joins the shared page texts
-  in ID order. The public serializer still checks direct writes to exposed note fields.
-- Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
-  cap of **12 MB**. The byte cap drops oldest but always keeps **≥ 2** entries, so undo survives even
-  one enormous snapshot.
+- Editor checkpoints share 128-ID pages of canonical note text and row offsets. Each ordinary edit
+  serializes its changed rows. Even a full capture can reuse pages that compare equal.
+  Autosave receives a single string assembled in ID order. A full restore can request that text again.
+- History retains up to **50 states**. Its **12 MiB** budget estimates additional storage beyond
+  the current paged checkpoint, including older page directories, text and offsets. A shared page
+  counts once. At the default settings even a costly edit keeps its immediate predecessor.
+  Callers that supply standalone JSON strings retain the original serialized-length budget.
 - `canUndo()` is `_undo.length > 1` — the bottom entry is the "Initial" seed. Any new capture clears
   the redo stack.
 - Restoring two versions of the same canonically ordered score compares shared pages by identity.
@@ -448,6 +471,12 @@ The measured drag and marquee costs were dominated by other work, so picking sti
   Structural edits, different variable references, unscoped edits and noncanonical state use
   the full loader to reestablish graph insertion order. History consumers can still request
   an independently parsed snapshot.
+
+On Node 24.22.1, `scripts/perf/bench-history.mjs` applied 20 duration edits spread across
+500,000 notes, then undid and redid all 20. At each step the SHA-256 of a fresh full export and
+the single-string snapshot matched the expected state. Clearing the 20 older states while
+keeping the live score and latest checkpoint released **2.58 MiB of V8 heap** after forced GC.
+The final autosave text contained 78,865,596 characters.
 
 For an octave edit on `voices-*`, the paired Edge run timed the restore event
 through two animation callbacks. The heap is decimal MB after initial load and GC.
@@ -667,9 +696,8 @@ node scripts/perf/converge.mjs
 | **Incremental sync for complex scenes** | Stable body slots and partial GPU uploads ship for ordinary edits. Scenes with rests, envelopes, tails or corruption use the full synchronization path. |
 | **Structural undo** | Ordinary expression edits share history pages and restore changed records. Undo across a topology change still uses the full loader. |
 | **Drop target search** | The first single-note drop builds the time ranges. Structural edits and an expired evaluation journal rebuild them. Overlapping ranges can still require inspecting much of a score. |
-| **GPU picking** | **Not shipped.** `picking.js` is a self-described scaffold: no ID pass is ever drawn, `begin()`/`end()` have zero call sites, and `Workspace.pickAt` tries `pickAllAt()` first (which always exists), so the GPU branch is unreachable. All picking is CPU-side. |
+| **GPU ID-buffer picking** | Point selection and the final marquee result use the CPU instance index. The GPU draws the live marquee highlights. |
 | **Measure-triangle outline batching** | Intentionally skipped — bounded by measure count M ≪ N. |
-| **Spatial index for picking** | Not warranted by measurement. |
 
 ## Limits
 

@@ -1718,101 +1718,41 @@ export class DependencyGraph {
    */
   getChildrenTreeByAllProperties(noteId) {
     const edgesByProperty = { frequency: [], startTime: [], duration: [] };
-    const visited = new Map(); // noteId -> Set<"changedProp:originProp">
+    const names = ['frequency', 'startTime', 'duration'];
+    // Rows select the changed parent property, columns the child's property.
+    const outgoing = [
+      [this.frequencyOnFrequencyDependents, this.startTimeOnFrequencyDependents, this.durationOnFrequencyDependents],
+      [this.frequencyOnStartTimeDependents, this.startTimeOnStartTimeDependents, this.durationOnStartTimeDependents],
+      [this.frequencyOnDurationDependents, this.startTimeOnDurationDependents, this.durationOnDurationDependents],
+    ];
+    const visited = new Map(); // id -> nine bits for (root property, changed property)
+    const queue = names.map((_, origin) => ({ id: noteId, depth: 0, changed: origin, origin }));
     let maxDepth = 0;
-
-    // Queue items: { id, depth, changedProp, originProp }
-    // originProp tracks which root property initiated this branch
-    const queue = [];
-    let queueIdx = 0;
-
-    // Seed queue with all 3 properties from root
-    for (const prop of ['frequency', 'startTime', 'duration']) {
-      if (!visited.has(noteId)) {
-        visited.set(noteId, new Set());
-      }
-      visited.get(noteId).add(`${prop}:${prop}`);
-      queue.push({ id: noteId, depth: 0, changedProp: prop, originProp: prop });
-    }
-
-    const addEdge = (parentId, childId, depth, childChangedProp, originProp) => {
-      if (!visited.has(childId)) {
-        visited.set(childId, new Set());
-      }
-      const key = `${childChangedProp}:${originProp}`;
-      if (!visited.get(childId).has(key)) {
-        visited.get(childId).add(key);
-        maxDepth = Math.max(maxDepth, depth);
-        edgesByProperty[originProp].push({ parentId, childId, depth });
-        queue.push({ id: childId, depth, changedProp: childChangedProp, originProp });
-      }
-    };
-
-    while (queueIdx < queue.length) {
-      const { id: parentId, depth, changedProp, originProp } = queue[queueIdx++];
-      const childDepth = depth + 1;
-
-      // Same propagation logic as getChildrenTreeByProperty, but track originProp
-      if (changedProp === 'frequency') {
-        const stOnFreq = this.startTimeOnFrequencyDependents.get(parentId);
-        if (stOnFreq) {
-          for (const childId of stOnFreq) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime', originProp);
-          }
-        }
-        const freqOnFreq = this.frequencyOnFrequencyDependents.get(parentId);
-        if (freqOnFreq) {
-          for (const childId of freqOnFreq) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency', originProp);
-          }
-        }
-        const durOnFreq = this.durationOnFrequencyDependents.get(parentId);
-        if (durOnFreq) {
-          for (const childId of durOnFreq) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration', originProp);
-          }
-        }
-      } else if (changedProp === 'startTime') {
-        const stOnSt = this.startTimeOnStartTimeDependents.get(parentId);
-        if (stOnSt) {
-          for (const childId of stOnSt) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime', originProp);
-          }
-        }
-        const freqOnSt = this.frequencyOnStartTimeDependents.get(parentId);
-        if (freqOnSt) {
-          for (const childId of freqOnSt) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency', originProp);
-          }
-        }
-        const durOnSt = this.durationOnStartTimeDependents.get(parentId);
-        if (durOnSt) {
-          for (const childId of durOnSt) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration', originProp);
-          }
-        }
-      } else if (changedProp === 'duration') {
-        const stOnDur = this.startTimeOnDurationDependents.get(parentId);
-        if (stOnDur) {
-          for (const childId of stOnDur) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime', originProp);
-          }
-        }
-        const freqOnDur = this.frequencyOnDurationDependents.get(parentId);
-        if (freqOnDur) {
-          for (const childId of freqOnDur) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency', originProp);
-          }
-        }
-        const durOnDur = this.durationOnDurationDependents.get(parentId);
-        if (durOnDur) {
-          for (const childId of durOnDur) {
-            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration', originProp);
+    const childOrder = [1, 0, 2]; // start, frequency, duration: stable sibling order
+    for (let i = 0; i < queue.length; i++) {
+      const { id: parentId, depth, changed, origin } = queue[i];
+      const edges = edgesByProperty[names[origin]];
+      for (const next of childOrder) {
+        const children = outgoing[changed][next].get(parentId);
+        if (!children) continue;
+        const bit = 1 << (origin * 3 + next);
+        const [freq, start, duration] = outgoing[next];
+        for (const childId of children) {
+          if (childId === noteId) continue;
+          const mask = visited.get(childId) || 0;
+          if (mask & bit) continue;
+          visited.set(childId, mask | bit);
+          const childDepth = depth + 1;
+          maxDepth = Math.max(maxDepth, childDepth);
+          edges.push({ parentId, childId, depth: childDepth });
+          // Wide chords/fan-outs usually end here. An empty next frontier
+          // needs no queue entry (or per-note Set of property strings).
+          if (freq.has(childId) || start.has(childId) || duration.has(childId)) {
+            queue.push({ id: childId, depth: childDepth, changed: next, origin });
           }
         }
       }
     }
-
     return { edgesByProperty, maxDepth };
   }
 

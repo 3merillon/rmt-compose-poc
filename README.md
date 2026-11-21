@@ -88,15 +88,15 @@ The 100k figure is about **rendering**, not editing: `sync()` is the remaining b
   - **Algorithmic reverb** — the impulse response is synthesised in the browser at runtime (no audio assets); room size, decay, damping, pre-delay and wet amount are live (IR re-renders debounced)
   - Optional **pitch panning** (low notes left, high notes right) and a peak limiter
   - 11 instruments: 9 synthesized (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) and 2 **multisampled** (`piano`, `violin`) cut from the CC0 VSCO-2 Community Edition library. Sample zones are decoded lazily, only for the notes about to play.
-  - Instruments inherit down the frequency dependency chain; a note without an explicit instrument takes its ancestor's, falling back to the global default
+  - Instruments follow each player's rhythmic line. Setting a note's instrument starts a new player.
   - **Per-note amplitude** — an exact relative gain (`a`) like every other variable: `[1].a * (121/100)`. A note without one sounds at the BaseNote's; the default is 1, and playback clamps the result to 0–4
   - Click-free ADSR, 200 ms pause fade, 20 ms stop de-click
   - **Loop playback** — shift-click or long-press Play. Gapless at the seam: release tails and reverb ring across the loop boundary.
 
-- **Module library** (79 modules in 6 sections — see [Module Library](#module-library))
+- **Module library** (81 modules in 6 sections — see [Module Library](#module-library))
 
 - **Productivity**
-  - Undo/redo (50 entries, 12 MB cap), autosaved composition (`rmt:moduleSnapshot:v1`), autosaved library layout (`ui-state`)
+  - Undo/redo with shared note pages (up to 50 states, 12 MiB history budget), autosaved composition in IndexedDB, autosaved library layout (`ui-state`)
   - Load / save module JSON; reorder module; reset to default
   - Persistent X/Y scale (time and frequency density)
   - Mobile: pointer-events throughout, real viewport measurement (not `100vh`), touch drag, pinch-zoom, coarse-pointer hit targets
@@ -126,7 +126,7 @@ Other scripts:
 
 | Script | What it does |
 |---|---|
-| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents), then checks exact arithmetic at depth, per-variable evaluation order and the amplitude variable, and reads exported MIDI files back note by note. **Not a unit-test suite** — the repo has no test framework. |
+| `npm test` | Validates the shipped modules, exact evaluation, editing, playback data and MIDI export. Library checks compare the exact onset, duration and frequency of every sounding note with the recorded score. |
 | `npm run gen:intervals` | Regenerates the 46 interval modules and patches `library.json` |
 | `npm run perf:gen` / `npm run perf:bench` | Generate stress modules; benchmark evaluation in Node |
 | `npm run samples:build` | Rebuilds the piano/violin samples from VSCO-2 CE (needs `ffmpeg` + network) |
@@ -162,7 +162,7 @@ Other scripts:
 
 ## Module Library
 
-The second bar under the top bar. 79 shipped modules in six sections:
+The second bar under the top bar contains 81 shipped modules in six sections.
 
 | Section | Count | Contents |
 |---|---|---|
@@ -171,7 +171,7 @@ The second bar under the top bar. 79 shipped modules in six sections:
 | **Progressions** | 8 | V7–I, ii–V–I, I–IV–V–I, I–vi–IV–V, plus authentic / plagal / deceptive / half cadences |
 | **Melodies** | 7 | Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 1 | `canon base` — and where your own modules land |
+| **Custom** | 3 | The complete canon, its leading bass and its theme, alongside your own modules |
 
 Every module is **relational**. A chord is a root plus ratios *of that root*; a progression chains each root off the previous one, so only the first root ever touches `base`. Drop a module onto a note and the whole structure re-roots onto that note with its tree intact; transpose the first root and the entire progression moves.
 
@@ -375,7 +375,7 @@ Example — chain notes up the 12-TET scale:
 
 ### Assets and tooling
 - `public/modules/library.json` — the v2 library manifest
-- `public/modules/` — the 79 shipped modules, plus `defaultModule.json`
+- `public/modules/` — the 81 shipped modules, plus `defaultModule.json`
 - `public/samples/` — the multisampled piano and violin (CC0)
 - `scripts/` — module generators, the module validator (`npm test`), the sample builder, and the Playwright perf/visual harnesses
 

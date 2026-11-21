@@ -35,7 +35,7 @@ const check = (name, pass, detail) => {
   console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 };
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.PW_CHANNEL || undefined });
 
 async function newPage({ width, height, hasTouch = false }) {
   const ctx = await browser.newContext({
@@ -870,6 +870,17 @@ console.log('\n== mobile 390x844 (touch) — long-press marquee');
     await page.waitForTimeout(450);
     return selection(page);
   };
+
+  // Park the floating widget below the notes with the same touch gesture a user uses.
+  const header = await page.locator('#group-widget .group-widget-header').boundingBox();
+  const x = Math.round(header.x + 50);
+  const y = Math.round(header.y + header.height / 2);
+  const bottom = page.viewportSize().height - 54;
+  await touch('touchStart', [{ x, y }]);
+  for (const fraction of [0.25, 0.5, 0.75, 1]) {
+    await touch('touchMove', [{ x, y: Math.round(y + (bottom - y) * fraction) }]);
+  }
+  await touch('touchEnd', []);
 
   // 1. REMOVE a note that is in the group
   const victim = mSel[0];

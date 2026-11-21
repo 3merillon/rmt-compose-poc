@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Measures the CPU picking path (pickAt / pickStackAt / hitTestSubRegion), which runs on
- * every pointermove. Reports ms per call so we know whether a spatial index is warranted.
+ * pointer movement and stack clicks. Reports isolated CPU time per call.
  */
 import { chromium } from 'playwright';
 

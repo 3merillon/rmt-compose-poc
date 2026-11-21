@@ -239,7 +239,7 @@ export class Workspace {
         // is NOT handled here — a note already in the group falls through to the normal
         // move gesture below, which is then decorated as a group drag, so it inherits all
         // the existing snapping and clamping for free.
-        {
+        if (e.shiftKey || e.pointerType === 'touch') {
           const hit = this._pickAny(e.clientX, e.clientY);
 
           if (!hit) {
@@ -551,7 +551,6 @@ export class Workspace {
             baselineStartSec: null,
             lastPreview: { startSec: 0, durationSec: 0 }
           };
-          this._decorateAsGroupDrag(this._interaction);
 
           // Do NOT gate camera yet; allow pinch if a second touch appears.
           // Attach doc-level listeners to track pointer moves for promotion/cancel.
@@ -600,68 +599,6 @@ export class Workspace {
           pointerOffsetWorld = pointerWX0 - startWorldX;
         }
 
-        // PERFORMANCE: Capture baseline startSec and compute affected dependents ONCE at pointerdown
-        const baseline = new Map();
-        baseline.set(id, origStartSec);
-        let affectedIds = new Set();
-        
-        try {
-          const mod = this._module;
-          const anchorId = Number(id);
-
-          // PERFORMANCE: Use DependencyGraph for O(V+E) traversal instead of O(n²) string matching
-          if (type === 'move') {
-            // For MOVE: include notes whose startTime depends on the dragged note's startTime
-            // When we move a note (change its startTime), only notes referencing its startTime should move
-            const graph = mod._dependencyGraph;
-            if (graph && typeof graph.getAllStartTimeOnStartTimeDependents === 'function') {
-              affectedIds = graph.getAllStartTimeOnStartTimeDependents(anchorId);
-            } else if (graph && typeof graph.getAllStartTimeDependents === 'function') {
-              // Fallback to old behavior if property-specific tracking not available
-              affectedIds = graph.getAllStartTimeDependents(anchorId);
-            } else if (graph && typeof graph.getAllDependents === 'function') {
-              affectedIds = graph.getAllDependents(anchorId);
-            }
-          } else if (type === 'resize') {
-            // For RESIZE: include notes whose startTime depends on the dragged note's duration
-            // When we resize a note (change its duration), only notes referencing its duration should move
-            const graph = mod._dependencyGraph;
-            if (graph && typeof graph.getAllStartTimeOnDurationDependents === 'function') {
-              affectedIds = graph.getAllStartTimeOnDurationDependents(anchorId);
-            } else if (graph && typeof graph.getAllDependents === 'function') {
-              // Fallback: no preview for resize if property-specific tracking not available
-              affectedIds = new Set();
-            }
-          }
-          // octave type does not preview position changes, affectedIds stays empty
-
-          // Remove anchor from dependents set (it's not affected by its own movement)
-          affectedIds.delete(anchorId);
-
-          // Record baselines for affected set
-          for (const did of affectedIds) {
-            let s0 = 0;
-            try {
-              const n = mod.getNoteById(Number(did));
-              s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
-            } catch {
-              // Fallback to current renderer position (safe at pointerdown since no preview yet)
-              try {
-                const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
-                  ? this.renderer._noteIdToIndex.get(Number(did))
-                  : null;
-                if (idx != null && idx >= 0 && this.renderer.posSize) {
-                  const base = idx * 4;
-                  const xwLocal = this.renderer.posSize[base + 0];
-                  const xScale = this.renderer.currentXScaleFactor || 1.0;
-                  s0 = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
-                }
-              } catch {}
-            }
-            baseline.set(Number(did), Math.max(0, s0 || 0));
-          }
-        } catch {}
-
         this._interaction = {
           active: true,
           type,
@@ -676,31 +613,16 @@ export class Workspace {
           pointerOffsetWorld,
           origStartSec,
           origDurationSec,
-          baselineStartSec: baseline,
+          prepareNoteDrag: type === 'move' || type === 'resize',
+          baselineStartSec: null,
           lastPreview: { startSec: origStartSec, durationSec: origDurationSec },
-          // PERFORMANCE: Cache to avoid recomputing on every mousemove
-          cachedDependents: affectedIds,
+          cachedDependents: null,
           // Per-interaction caches for fast parent resolution during drag (note move/resize)
           // cachedParentChain: { list: [{id,startSec,endSec}], idx, anchorParentId }
           cachedParentChain: null,
           // cachedAncestorChain: [{id,startSec}] from current parent up to BaseNote (id 0)
           cachedAncestorChain: null
         };
-        // Grabbing a note that is already in the multi-selection turns this into a GROUP
-        // drag: identical gesture, identical snapping — only the commit differs.
-        this._decorateAsGroupDrag(this._interaction);
-        // Seed per-interaction parent/ancestor caches for note drags (move/resize)
-        this._seedParentCaches(Number(id));
-
-        // Defer drag overlay until user actually drags (avoid bar pop on simple selection)
-        // Precompute and set initial prospective parent at zero-delta so link line is correct immediately
-        try {
-          if (this.renderer?.setProspectiveParentId) {
-            const cand0 = this._resolveProspectiveParentCandidate(Number(id), Number(origStartSec) || 0, e.clientX, e.clientY);
-            this.renderer.setProspectiveParentId(cand0);
-          }
-        } catch {}
-
         // Gate camera input during interaction
         try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
 
@@ -799,25 +721,13 @@ export class Workspace {
           return;
         }
 
-        // Prefer precise subregion hit testing first so octave/tab bands can highlight even at edges.
-        let subHit = null;
-        if (this.renderer?.hitTestSubRegion) {
-          try { subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY); } catch {}
-        }
- 
-        // Derive hovered id from subHit when available; otherwise fall back to general note pick.
-        let newHoveredId = null;
-        if (subHit && subHit.id) {
-          newHoveredId = (subHit.id | 0);
-        } else {
-          const hit = this.pickAt(e.clientX, e.clientY, 2);
-          newHoveredId = (hit && hit.type === 'note') ? (hit.id | 0) : null;
-        }
- 
+        const noteHit = this.renderer.pickAt(e.clientX, e.clientY, 2);
+        const subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY, noteHit);
+        const mixedTop = this.renderer.pickTopAt(e.clientX, e.clientY, 2, noteHit);
+        const newHoveredId = noteHit?.id ?? null;
+
         // Update hover ring when note under cursor changes
-        if (this.renderer?.setHoverNoteId && newHoveredId !== this._hoveredId) {
-          this.renderer.setHoverNoteId(newHoveredId);
-        }
+        this.renderer.setHoverNoteId(newHoveredId);
  
         // Drive background emphasis for non-body subregions, else clear
         if (this.renderer?.setHoverSubRegion) {
@@ -827,7 +737,6 @@ export class Workspace {
           this.renderer.setHoverSubRegion(target);
         }
         // Update BaseNote and Measure hover from mixed top-most hit
-        const mixedTop = this.pickAt(e.clientX, e.clientY, 2);
         if (this.renderer?.setHoverBase) {
           this.renderer.setHoverBase(!!(mixedTop && mixedTop.type === 'base'));
         }
@@ -899,6 +808,12 @@ export class Workspace {
           }
         } catch {}
 
+        if (this._interaction.prepareNoteDrag) {
+          const start = this._interaction.startClient;
+          if (e.clientX === start.x && e.clientY === start.y) return;
+          this._prepareNoteDrag(this._interaction);
+          this._interaction.prepareNoteDrag = false;
+        }
         const { type, noteId } = this._interaction;
         const xScale = this.renderer?.currentXScaleFactor || 1.0;
 
@@ -915,24 +830,9 @@ export class Workspace {
           st.lastClient = { x: e.clientX, y: e.clientY };
           const rect = {
             x0: st.startClient.x, y0: st.startClient.y,
-            x1: e.clientX,        y1: e.clientY
+            x1: e.clientX,        y1: e.clientY, additive: st.marqueeAdditive
           };
           try { this.renderer?.setMarqueeRect?.(rect); } catch {}
-
-          let ids = [];
-          try {
-            const hits = this.renderer?.pickRect?.(rect.x0, rect.y0, rect.x1, rect.y1) || [];
-            for (const h of hits) {
-              const hid = Number(h && h.id);
-              if (Number.isFinite(hid) && hid !== 0) ids.push(hid);
-            }
-          } catch {}
-          st.marqueeIds = ids;
-
-          // Live preview only — the authoritative set is player.js's, and it is written
-          // once on release (workspace:marqueeCommit).
-          const live = st.marqueeAdditive ? new Set([...st.marqueeBaseIds, ...ids]) : new Set(ids);
-          try { this.renderer?.setMultiSelection?.(live); } catch {}
           try { if (e.cancelable) e.preventDefault(); } catch {}
           return;
         }
@@ -1035,7 +935,7 @@ export class Workspace {
           // glyph atlas (fraction labels, octave arrows) from the rest of the selection.
           // Desktop decorates after building the full state (see the pointerdown path);
           // promotion has to do the same or the two drag caches disagree.
-          if (this._interaction.groupMode) this._decorateAsGroupDrag(this._interaction);
+          this._decorateAsGroupDrag(this._interaction);
 
           // Seed per-interaction parent/ancestor caches for note drags (move/resize) on promotion
           this._seedParentCaches(Number(noteId));
@@ -1656,6 +1556,14 @@ export class Workspace {
       // Clear cursor (hover handler will reapply)
       try { this.containerEl.style.cursor = this._currentCursor || 'default'; } catch {}
 
+      // A click on a note/touch tap never published a preview. No geometry,
+      // selection or dependent positions need to be restored on release.
+      if (st.prepareNoteDrag || st.type === 'movePending') {
+        this._interaction = { active: false };
+        this._interactionEdgeCache = null;
+        return;
+      }
+
       // Clear GL preview (shader-based and legacy)
       try {
         if (this.renderer?.clearDragOffsetPreview) {
@@ -1690,14 +1598,6 @@ export class Workspace {
       // Take the rubber-band rectangle down (on cancel as well as commit)
       try { this.renderer?.setMarqueeRect?.(null); } catch {}
       this._cancelLongPress();
-      // An ABANDONED marquee (pinch, pointercancel) must not strand its live preview
-      // highlight — restore what was selected before the drag. On commit we leave it
-      // alone: player.js overwrites it from marqueeCommit a moment later.
-      try {
-        if (st && st.type === 'marquee' && !commit) {
-          this.renderer?.setMultiSelection?.(st.marqueeBaseIds || new Set());
-        }
-      } catch {}
 
       // Commit
       try {
@@ -1725,7 +1625,7 @@ export class Workspace {
             // Hand the result to player.js, which owns the authoritative selection.
             // Emitted even when empty: a shift-drag across nothing should clear.
             eventBus.emit('workspace:marqueeCommit', {
-              ids: Array.isArray(st.marqueeIds) ? st.marqueeIds : [],
+              ids: this.renderer.pickRectIds(st.startClient.x, st.startClient.y, st.lastClient.x, st.lastClient.y),
               additive: !!st.marqueeAdditive
             });
           } else if (st.type === 'move' && st.groupMode) {
@@ -1902,6 +1802,7 @@ export class Workspace {
   // Mixed-type picking (measure/base/notes). Returns first/top-most hit.
   pickAt(clientX, clientY, expandCssPx = 2) {
     try {
+      if (this.renderer?.pickTopAt) return this.renderer.pickTopAt(clientX, clientY, expandCssPx);
       if (this.renderer && typeof this.renderer.pickAllAt === 'function') {
         const list = this.renderer.pickAllAt(clientX, clientY, expandCssPx) || [];
         return (list && list.length) ? list[0] : null;
@@ -1977,6 +1878,7 @@ export class Workspace {
       this._onDocPointerUp = (ev) => {
         try {
           if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+          if (this._interaction?.type === 'marquee') this._interaction.lastClient = { x: ev.clientX, y: ev.clientY };
           this._endInteraction(true);
         } catch {}
       };
@@ -2012,14 +1914,12 @@ export class Workspace {
       startClient: { x: e.clientX, y: e.clientY },
       lastClient:  { x: e.clientX, y: e.clientY },
       marqueeAdditive: !!additive,
-      marqueeBaseIds: additive ? new Set(this._multiSelIds()) : new Set(),
-      marqueeIds: [],
       lastPreview: { startSec: 0, durationSec: 0 }
     };
 
     this._attachDocInteractionListeners();
 
-    try { this.renderer?.setMarqueeRect?.({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY }); } catch {}
+    try { this.renderer?.setMarqueeRect?.({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, additive }); } catch {}
     try { this.containerEl.style.cursor = 'crosshair'; } catch {}
     // NO preventDefault here. We are called from the pointerdown listener, which is
     // registered { passive: true } — the call would be ignored and would log
@@ -2328,6 +2228,36 @@ export class Workspace {
     } catch {
       return null;
     }
+  }
+
+  // Build the baseline only on the first movement. Pointerdown also starts a
+  // plain selection; on a heavily referenced note that click needs no drag graph.
+  _prepareNoteDrag(st) {
+    const mod = this._module;
+    const id = st.noteId, graph = mod?._dependencyGraph;
+    let dependents;
+    if (st.type === 'move') {
+      dependents = graph?.getAllStartTimeOnStartTimeDependents?.(id) ??
+        graph?.getAllStartTimeDependents?.(id) ?? graph?.getAllDependents?.(id);
+    } else {
+      dependents = graph?.getAllStartTimeOnDurationDependents?.(id);
+    }
+    st.cachedDependents = dependents || new Set();
+    st.cachedDependents.delete(id);
+    st.baselineStartSec = new Map([[id, st.origStartSec]]);
+    for (const did of st.cachedDependents) {
+      let startSec = 0;
+      try {
+        const note = mod.getNoteById(Number(did));
+        startSec = toNumber(note?.getVariable?.('startTime'), 0);
+      } catch {
+        const r = this.renderer, index = r._noteIdToIndex?.get(Number(did));
+        if (index != null) startSec = r.posSize[index * 4] / (r._cfgSX() * (r.currentXScaleFactor || 1));
+      }
+      st.baselineStartSec.set(Number(did), Math.max(0, startSec || 0));
+    }
+    this._decorateAsGroupDrag(st);
+    this._seedParentCaches(id);
   }
 
   // Seed the per-interaction parent caches for a note drag (move/resize): the note's

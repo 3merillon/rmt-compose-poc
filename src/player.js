@@ -1130,15 +1130,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                         // GL stack pick: gather all hits top-most first and cycle on repeated clicks (note/measure/base)
                         let targetEntry = null;
                         try {
-                          const stack = (glWorkspace && typeof glWorkspace.pickStackAt === 'function')
-                            ? glWorkspace.pickStackAt(event.clientX, event.clientY, 3)
-                            : [];
-                          const entries = Array.isArray(stack)
-                            ? stack.filter(h => h && (h.type === 'note' || h.type === 'measure' || h.type === 'base' || h.type === 'reference'))
-                                    .map(h => ({ type: String(h.type), id: Number(h.id) }))
-                            : [];
+                          const prev = containerEl.__rmtWsStack || { entries: [], index: -1 };
+                          let entries;
+                          if (!prev.entries.length && !currentSelectedNote) {
+                            const top = glWorkspace?.pickAt(event.clientX, event.clientY, 3);
+                            entries = top ? [top] : [];
+                          } else {
+                            entries = glWorkspace?.pickStackAt(event.clientX, event.clientY, 3) || [];
+                          }
                           if (entries.length > 0 && !isLocked) {
-                            const prev = containerEl.__rmtWsStack || { entries: [], index: -1, lastX: 0, lastY: 0 };
                             let index = 0;
 
                             // Determine previous selected entry (type-aware)
@@ -1152,13 +1152,20 @@ document.addEventListener('DOMContentLoaded', async function() {
                               return null;
                             })();
 
-                            // Shallow equality check for stacks
-                            const sameOrder = prev.entries
-                              && prev.entries.length === entries.length
-                              && prev.entries.every((v, i) => v.type === entries[i].type && v.id === entries[i].id);
-
-                            if (sameOrder) {
-                              index = ((prev.index || 0) + 1) % entries.length;
+                            // Bringing the chosen note to the front changes painter order.
+                            // Keep cycling the original order while the same stack is under
+                            // the same point, including when a swapped slot crosses another hit.
+                            let sameStack = prev.entries.length === entries.length &&
+                              prev.entries.every((v, i) => v.type === entries[i].type && v.id === entries[i].id);
+                            if (!sameStack && prev.lastX === event.clientX && prev.lastY === event.clientY &&
+                                prev.entries.length === entries.length) {
+                              const types = new Map();
+                              for (const hit of prev.entries) types.set(hit.id, hit.type);
+                              sameStack = entries.every(hit => types.get(hit.id) === hit.type);
+                            }
+                            if (sameStack) {
+                              entries = prev.entries;
+                              index = (prev.index + 1) % entries.length;
                             } else if (prevSel) {
                               const pos = entries.findIndex(e => e.type === prevSel.type && e.id === prevSel.id);
                               if (pos >= 0) index = (pos + 1) % entries.length;
@@ -1182,8 +1189,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                           if (t === 'note' || t === 'reference') {
                             const note = myModule.getNoteById(tid);
                             if (note) {
-                              currentSelectedNote = note;
-                              try { syncRendererSelection(); } catch {}
+                              // showNoteVariables brings the note to front and syncs its selection.
                               const el = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(note.id))}"]`);
                               if (el) {
                                 showNoteVariables(note, el);
@@ -3091,7 +3097,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         if (multiSelection.size === 1) {
             const only = myModule.getNoteById([...multiSelection][0]);
             multiSelection.clear();
-            try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+            try { glWorkspace?.renderer?.syncMultiSelection(multiSelection); } catch {}
             try { hideGroupWidget(); } catch {}
             if (only) {
                 currentSelectedNote = only;
@@ -3101,7 +3107,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
         }
 
-        try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+        try { glWorkspace?.renderer?.syncMultiSelection(multiSelection); } catch {}
         try { glWorkspace?.requestRender?.(); } catch {}
 
         if (multiSelection.size >= 2) {
@@ -3450,7 +3456,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             updateVisualNotes(evaluatedNotes, true);
             createMeasureBars();
             invalidateModuleEndTimeCache();
-            try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
             try { glWorkspace?.requestRender?.(); } catch {}
             const what = op === 'instrument' ? `Instrument ${text || 'inherited'}`
                 : op === 'instrumentOnePlayer' ? `Instrument ${text || 'inherited'} (one player)`

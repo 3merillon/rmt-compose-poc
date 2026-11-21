@@ -260,25 +260,14 @@ camera gestures on touch are in [Camera Controller](/developer/rendering/camera-
 
 ## Picking is 100% CPU
 
-::: warning GPU picking is not shipped
-`src/renderer/webgl2/picking.js` is a self-described scaffold: *"No draw integration yet."* It is
-**imported by nothing** — never constructed, never initialized, not bundled — so the FBO it would
-allocate never exists. `Workspace.pickAt()` goes straight to `renderer.pickAllAt()`. Do not
-document or build on it.
-:::
+The workspace calls `RendererAdapter.pickTopAt()` for a single hit and `pickAllAt()` for
+a stack. Both check measure triangles, the BaseNote circle, notes, then reference lines.
+`InstanceRanges` rejects draw-slot blocks outside the pointer bounds. Within candidate blocks
+the renderer tests actual rounded note rectangles in reverse draw order. Hover uses the same
+note hit to resolve the visible pull tab or arrow column.
 
-The live path:
-
-- `RendererAdapter.pickAllAt()` (`renderer.js:9640`) — measure triangles (top) → base circle → the
-  note stack. Returns hits top-most first.
-- `RendererAdapter.pickAt()` (`renderer.js:3844`) — a **reverse linear scan** over `_instanceNoteIds`
-  (last-drawn is top-most), a fast world-space AABB reject, then a precise **rounded-rect** test so
-  the corners of a note are not selectable.
-- `hitTestSubRegion()` (`renderer.js:3907`) — which *sub-region* was hit (pull tab, arrow column).
-  Only runs once a note body is hit, and respects the rounded interior.
-
-There is **no spatial index**, and measurement says none is warranted: `pickAt` is **0.017 ms at 5,000
-notes and 0.314 ms at 100,000**.
+The GPU picking file is an unused scaffold. See [Picking](/developer/rendering/picking) for the
+point and marquee queries and the playback benchmark.
 
 ## Configuration
 

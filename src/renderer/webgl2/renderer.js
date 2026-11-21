@@ -317,23 +317,7 @@ export class RendererAdapter {
     this._relRdepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
     this._relDepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
 
-    // PERFORMANCE: Cache dependency highlight data per selected note to avoid recomputation
-    // Invalidated when module structure changes or selection changes
-    this._depHighlightCache = {
-      noteId: null,                // cached selectedNoteId
-      posEpoch: null,              // cached posEpoch for invalidation
-      deps: null,                  // raw dependency IDs
-      rdeps: null,                 // raw dependent IDs
-      depIdx: null,                // index array for deps
-      rdepIdx: null,               // index array for rdeps
-      depMeasureIds: null,         // measure IDs in deps
-      rdepMeasureIds: null,        // measure IDs in rdeps
-      depsHasBase: false,
-      rdepsHasBase: false,
-      // Property-colored cache
-      rdepsByProperty: null,       // { frequency: [], startTime: [], duration: [] }
-      depsByProperty: null         // { frequency: [], startTime: [], duration: [] }
-    };
+
   }
 
   // Update configuration at runtime. Merges partial into current and normalizes; triggers redraw.
@@ -714,16 +698,15 @@ export class RendererAdapter {
     // that are keyed by note content rather than by note identity. They are bounded by the
     // note count within a module, so this is the only place they need to be released.
     if (this._moduleRef !== module) {
+      for (const entry of this._ringBuffers?.values() || []) this.gl?.deleteBuffer(entry.buffer);
+      this._ringBuffers?.clear();
       this._parsedColorCache = null;
       this._idColorCache = null;
       this._fracStrCache = null;
     }
     this._moduleRef = module;
 
-    // Bump position epoch at START of sync to invalidate dependency highlight cache.
-    // This ensures cached dependency data is recomputed when module data changes
-    // (e.g., when a parent note's octave changes, affecting child note positions).
-    // Previously this was only bumped at the END of sync, causing stale cache hits.
+    // Invalidate position- and selection-dependent data before rebuilding the scene.
     this._posEpoch = (this._posEpoch || 0) + 1;
 
     // CSS px -> world units (Y) for padding to match DOM borders
@@ -1149,114 +1132,57 @@ export class RendererAdapter {
     } catch {}
 
     // Compute related highlight index sets from module when a note is selected
-    // PERFORMANCE: Use cached dependency data when selection hasn't changed
     try {
-      if (selectedNoteId != null && module && typeof module.getDirectDependencies === 'function' && this._noteIdToIndex) {
+      // Base selection draws its own ring. Its score-wide relation rings and lines are hidden.
+      if (selectedNoteId != null && selectedNoteId !== 0 && module && typeof module.getDirectDependencies === 'function' && this._noteIdToIndex) {
         const selIdNum = Number(selectedNoteId);
-        const cache = this._depHighlightCache;
+        const deps = module.getDirectDependencies(selIdNum) || [];
+        const depsByProperty = module.getDirectDependenciesByProperty?.(selIdNum) ||
+          { frequency: [], startTime: [], duration: [] };
+        const trees = this._selectionTrees(module, selIdNum);
+        const fallback = trees ? null : module.getDependentsByProperty?.(selIdNum);
 
-        // Check if we can reuse cached dependency data (same selection AND same posEpoch)
-        // posEpoch changes when module data is modified (e.g., after drop), so we must recompute
-        let deps, rdeps, rdepsByProperty, depsByProperty;
-        if (cache.noteId === selIdNum && cache.deps && cache.rdeps && cache.posEpoch === this._posEpoch) {
-          // Reuse cached raw dependency arrays
-          deps = cache.deps;
-          rdeps = cache.rdeps;
-          rdepsByProperty = cache.rdepsByProperty;
-          depsByProperty = cache.depsByProperty;
-          // Also reuse measure IDs and base flags (these don't change with reordering)
-          this._relDepsMeasureIds = cache.depMeasureIds;
-          this._relRdepsMeasureIds = cache.rdepMeasureIds;
-          this._relDepsHasBase = cache.depsHasBase;
-          this._relRdepsHasBase = cache.rdepsHasBase;
-        } else {
-          // Selection changed - compute and cache dependency data
-          const depsRaw = module.getDirectDependencies(selIdNum);
-          const rdepsRaw = (typeof module.getDependentNotes === 'function') ? module.getDependentNotes(selIdNum) : [];
-          deps = Array.isArray(depsRaw) ? depsRaw : [];
-          rdeps = Array.isArray(rdepsRaw) ? rdepsRaw : [];
+        const toIdx = id => this._noteIdToIndex.get(Number(id));
+        const selIdx = toIdx(selIdNum);
+        const measureIds = module.getTimingSummary?.()?.measureIds;
+        const isBarId = id => measureIds ? measureIds.has(id) : isMeasureNote(module.getNoteById(id));
+        this._relDepsMeasureIds = deps.filter(isBarId);
+        this._relDepsHasBase = deps.includes(0);
+        this._relDepsIdx = deps.map(toIdx).filter(i => i != null && i !== selIdx);
 
-          // Get property-colored dependents (notes that would move if property changes)
-          rdepsByProperty = (typeof module.getDependentsByProperty === 'function')
-            ? module.getDependentsByProperty(selIdNum)
-            : { frequency: [], startTime: [], duration: [] };
+        // Uncolored dependencies can include properties other than pitch, start
+        // and duration. Only bars, a dependent BaseNote, and optional drag ghosts
+        // consume that separate traversal. Keep it exact whenever they need it.
+        const needAll = !trees || !measureIds || measureIds.size ||
+          module.getDirectDependencies(0).some(id => id !== 0) || this.drawDragGhosts;
+        const rdeps = needAll ? module.getDependentNotes?.(selIdNum) || [] : null;
+        this._relRdepsMeasureIds = rdeps?.filter(isBarId) || [];
+        this._relRdepsHasBase = rdeps?.includes(0) || false;
+        this._relRdepsIdx = rdeps?.map(toIdx).filter(i => i != null && i !== selIdx) ?? null;
 
-          // Get property-colored dependencies (what this note's expressions reference)
-          depsByProperty = (typeof module.getDirectDependenciesByProperty === 'function')
-            ? module.getDirectDependenciesByProperty(selIdNum)
-            : { frequency: [], startTime: [], duration: [] };
-
-          // Compute measure IDs and base flags
-          const depMeasureIds = [];
-          const rdepMeasureIds = [];
-          let depsHasBase = false;
-          let rdepsHasBase = false;
-
-          const isBarId = (id) => {
-            try { return isMeasureNote(module.getNoteById(Number(id))); } catch { return false; }
-          };
-
-          for (let k = 0; k < deps.length; k++) {
-            const id = Number(deps[k]);
-            if (id === 0) { depsHasBase = true; continue; }
-            if (isBarId(id)) depMeasureIds.push(id);
-          }
-          for (let k = 0; k < rdeps.length; k++) {
-            const id = Number(rdeps[k]);
-            if (id === 0) { rdepsHasBase = true; continue; }
-            if (isBarId(id)) rdepMeasureIds.push(id);
-          }
-
-          // Cache the computed data (including posEpoch for invalidation)
-          cache.noteId = selIdNum;
-          cache.posEpoch = this._posEpoch;
-          cache.deps = deps;
-          cache.rdeps = rdeps;
-          cache.rdepsByProperty = rdepsByProperty;
-          cache.depsByProperty = depsByProperty;
-          cache.depMeasureIds = Array.from(new Set(depMeasureIds));
-          cache.rdepMeasureIds = Array.from(new Set(rdepMeasureIds));
-          cache.depsHasBase = depsHasBase;
-          cache.rdepsHasBase = rdepsHasBase;
-
-          this._relDepsMeasureIds = cache.depMeasureIds;
-          this._relRdepsMeasureIds = cache.rdepMeasureIds;
-          this._relDepsHasBase = depsHasBase;
-          this._relRdepsHasBase = rdepsHasBase;
-        }
-
-        // Always recompute indices (they depend on current buffer ordering)
-        const toIdx = (id) => {
-          const idx = this._noteIdToIndex.get(Number(id));
-          return (idx != null && idx >= 0 && idx < N) ? idx : null;
-        };
-        const selIdx = this._noteIdToIndex.get(selIdNum);
-        const depSet = new Set();
-        for (const d of deps) {
-          const ii = toIdx(d);
-          if (ii != null && ii !== selIdx) depSet.add(ii);
-        }
-        const rdepSet = new Set();
-        for (const d of rdeps) {
-          const ii = toIdx(d);
-          if (ii != null && ii !== selIdx) rdepSet.add(ii);
-        }
-        this._relDepsIdx = Array.from(depSet);
-        this._relRdepsIdx = Array.from(rdepSet);
-
-        // Compute property-colored indices for rdeps (dependents)
-        // These follow the paradigm: which notes would MOVE if this property changes
-        const rdepsIdxByProp = { frequency: [], startTime: [], duration: [] };
+        // The edges already visited for the colored lines identify the same
+        // affected notes as the three property traversals. A child reached by
+        // two changed properties needs only one ring of each origin color.
+        const indices = { frequency: [], startTime: [], duration: [] };
+        const hasBase = { frequency: false, startTime: false, duration: false };
+        let seen;
+        let bit = 1;
         for (const prop of ['frequency', 'startTime', 'duration']) {
-          const propIds = rdepsByProperty[prop] || [];
-          const propIdxSet = new Set();
-          for (const id of propIds) {
-            const ii = toIdx(id);
-            if (ii != null && ii !== selIdx) propIdxSet.add(ii);
+          const list = trees ? trees.edgesByProperty[prop] : fallback?.[prop] || [];
+          if (list.length && !seen) seen = new Uint8Array(N);
+          for (const entry of list) {
+            const id = trees ? entry.childId : entry;
+            if (id === 0) hasBase[prop] = true;
+            const idx = toIdx(id);
+            if (idx != null && idx !== selIdx && !(seen[idx] & bit)) {
+              indices[prop].push(idx);
+              seen[idx] |= bit;
+            }
           }
-          rdepsIdxByProp[prop] = Array.from(propIdxSet);
+          bit <<= 1;
         }
-        this._relRdepsIdxByProperty = rdepsIdxByProp;
+        this._relRdepsIdxByProperty = indices;
+        this._relRdepsHasBaseByProperty = hasBase;
 
         // Compute property-colored indices for deps (dependencies)
         const depsIdxByProp = { frequency: [], startTime: [], duration: [] };
@@ -1272,11 +1198,6 @@ export class RendererAdapter {
         this._relDepsIdxByProperty = depsIdxByProp;
 
         // Compute base flags per property
-        this._relRdepsHasBaseByProperty = {
-          frequency: (rdepsByProperty.frequency || []).includes(0),
-          startTime: (rdepsByProperty.startTime || []).includes(0),
-          duration: (rdepsByProperty.duration || []).includes(0)
-        };
         this._relDepsHasBaseByProperty = {
           frequency: (depsByProperty.frequency || []).includes(0),
           startTime: (depsByProperty.startTime || []).includes(0),
@@ -1319,7 +1240,7 @@ export class RendererAdapter {
         this._relDepsChainByProperty = { frequency: [], startTime: [], duration: [] };
         this._relDepsChainIdxByProperty = { frequency: [], startTime: [], duration: [] };
         // Clear cache when no selection
-        this._depHighlightCache.noteId = null;
+        this._linkTreeCache = null;
       }
     } catch { this._relDepsIdx = null; this._relRdepsIdx = null; }
  
@@ -1551,15 +1472,12 @@ export class RendererAdapter {
     const t = (typeof timeSec === 'number') ? timeSec : 0;
     // Keep legacy world-x in sync for any consumers reading it prior to render
     this.playheadXWorld = t * this._cfgSX() * (this.currentXScaleFactor || 1.0);
-    // player.js calls this from its rAF loop on EVERY frame, playing or not. Marking the
-    // scene dirty unconditionally kept needsRedraw permanently true, which silently
-    // defeated the redraw gate: a completely idle canvas still paid a full per-note
-    // redraw 60x a second. Only a playhead that actually moved changes any pixels.
-    // (_render derives the playhead X from playheadTimeSec at draw time, and the scale
-    // setters mark their own redraws, so nothing else depends on this being sticky.)
     if (t === this.playheadTimeSec) return;
     this.playheadTimeSec = t;
-    this.needsRedraw = true;
+    // The line is pixel-snapped. At score overview scales, several seconds can
+    // elapse before it reaches another pixel. Camera changes dirty their own frames.
+    const x = this.matrix[0] * this.playheadXWorld + this.matrix[6] - this.canvasOffset.x;
+    if (!this.trackingMode && Math.round(x) !== Math.round(this._lastPlayheadLocalX)) this.needsRedraw = true;
   }
 
   // Public API: set hovered note id for hover ring rendering
@@ -1701,9 +1619,7 @@ export class RendererAdapter {
         if (same) return;
       }
 
-      this._multiSelIds = next;
-      this._resolveMultiSelIndices();
-      this.needsRedraw = true;
+      this.syncMultiSelection(next);
     } catch {
       this._multiSelIds = null;
       this._multiSelNoteIdx = null;
@@ -1711,8 +1627,22 @@ export class RendererAdapter {
     }
   }
 
+  // player.js owns this Set and calls here after each mutation. Keep one copy
+  // of the IDs when committing a large group. The public setter above takes
+  // a snapshot of an arbitrary caller's iterable.
+  syncMultiSelection(ids) {
+    this._multiSelIds = ids?.size ? ids : null;
+    this._resolveMultiSelIndices();
+    this.needsRedraw = true;
+  }
+
   // Public API: current multi-selection as an array of ids (empty when none).
   getMultiSelection() {
+    const rect = this._marqueeRect;
+    if (rect) {
+      const hits = this.pickRectIds(rect.x0, rect.y0, rect.x1, rect.y1);
+      return rect.additive && this._multiSelIds ? [...new Set([...this._multiSelIds, ...hits])] : hits;
+    }
     return this._multiSelIds ? Array.from(this._multiSelIds) : [];
   }
 
@@ -1729,8 +1659,9 @@ export class RendererAdapter {
       const x1 = Number(rect.x1), y1 = Number(rect.y1);
       if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) return;
       const cur = this._marqueeRect;
-      if (cur && cur.x0 === x0 && cur.y0 === y0 && cur.x1 === x1 && cur.y1 === y1) return;
-      this._marqueeRect = { x0, y0, x1, y1 };
+      const additive = !!rect.additive;
+      if (cur && cur.x0 === x0 && cur.y0 === y0 && cur.x1 === x1 && cur.y1 === y1 && cur.additive === additive) return;
+      this._marqueeRect = { x0, y0, x1, y1, additive };
       this.needsRedraw = true;
     } catch {
       this._marqueeRect = null;
@@ -1748,36 +1679,31 @@ export class RendererAdapter {
    * group visibly tears on drop). Half-supporting them was worse than not supporting them.
    */
   pickRect(clientX0, clientY0, clientX1, clientY1) {
+    return this.pickRectIds(clientX0, clientY0, clientX1, clientY1).map(id => ({ type: 'note', id }));
+  }
+
+  _worldRect(x0, y0, x1, y1) {
+    const a = this.screenToWorld(Math.min(x0, x1), Math.min(y0, y1));
+    const b = this.screenToWorld(Math.max(x0, x1), Math.max(y0, y1));
+    return [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)];
+  }
+
+  pickRectIds(x0, y0, x1, y1) {
     const hits = [];
-    try {
-      const cx0 = Math.min(clientX0, clientX1);
-      const cx1 = Math.max(clientX0, clientX1);
-      const cy0 = Math.min(clientY0, clientY1);
-      const cy1 = Math.max(clientY0, clientY1);
-
-      // Notes live in world units: map the rect corners through the same inverse
-      // affine used for point picking. Y is not guaranteed to increase downward in
-      // world space, so re-normalize after the transform.
-      if (this.posSize && this._instanceNoteIds) {
-        const a = this.screenToWorld(cx0, cy0);
-        const b = this.screenToWorld(cx1, cy1);
-        const wx0 = Math.min(a.x, b.x), wx1 = Math.max(a.x, b.x);
-        const wy0 = Math.min(a.y, b.y), wy1 = Math.max(a.y, b.y);
-
-        const N = Math.min(this._instanceNoteIds.length, this.instanceCount | 0);
-        const ps = this.posSize;
-        for (let i = 0; i < N; i++) {
-          const id = this._instanceNoteIds[i] | 0;
-          if (id === 0) continue;
-          const o = i * 4;
-          const x = ps[o + 0];
-          const y = ps[o + 1];
-          if (x > wx1 || (x + ps[o + 2]) < wx0) continue;
-          if (y > wy1 || (y + ps[o + 3]) < wy0) continue;
-          hits.push({ type: 'note', id });
-        }
+    if (!this.posSize || !this._instanceNoteIds) return hits;
+    const [left, minY, right, maxY] = this._worldRect(x0, y0, x1, y1);
+    const ranges = [];
+    if (this._rangeIndex) this._rangeIndex.collect(left, right, ranges, minY, maxY);
+    else ranges.push(0, this.instanceCount);
+    const ps = this.posSize;
+    for (let j = 0; j < ranges.length; j += 2) {
+      for (let i = ranges[j]; i < ranges[j + 1]; i++) {
+        const o = i * 4, x = ps[o], y = ps[o + 1];
+        if (x > right || x + ps[o + 2] < left || y > maxY || y + ps[o + 3] < minY) continue;
+        const id = this._instanceNoteIds[i];
+        if (id) hits.push(id);
       }
-    } catch {}
+    }
     return hits;
   }
 
@@ -1799,10 +1725,8 @@ export class RendererAdapter {
     const noteMap = this._noteIdToIndex || null;
     const noteIdx = [];
     for (const id of sel) {
-      if (noteMap && noteMap.has(id)) {
-        const i = noteMap.get(id);
-        if (i != null && i >= 0 && i < this.instanceCount) noteIdx.push(i);
-      }
+      const i = noteMap?.get(id);
+      if (i != null && i >= 0 && i < this.instanceCount) noteIdx.push(i);
     }
     this._multiSelNoteIdx = noteIdx.length ? noteIdx : null;
     this._multiSelNoteMapRef = noteMap;
@@ -2378,12 +2302,22 @@ export class RendererAdapter {
       uniform float u_layerZ;  // depth
       uniform vec2 u_scale;    // (px per world X, px per world Y)
       uniform vec2 u_dragOffset; // (dx, dw) in world units; 0,0 when not moving (or for anchor)
+      uniform vec4 u_marqueeBounds; // min.xy, max.xy in world units
+      uniform int u_marqueeFilter; // 1 draws hits, -1 draws only the existing group outside it
 
       out vec2 v_uv;
       out vec2 v_noteSize; // CSS px
 
       void main() {
         // Apply drag/resize offset (dx,dw) when provided
+        if (u_marqueeFilter != 0) {
+          bool intersects = all(lessThanEqual(a_posSize.xy, u_marqueeBounds.zw))
+                         && all(greaterThanEqual(a_posSize.xy + a_posSize.zw, u_marqueeBounds.xy));
+          if (intersects != (u_marqueeFilter > 0)) {
+            gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
+            return;
+          }
+        }
         vec2 posAdjusted  = a_posSize.xy + vec2(u_dragOffset.x, 0.0);
         vec2 sizeAdjusted = a_posSize.zw + vec2(u_dragOffset.y, 0.0);
 
@@ -2445,6 +2379,8 @@ export class RendererAdapter {
         this._uniforms.selectionRing.u_borderWidth  = gl.getUniformLocation(p, 'u_borderWidth');
         this._uniforms.selectionRing.u_color        = gl.getUniformLocation(p, 'u_color');
         this._uniforms.selectionRing.u_dragOffset   = gl.getUniformLocation(p, 'u_dragOffset');
+        this._uniforms.selectionRing.u_marqueeFilter = gl.getUniformLocation(p, 'u_marqueeFilter');
+        this._uniforms.selectionRing.u_marqueeBounds = gl.getUniformLocation(p, 'u_marqueeBounds');
       }
     } catch {}
 
@@ -2985,10 +2921,10 @@ export class RendererAdapter {
    * instanced call. Hoisted out of _render() so ring passes that are not tied to the
    * single selected note (dependency rings, multi-selection) can share it.
    */
-  _drawRingIdxList(indices, rgba, borderPx) {
+  _drawRingIdxList(indices, rgba, borderPx, marqueeBounds = null, cacheKey = null) {
     const gl = this.gl;
     if (!gl || !this.selectionRingProgram) return;
-    if (!indices || !indices.length) return;
+    if (!indices?.length && !marqueeBounds) return;
     if (!this.posSize || !this.instanceCount) return;
 
     const rectCss = this._cachedCanvasRect || (this.canvas ? this.canvas.getBoundingClientRect() : null);
@@ -3020,6 +2956,21 @@ export class RendererAdapter {
     if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
 
     gl.bindVertexArray(this.rectVAO);
+    if (marqueeBounds) {
+      gl.uniform4fv(Us.u_marqueeBounds, marqueeBounds);
+      gl.uniform1i(Us.u_marqueeFilter, indices ? -1 : 1);
+      if (!indices) {
+        // The GPU already has every visible note's bounds. A moving marquee
+        // needs just four coordinates until the user commits the selection.
+        gl.uniform2f(Us.u_dragOffset, 0, 0);
+        this._drawVisibleInstances(this.selectionRingProgram, null, this._visibleRanges);
+        gl.uniform1i(Us.u_marqueeFilter, 0);
+        gl.bindVertexArray(null);
+        this._setAttr4Enabled(true);
+        gl.depthMask(true);
+        return;
+      }
+    }
     if (!this._singlePosSizeBuffer) {
       this._singlePosSizeBuffer = gl.createBuffer();
     }
@@ -3027,22 +2978,41 @@ export class RendererAdapter {
     const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
     // The ring shader reads only position/size and a uniform drag offset.
     // Draw consecutive rings with the same offset together, in painter order.
+    // A committed selection has fixed world geometry. Keep each large ring
+    // batch on the GPU across camera frames; drag previews retain their offsets.
+    let saved = null;
+    if (cacheKey && !this._dragActive && indices.length >= 512) {
+      const buffers = this._ringBuffers || (this._ringBuffers = new Map());
+      saved = buffers.get(cacheKey);
+      if (!saved) {
+        saved = { buffer: gl.createBuffer() };
+        buffers.set(cacheKey, saved);
+      }
+    }
+    const upload = !saved || saved.indices !== indices || saved.epoch !== this._posEpoch;
     const need = indices.length * 4;
     if (!this._depRingBatch || this._depRingBatch.length < need) {
       this._depRingBatch = new Float32Array(Math.max(need, 64));
     }
     const batch = this._depRingBatch;
-    let count = 0, moving = false;
+    let count = upload ? 0 : saved.count, moving = false;
     const flush = () => {
       if (uDrag) gl.uniform2f(uDrag, moving ? this._dragOffsetX || 0 : 0, moving ? this._dragOffsetW || 0 : 0);
-      gl.bufferData(gl.ARRAY_BUFFER, batch, gl.DYNAMIC_DRAW, 0, count * 4);
+      if (upload) {
+        gl.bufferData(gl.ARRAY_BUFFER, batch, gl.DYNAMIC_DRAW, 0, count * 4);
+        if (saved) {
+          saved.indices = indices;
+          saved.epoch = this._posEpoch;
+          saved.count = count;
+        }
+      }
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
       count = 0;
     };
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
+    gl.bindBuffer(gl.ARRAY_BUFFER, saved?.buffer || this._singlePosSizeBuffer);
     gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(1, 1);
-    for (const idx of indices) {
+    if (upload) for (const idx of indices) {
       if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
       const shifted = !!(this._dragActive && this._dragFlags?.[idx] === 1 &&
         !(this._dragAnchorIndex != null && idx === (this._dragAnchorIndex | 0)));
@@ -3056,6 +3026,7 @@ export class RendererAdapter {
       count++;
     }
     if (count) flush();
+    if (marqueeBounds) gl.uniform1i(Us.u_marqueeFilter, 0);
 
     // Restore instanced buffer for attribute 1
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
@@ -3067,11 +3038,29 @@ export class RendererAdapter {
     gl.depthMask(true);
   }
 
+  _selectionTrees(module, anchor) {
+    if (!module?.getChildrenTreeByAllProperties) return null;
+    const cached = this._linkTreeCache;
+    if (cached?.module === module && cached.anchor === anchor && cached.pos === this._posEpoch) return cached.trees;
+    const trees = module.getChildrenTreeByAllProperties(anchor);
+    this._linkTreeCache = { module, anchor, pos: this._posEpoch, trees };
+    return trees;
+  }
+
+  _ensureGhostIndices() {
+    if (!this._relRdepsIdx && this._lastSelectedNoteId != null && this._lastSelectedNoteId !== 0) {
+      const ids = this._moduleRef?.getDependentNotes?.(this._lastSelectedNoteId) || [];
+      this._relRdepsIdx = ids.map(id => this._noteIdToIndex.get(id)).filter(i => i != null);
+    }
+    return this._relRdepsIdx;
+  }
+
   // Compute ranges once for all body and overlay passes of this frame.
-  _updateVisibleInstances(vpW) {
+  _updateVisibleInstances(vpW, vpH) {
     const ranges = this._nextVisibleRanges || [];
     const old = this._visibleRanges || [];
     const m = this.matrix;
+    this._detailRanges = ranges;
     if (!this._rangeIndex || m[1] !== 0 || m[3] !== 0 || !(m[0] > 0)) {
       ranges.length = 0;
       ranges.push(0, this.instanceCount);
@@ -3083,12 +3072,68 @@ export class RendererAdapter {
       const pad = 4 / m[0] + Math.max(Math.abs(x0), Math.abs(x1)) * 1e-6
         + 2 * (Math.abs(this._dragOffsetX || 0) + Math.abs(this._dragOffsetW || 0));
       this._rangeIndex.collect(x0 - pad, x1 + pad, ranges);
-    }
-    if (ranges.length !== old.length || ranges.some((v, i) => v !== old[i])) {
-      this._lastTabEpoch = this._lastArrowEpoch = -1;
+      let candidates = 0;
+      for (let j = 0; j < ranges.length; j += 2) candidates += ranges[j + 1] - ranges[j];
+      if (m[4] > 0 && candidates >= 512 && (m[0] < 1 || this.currentXScaleFactor < 1 || candidates > 8192)) {
+        this._detailRanges = this._overviewDetailRanges(vpW, vpH, x0, x1);
+      }
     }
     this._nextVisibleRanges = old;
     this._visibleRanges = ranges;
+    const previous = this._lastDetailRanges;
+    const next = this._detailRanges;
+    if (!previous || next.length !== previous.length || next.some((v, i) => v !== previous[i])) {
+      this._lastDetailRanges = next.slice();
+      this._lastTabEpoch = this._lastArrowEpoch = -1;
+      this._textDirty = true;
+    }
+  }
+
+  // Bodies, selection and picking keep the full geometry. At overview scales
+  // only draw controls which fit their note; when they overlap heavily, retain
+  // the selected/hovered controls. Query a margin around the view so following
+  // the playhead can reuse the result without scanning notes on every frame.
+  _overviewDetailRanges(vpW, vpH, x0, x1) {
+    const m = this.matrix, scale = m[0];
+    const y0 = (this.canvasOffset.y - m[7]) / m[4], y1 = y0 + vpH / m[4];
+    let cache = this._overviewDetails;
+    const budget = Math.max(128, Math.min(1024, Math.floor(vpW * vpH / (32 * 24))));
+    if (!cache || cache.pos !== this._posEpoch || cache.drag !== this._dragEpoch ||
+        cache.sx !== scale || cache.sy !== m[4] || cache.budget !== budget ||
+        x0 < cache.x0 || x1 > cache.x1 || y0 < cache.y0 || y1 > cache.y1) {
+      const padX = (x1 - x0) / 4, padY = (y1 - y0) / 4;
+      cache = this._overviewDetails = {
+        x0: x0 - padX, x1: x1 + padX, y0: y0 - padY, y1: y1 + padY,
+        sx: scale, sy: m[4], pos: this._posEpoch, drag: this._dragEpoch, budget,
+        ranges: [], crowded: false
+      };
+      if (this._cfgNoteH() * 2 * m[4] >= 8) {
+        const blocks = [];
+        const dx = Math.abs(this._dragOffsetX || 0), dw = Math.abs(this._dragOffsetW || 0);
+        this._rangeIndex.collect(cache.x0 - dx - dw, cache.x1 + dx + dw, blocks);
+        let count = 0;
+        for (let j = 0; j < blocks.length && !cache.crowded; j += 2) {
+          for (let i = blocks[j]; i < blocks[j + 1]; i++) {
+            const o = i * 4, p = this.posSize, w = p[o+2] + dw, h = p[o+3];
+            if (w * scale < 10 || h * m[4] < 8 || p[o] - dx > cache.x1 ||
+                p[o] + dx + w < cache.x0 || p[o+1] > cache.y1 || p[o+1] + h < cache.y0) continue;
+            const ranges = cache.ranges;
+            if (ranges.length && ranges[ranges.length - 1] === i) ranges[ranges.length - 1]++;
+            else ranges.push(i, i + 1);
+            // Fragmented painter order would otherwise issue a GL draw per note
+            // in every controls pass, even for a visually very small footprint.
+            if (++count > budget || ranges.length > 256) { cache.crowded = true; break; }
+          }
+        }
+      }
+    }
+    if (!cache.crowded) return cache.ranges;
+    const selected = this._noteIdToIndex?.get(this._lastSelectedNoteId);
+    const hovered = this._noteIdToIndex?.get(this._hoveredNoteId);
+    const ranges = [];
+    if (hovered != null && hovered !== selected) ranges.push(hovered, hovered + 1);
+    if (selected != null) ranges.push(selected, selected + 1);
+    return ranges;
   }
 
   _uploadChangedInstances(slots) {
@@ -3110,14 +3155,14 @@ export class RendererAdapter {
 
   _uploadVisibleRegions(data) {
     const gl = this.gl;
-    for (let j = 0; j < this._visibleRanges.length; j += 2) {
-      const start = this._visibleRanges[j], end = this._visibleRanges[j + 1];
+    for (let j = 0; j < this._detailRanges.length; j += 2) {
+      const start = this._detailRanges[j], end = this._detailRanges[j + 1];
       if (end > start) gl.bufferSubData(gl.ARRAY_BUFFER, start * 16, data, start * 4, (end - start) * 4);
     }
   }
 
-  _drawVisibleInstances(program, regionBuffer = null) {
-    const gl = this.gl, ranges = this._visibleRanges;
+  _drawVisibleInstances(program, regionBuffer = null, ranges = this._detailRanges) {
+    const gl = this.gl;
     if (ranges.length === 2 && ranges[0] === 0 && ranges[1] === this.instanceCount) {
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
       return;
@@ -3180,7 +3225,7 @@ export class RendererAdapter {
     this.canvasOffset = { x: rectCss.left, y: rectCss.top };
     
 
-    this._updateVisibleInstances(vpW);
+    this._updateVisibleInstances(vpW, vpH);
 
     // Tails first, under the note bodies: a note that follows paints over the tail
     // of the one before. Hidden while a drag previews new positions (they return
@@ -3250,7 +3295,7 @@ export class RendererAdapter {
 
       // Upload per-instance flags (silence mask) is handled during sync() to avoid per-frame uploads
  
-      this._drawVisibleInstances(prog);
+      this._drawVisibleInstances(prog, null, this._visibleRanges);
       gl.bindVertexArray(null);
 
       // Second pass for borders is no longer needed because border is integrated
@@ -3312,7 +3357,7 @@ export class RendererAdapter {
         for (const prop of ['startTime', 'frequency', 'duration']) {
           const rdepsIdx = this._relRdepsIdxByProperty?.[prop];
           if (rdepsIdx?.length) {
-            this._drawRingIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS);
+            this._drawRingIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS, null, 'child:' + prop);
           }
         }
 
@@ -3321,7 +3366,7 @@ export class RendererAdapter {
         for (const prop of ['startTime', 'frequency', 'duration']) {
           const chainIdx = this._relDepsChainIdxByProperty?.[prop];
           if (chainIdx?.length) {
-            this._drawRingIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
+            this._drawRingIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS, null, 'parent:' + prop);
           }
         }
       }
@@ -3330,9 +3375,12 @@ export class RendererAdapter {
     // Multi-selection group ring (notes) — above the dependency rings, below the single
     // selection ring, so the "current" note keeps its normal ring on top.
     try {
-      if (this._ensureMultiSelIndices() && this._multiSelNoteIdx) {
-        this._drawRingIdxList(this._multiSelNoteIdx, this._multiSelRingRgba(), this._multiSelRingPx());
+      const rect = this._marqueeRect;
+      const bounds = rect && this._worldRect(rect.x0, rect.y0, rect.x1, rect.y1);
+      if ((!rect || rect.additive) && this._ensureMultiSelIndices() && this._multiSelNoteIdx) {
+        this._drawRingIdxList(this._multiSelNoteIdx, this._multiSelRingRgba(), this._multiSelRingPx(), bounds, 'group');
       }
+      if (bounds) this._drawRingIdxList(null, this._multiSelRingRgba(), this._multiSelRingPx(), bounds);
     } catch {}
 
     // Selection outline for currently selected note (rounded, zoom-aware)
@@ -3842,60 +3890,43 @@ export class RendererAdapter {
 
   // CPU picking against rounded-rect geometry. Returns top-most note id or null.
   pickAt(clientX, clientY, expandCssPx = 2) {
+    return this._pickNotes(clientX, clientY, expandCssPx, null);
+  }
+
+  // Stack and top-only queries share the same exact shape test and painter order.
+  pickStackAt(clientX, clientY, expandCssPx = 2) {
+    const hits = [];
+    this._pickNotes(clientX, clientY, expandCssPx, hits);
+    return hits;
+  }
+
+  _pickNotes(clientX, clientY, expandCssPx, hits) {
     if (!this.posSize || !this._instanceNoteIds) return null;
-
-    // Convert hit expansion from CSS px to world units for fast AABB reject
-    const exWU = (expandCssPx || 0) / (this.xScalePxPerWU || 1.0);
-    const eyWU = (expandCssPx || 0) / (this.yScalePxPerWU || 1.0);
-
     const p = this.screenToWorld(clientX, clientY);
-    const N = this._instanceNoteIds.length;
-
-    // Iterate from top-most (last drawn) to bottom
-    for (let i = N - 1; i >= 0; i--) {
-      const id = this._instanceNoteIds[i] | 0;
-      const o = i * 4;
-
-      // Quick AABB test in world units (expanded)
-      const x = this.posSize[o + 0] - exWU;
-      const y = this.posSize[o + 1] - eyWU;
-      const w = this.posSize[o + 2] + 2 * exWU;
-      const h = this.posSize[o + 3] + 2 * eyWU;
-      if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) continue;
-
-      // Precise rounded-rect test in CSS px space to avoid corner-selection artifacts
-      if (this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) {
-        return { type: 'note', id };
+    const ex = expandCssPx / (this.xScalePxPerWU || 1);
+    const ey = expandCssPx / (this.yScalePxPerWU || 1);
+    const left = p.x - ex, right = p.x + ex, top = p.y - ey, bottom = p.y + ey;
+    const ranges = this._pickRanges ||= [];
+    if (this._rangeIndex && !this._dragActive) {
+      this._rangeIndex.collect(left, right, ranges, top, bottom);
+    } else {
+      ranges.length = 2;
+      ranges[0] = 0;
+      ranges[1] = this._instanceNoteIds.length;
+    }
+    const rects = this.posSize;
+    for (let r = ranges.length - 2; r >= 0; r -= 2) {
+      for (let i = ranges[r + 1] - 1; i >= ranges[r]; i--) {
+        const o = i * 4;
+        if (rects[o] > right || rects[o] + rects[o + 2] < left ||
+            rects[o + 1] > bottom || rects[o + 1] + rects[o + 3] < top) continue;
+        if (!this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) continue;
+        const hit = { type: 'note', id: this._instanceNoteIds[i] };
+        if (!hits) return hit;
+        hits.push(hit);
       }
     }
     return null;
-  }
-
-  // CPU stack picking: return all hit notes top-most first (rounded-rect aware)
-  pickStackAt(clientX, clientY, expandCssPx = 2) {
-    if (!this.posSize || !this._instanceNoteIds) return [];
-    const exWU = (expandCssPx || 0) / (this.xScalePxPerWU || 1.0);
-    const eyWU = (expandCssPx || 0) / (this.yScalePxPerWU || 1.0);
-    const p = this.screenToWorld(clientX, clientY);
-    const N = this._instanceNoteIds.length;
-    const hits = [];
-    for (let i = N - 1; i >= 0; i--) {
-      const id = this._instanceNoteIds[i] | 0;
-      const o = i * 4;
-
-      // Quick AABB test in world units (expanded)
-      const x = this.posSize[o + 0] - exWU;
-      const y = this.posSize[o + 1] - eyWU;
-      const w = this.posSize[o + 2] + 2 * exWU;
-      const h = this.posSize[o + 3] + 2 * eyWU;
-      if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) continue;
-
-      // Precise rounded-rect hit
-      if (this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) {
-        hits.push({ type: 'note', id });
-      }
-    }
-    return hits;
   }
   /**
    * Hit test sub-region for the top-most note under the given client point.
@@ -3904,10 +3935,8 @@ export class RendererAdapter {
    * - Respects rounded-rect interior via pickAt() (corner-safe); only runs when a note body is hit.
    * - Silence notes do not report octaveUp/Down regions.
    */
-  hitTestSubRegion(clientX, clientY) {
+  hitTestSubRegion(clientX, clientY, hit = this.pickAt(clientX, clientY, 2)) {
     try {
-      // First, hit test the note body with rounded-corner-safe CPU picking
-      const hit = this.pickAt(clientX, clientY, 2);
       if (!hit || hit.type !== 'note') return null;
       const id = hit.id | 0;
 
@@ -3916,6 +3945,14 @@ export class RendererAdapter {
         ? this._noteIdToIndex.get(id)
         : undefined;
       if (idx == null || idx < 0 || idx >= this.instanceCount) {
+        return { id, region: 'body' };
+      }
+
+      // Only rendered controls can receive a gesture. In dense overviews most
+      // note bodies have no tabs or arrows, even within the normal edge tolerance.
+      const details = this._detailRanges;
+      if (!this.drawNoteOverlays || (details && details !== this._visibleRanges &&
+          !details.some((first, j) => j % 2 === 0 && first <= idx && idx < details[j + 1]))) {
         return { id, region: 'body' };
       }
 
@@ -6804,6 +6841,17 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       if (!gl || !this.canvas) return;
       if (!this.drawNoteOverlays || !this.instanceCount) return;
 
+      const ranges = this._detailRanges;
+      if (!ranges.length) {
+        // Measure ids are appended later in the same glyph pass. Start that
+        // list fresh so cached note labels cannot survive a zoom into overview.
+        this._glyphRunsCache = null;
+        this._atlasGlyphCache = null;
+        this._deferredGlyphRuns = [];
+        this._textRebuildThisFrame = false;
+        return;
+      }
+
       // Ensure instanced attribute 4 (region attrib used by tab/arrow/divider masks) is enabled.
       // Note body pass disables attrib 4 via _setAttr4Enabled(false); without re-enabling,
       // tab regions, octave backgrounds, and fraction divider bands will not render at idle.
@@ -6813,7 +6861,6 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       const vpW = Math.max(1, rectCss.width);
       const vpH = Math.max(1, rectCss.height);
 
-      const ranges = this._visibleRanges;
       const m = this.matrix;
       const off = this.canvasOffset || { x: 0, y: 0 };
 
@@ -9612,7 +9659,7 @@ try {
       };
 
       // Hit test all measure triangles (CSS px). Returns top-most first (reverse draw order).
-      proto.pickTrianglesAt = function(clientX, clientY) {
+      proto.pickTrianglesAt = function(clientX, clientY, firstOnly = false) {
         try {
           const css = this._measureTriCss;
           const ids = this._measureTriIds;
@@ -9630,38 +9677,31 @@ try {
             const cx = left + w,       cy = top + h;       // bottom right
             if (this._pointInTriangle(px, py, ax, ay, bx, by, cx, cy)) {
               hits.push({ type: 'measure', id: ids[i] });
+              if (firstOnly) break;
             }
           }
           return hits;
         } catch { return []; }
       };
 
+      // A hover/ordinary hit needs only the first item in painter order.
+      // A supplied note hit (including null) lets hover reuse its subregion probe.
+      proto.pickTopAt = function(clientX, clientY, expandCssPx = 2, noteHit) {
+        return this.pickTrianglesAt(clientX, clientY, true)[0] ||
+          this.pickBaseCircleAt(clientX, clientY)[0] ||
+          (noteHit === undefined ? this.pickAt(clientX, clientY, expandCssPx) : noteHit) ||
+          this.pickReferenceLinesAt(clientX, clientY, true)[0] || null;
+      };
+
       // Mixed-type stack at client coords: triangles (top), base, then notes (existing stack)
       proto.pickAllAt = function(clientX, clientY, expandCssPx = 2) {
         try {
-          const list = [];
-          // Triangles first (on top of notes visually)
-          try {
-            const tHits = this.pickTrianglesAt(clientX, clientY);
-            if (tHits && tHits.length) list.push(...tHits);
-          } catch {}
-          // Base circle next
-          try {
-            const bHits = this.pickBaseCircleAt(clientX, clientY);
-            if (bHits && bHits.length) list.push(...bHits);
-          } catch {}
-          // Notes (existing CPU stack)
-          try {
-            const nHits = this.pickStackAt(clientX, clientY, expandCssPx) || [];
-            // Already includes { type:'note', id }
-            list.push(...nHits);
-          } catch {}
-          // Reference lines last: they cross everything, so anything else wins
-          try {
-            const rHits = this.pickReferenceLinesAt(clientX, clientY);
-            if (rHits && rHits.length) list.push(...rHits);
-          } catch {}
-          return list;
+          const hits = this.pickTrianglesAt(clientX, clientY);
+          const base = this.pickBaseCircleAt(clientX, clientY)[0];
+          if (base) hits.push(base);
+          this._pickNotes(clientX, clientY, expandCssPx, hits);
+          for (const line of this.pickReferenceLinesAt(clientX, clientY)) hits.push(line);
+          return hits;
         } catch { return []; }
       };
     }
@@ -10062,6 +10102,7 @@ try {
         layout(location=2) in vec2 a_pFlags;      // (p0Drag, p1Drag) flags for horizontal GPU drag
 
         uniform vec2  u_viewport;                 // (canvas CSS w,h)
+        uniform vec2 u_pan;                       // from the view that built these endpoints
         uniform float u_thickness;                // CSS px
         uniform float u_dragCssX;                 // CSS px horizontal drag offset
 
@@ -10078,7 +10119,7 @@ try {
 
           float s = a_unit.x;                        // along the line
           float t = (a_unit.y - 0.5) * u_thickness;  // across thickness centered at 0
-          vec2 pos = mix(p0, p1, s) + n * t;
+          vec2 pos = mix(p0, p1, s) + n * t + u_pan;
 
           float ndcX = (pos.x / u_viewport.x) * 2.0 - 1.0;
           float ndcY = 1.0 - (pos.y / u_viewport.y) * 2.0;
@@ -10097,6 +10138,7 @@ try {
         this._uniforms.linkLine = this._uniforms.linkLine || {};
         if (this.linkLineProgram) {
           this._uniforms.linkLine.u_viewport  = gl.getUniformLocation(this.linkLineProgram, "u_viewport");
+          this._uniforms.linkLine.u_pan = gl.getUniformLocation(this.linkLineProgram, "u_pan");
           this._uniforms.linkLine.u_thickness = gl.getUniformLocation(this.linkLineProgram, "u_thickness");
           this._uniforms.linkLine.u_color     = gl.getUniformLocation(this.linkLineProgram, "u_color");
           this._uniforms.linkLine.u_dragCssX  = gl.getUniformLocation(this.linkLineProgram, "u_dragCssX");
@@ -10310,7 +10352,14 @@ try {
 
           // Check if we need to rebuild endpoints (epoch-gated to avoid redundant CPU work)
           const anchorChanged = (this._lastLinkAnchorId !== anchorId);
-          const viewChanged   = (this._lastLinkViewEpoch !== this._viewEpoch);
+          // A pan translates every note endpoint equally. Measure markers can
+          // be screen-anchored vertically, so rebuild for vertical moves there.
+          const basis = this._linkBasis, m = this.matrix;
+          const tx = m[6] - this.canvasOffset.x, ty = m[7] - this.canvasOffset.y;
+          const translate = basis && !this._dragActive && basis.config === this._config &&
+            basis.sx === m[0] && basis.sy === m[4] && basis.b === m[1] && basis.c === m[3] &&
+            basis.w === vpW && basis.h === vpH && (!this._measureTriIds?.length || basis.ty === ty);
+          const viewChanged = this._lastLinkViewEpoch !== this._viewEpoch && !translate;
           const posChanged    = (this._lastLinkPosEpoch !== this._posEpoch);
           const prosChanged   = (this._lastLinkProspectiveParentId !== this._prospectiveParentId);
           const triChanged    = (this._lastLinkTriDataEpoch !== this._triDataEpoch);
@@ -10445,7 +10494,7 @@ try {
                   const yCenterWorld = this._noteCenterY(baseFreq);
                   return toLocalCss(xCenterWorld, yCenterWorld);
                 }
-                if (isMeasureNoteId(numId)) {
+                if (this._measureTriIdToIndex?.has(numId)) {
                   // measure triangle
                   const triIdx = (this._measureTriIdToIndex && this._measureTriIdToIndex.get)
                     ? this._measureTriIdToIndex.get(numId)
@@ -10639,26 +10688,36 @@ try {
                 // (tens of thousands of objects per frame with a 5000-dependent hub), which is
                 // what kept triggering GC mid-drag. Both epochs in the key are bumped by sync(),
                 // so any real change to the module still invalidates it.
-                const treeKey = Number(anchorId) + '|' + (this._posEpoch || 0) + '|' + (this._sceneEpoch || 0);
-                let allTrees;
-                if (this._linkTreeCache && this._linkTreeCache.key === treeKey) {
-                  allTrees = this._linkTreeCache.trees;
-                } else {
-                  allTrees = mref.getChildrenTreeByAllProperties(Number(anchorId));
-                  this._linkTreeCache = { key: treeKey, trees: allTrees };
-                }
+                const allTrees = this._selectionTrees(mref, Number(anchorId));
 
                 for (const prop of ['frequency', 'startTime', 'duration']) {
                   const edges = allTrees.edgesByProperty[prop];
                   if (!edges?.length) continue;
 
+                  // At overview scales many siblings end in the same pixel.
+                  // One segment represents those coincident paths; the full tree
+                  // and its per-note rings still retain every relationship.
+                  const siblings = edges.length > 2048 && !this._dragActive &&
+                    (this.xScalePxPerWU < 1 || this.currentXScaleFactor < 1) ? new Map() : null;
+                  let lastParent = null, parentCenter = null;
                   for (const edge of edges) {
                     // During drag, only include edges where child is in the moving set
                     if (movingSet && !movingSet.has(edge.childId)) continue;
 
-                    const parentCenter = getCenterForId(edge.parentId);
+                    if (edge.parentId !== lastParent) {
+                      parentCenter = getCenterForId(edge.parentId);
+                      lastParent = edge.parentId;
+                      siblings?.clear();
+                    }
                     const childCenter = getCenterForId(edge.childId);
                     if (!parentCenter || !childCenter) continue;
+                    if (siblings) {
+                      const x = Math.round(childCenter.x), y = Math.round(childCenter.y);
+                      let row = siblings.get(y);
+                      if (!row) siblings.set(y, row = new Set());
+                      if (row.has(x)) continue;
+                      row.add(x);
+                    }
 
                     // Add segment from parent to child
                     rdepsListByProp[prop].push(parentCenter.x, parentCenter.y, childCenter.x, childCenter.y);
@@ -10847,6 +10906,7 @@ try {
             this._lastLinkDragEpoch = this._dragEpoch;
             this._lastLinkProspectiveParentId = this._prospectiveParentId;
             this._lastLinkTriDataEpoch = this._triDataEpoch;
+            this._linkBasis = { sx: m[0], sy: m[4], b: m[1], c: m[3], config: this._config, tx, ty, w: vpW, h: vpH };
           } // end if (selC && needsRebuild)
 
           // Draw link lines if selection exists (uses cached/fresh endpoints)
@@ -10858,6 +10918,7 @@ try {
             const uTh  = U ? U.u_thickness : gl.getUniformLocation(this.linkLineProgram, 'u_thickness');
             const uCol = U ? U.u_color     : gl.getUniformLocation(this.linkLineProgram, 'u_color');
             if (uVP)  gl.uniform2f(uVP, vpW, vpH);
+            gl.uniform2f(U.u_pan, tx - (this._linkBasis?.tx ?? tx), ty - (this._linkBasis?.ty ?? ty));
             // Fixed 2px thickness for link lines (selected or dragging)
             if (uTh)  gl.uniform1f(uTh, 2.0);
             // Set drag delta uniform (CSS px); endpoints move via GPU flags
@@ -11052,7 +11113,7 @@ try {
             // Dependent ghosts (translucent) — show where dependents will move/shift
             try {
               const stDO = this._dragOverlay || null;
-              if (this.drawDragGhosts && stDO && (stDO.type === 'move' || stDO.type === 'resize') && Array.isArray(this._relRdepsIdx) && this._relRdepsIdx.length && this.selectionFillProgram) {
+              if (this.drawDragGhosts && stDO && (stDO.type === 'move' || stDO.type === 'resize') && this._ensureGhostIndices()?.length && this.selectionFillProgram) {
                 const dxWU   = ((stDO.dxSec || 0) * this._cfgSX()) * (this.currentXScaleFactor || 1.0);
                 const ddurWU = ((stDO.ddurSec || 0) * this._cfgSX()) * (this.currentXScaleFactor || 1.0);
 
@@ -11498,14 +11559,17 @@ try {
     };
 
     // Within 4 CSS px of a drawn line (and, for a key change, at or after its start).
-    proto.pickReferenceLinesAt = function (clientX, clientY) {
+    proto.pickReferenceLinesAt = function (clientX, clientY, firstOnly = false) {
       const css = this._refLineCss;
       if (!css || !css.length) return [];
       const px = clientX - (this.canvasOffset?.x ?? 0);
       const py = clientY - (this.canvasOffset?.y ?? 0);
       const hits = [];
       for (const r of css) {
-        if (px >= r.x0 - 2 && Math.abs(py - r.y) <= 4) hits.push({ type: 'reference', id: r.id });
+        if (px >= r.x0 - 2 && Math.abs(py - r.y) <= 4) {
+          hits.push({ type: 'reference', id: r.id });
+          if (firstOnly) break;
+        }
       }
       return hits;
     };
