@@ -192,7 +192,7 @@ pass you can actually hear.
 | Method | Location | Behaviour |
 |---|---|---|
 | `setRate(rate)` | `:627` | Live tempo: score seconds per clock second, clamped to 0.1–10. Re-times the playback in flight from 50 ms ahead of now (later voices are cancelled and scheduled again) and every later playback. Returns the rate in force. |
-| `scoreElapsed()` | `:610` | Score seconds elapsed in the playback in flight, through its time map; negative during the 0.1 s lead-in; `null` when nothing plays. The playhead follows it. |
+| `scoreElapsed()` | `:610` | Score seconds elapsed in the playback in flight, through its time map; negative during startup; `null` when nothing plays. The playhead stays at the chosen position until the first attack. |
 | `rate` | field | The live rate (1 = as written). Not saved: `player.js` resets it on every module load. |
 
 The mechanics, and why the loop seam survives a change, are in
@@ -204,31 +204,22 @@ The mechanics, and why the loop seam survives a change, are in
 await audioEngine.pauseFade(0.2);
 ```
 
-Fades every active voice to zero over `rampTime` (default `GENERAL_VOLUME_RAMP_TIME`, 0.2 s), then
-tears down with `stopAll(0)` — zero, because the voices are already silent and there is nothing left
-to declick.
-
-The teardown timer is **cancellable** (`_pauseFadeTimer` / `_pauseFadeResolve`). `_stopStreaming()`
-clears it and settles the promise, so a fast pause → play cannot let a stale timer `stopAll()` the
-new playback.
+Each playback has a gain node for each instrument, just before its dry and
+reverb paths. Play opens these gains over 8 ms. Pause closes them over 200 ms
+on the audio clock while the sounding notes follow their own envelopes.
+Pending attacks are cancelled. A timer resolves the UI promise, so a suspended
+context can finish the fade when its audio clock resumes.
 
 ## stopAll()
 
 ```javascript
-audioEngine.stopAll();          // 20 ms declick fade — the default
-audioEngine.stopAll(0);         // no fade; only correct if you already faded
+audioEngine.stopAll();  // 20 ms fade
 ```
 
-`stopAll(fadeSec = DECLICK_FADE)` (`:1023`). The 20 ms fade is the default for a reason, and it is
-the fix for the "pshhh" on Stop:
-
-> Cutting a sounding voice with `stop(now)` + `disconnect()` steps the bus from the voice's
-> instantaneous sample value to zero within one sample. Measured across a sweep of cut phases, that
-> step reaches **17.5×** the natural slew of the sustain it interrupts — a broadband edge. The reverb
-> send runs at unity, so it hits the convolver and smears across the IR's full length as a tick plus
-> hiss: 40 dB of splatter into 1–5 kHz and 57 dB above 5 kHz that has no business being there.
-
-Only a **mid-note** Stop ever clicked. Pause was never affected (it already ramped).
+Stop fades the outgoing playback from its current level and detaches its voices
+as their sources end. A rapid restart gets fresh gain nodes, so the outgoing
+fade can finish independently of the new attack. Clicking empty canvas while a
+piece plays uses this same fade and parks the playhead at the selected time.
 
 ## finish(): the end of a piece rings out
 
@@ -241,7 +232,7 @@ loading a module still cut the tails.
 
 ## The voice limit
 
-At most `audio.maxVoices` voices sound at once: the graph holds the setting as `graph.maxVoices`
+The release-tail budget is set by `audio.maxVoices`, available to the engine as `graph.maxVoices`
 (Settings → Audio → **Most voices at once**: 128 to 4096), and `MAX_VOICES = 256` (`:27`) is its default and
 the fallback (`:853`). `_makeRoomAt(start)` (`:852`) runs before
 each voice is connected: while that many voices that are not already fading sound at the new voice's start,
@@ -251,9 +242,6 @@ its note-off is never stolen, so a module with more notes held at once than the 
 rather than cutting a held note. `voiceStats` (`:76`) counts the peak number of voices in flight and
 the voices stolen. Measured peaks are in `design/phase-i-instruments.md` §1.4: 39 voices on the canon
 with 3 s tails, 183 on the heaviest stress module.
-
-Pass `0` only when the caller has already faded the voices to zero. `pauseFade()` is the one caller
-that does.
 
 ## setVolume()
 

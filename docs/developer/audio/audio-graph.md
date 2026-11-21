@@ -27,6 +27,8 @@ It is constructed once, by `AudioEngine`'s constructor (`audio-engine.js:68`), a
 ```
 per note:  voice ──► voiceGain (ADSR; gain.value starts at 0) ──► [StereoPanner]* ──┐
                                                                                     ▼
+                                                        transport gain (one per instrument)
+                                                                   │
                                                         instrumentBus (GainNode, unity)
                                                                    │
                                        dry (always unity) ─────────┼─────────────────┐

@@ -175,7 +175,7 @@ still in `activeOscillators` with their release tails scheduled. So a note's rel
 tail ring across the boundary exactly as they would mid-module.
 
 ::: danger Do not implement looping by calling play() again
-`play()` re-anchors at `ctx.currentTime + 0.1` and `_stopStreaming()`s the pass in flight — a **≥100 ms
+`play()` re-anchors after the startup lead and `_stopStreaming()`s the pass in flight — a **≥100 ms
 hole** every lap, plus a cut tail. The pump's wrap exists precisely to avoid this.
 :::
 
@@ -265,7 +265,7 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 
 | Action | What actually happens |
 |---|---|
-| Pause | `audioEngine.pauseFade()` — 200 ms fade, then `stopAll(0)`. The streaming state is dropped. |
+| Pause | `audioEngine.pauseFade()` — The engine stops scheduling and fades the current playback over 200 ms. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
 | The module's end | `audioEngine.finish()` — scheduling stops; the voices still sounding ring out their releases and stop themselves. A new Play cuts what is left. |
 | Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:3588`). |
@@ -274,6 +274,22 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.
 
 ## Verifying a change
+
+For a real score, capture the signal after the master limiter and compare note
+onsets with the loaded score. The following command uses the file picker, sets
+the tempo through the transport, then plays through the reverb tail.
+
+```sh
+node scripts/perf/check-file-audio.mjs http://localhost:3000 score.json report.json --bpm=300
+```
+
+On a 44,307-note sine score at 300 BPM in Chrome 157, the original build
+submitted every onset on time but reported 27.27 seconds of output underruns.
+With the revised scheduler and renderer, all 44,307 onsets had at least 90 ms
+of lead. The recorded output contained zero clipped samples or unexpected
+silent 20 ms windows. The device reported one 8.6 ms startup underrun, also
+observed with an idle audio graph. Separate pointer tests parked the playhead
+at score times 54 s and 44 s and resumed through both passages.
 
 Screenshots cannot show that the pump keeps handing out voices past the end of a module. Drive the
 real app instead:
