@@ -39,8 +39,7 @@ With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/modul
 | `startTime` | `'0'` | 0 s |
 | `duration` | `'1'` | 1 s |
 
-The BaseNote holds the only absolute values in a module: a frequency in Hz, a start and a duration in
-seconds. Its duration is the **time unit** (`base.d`), one beat if you count in beats. Nothing stores a
+The BaseNote supplies the score’s reference pitch, origin and **time unit** (`base.d`). Other notes can use literal Hz or seconds, or derive these quantities from another note. IDs and start times do not determine evaluation order. In the startup module, note 81 takes its pitch from the later note 83 while note 72 takes its pitch from note 81. Nothing stores a
 tempo; `60 / module.getTimeUnit()` is a read-only view of it.
 
 The BaseNote a fresh user actually sees comes from `public/modules/defaultModule.json`: frequency

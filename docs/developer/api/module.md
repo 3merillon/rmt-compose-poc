@@ -44,9 +44,7 @@ Any key you do not override falls back to these. They are **expression strings**
 | `startTime` | `'0'` | 0 s |
 | `duration` | `'1'` | 1 s, the time unit |
 
-The BaseNote holds the only absolute values in a module: a frequency in Hz, a start and a duration
-in seconds. Its duration is the *time unit* every other duration relates to (`base.d`), one beat if
-you count in beats. Nothing stores a tempo; `60 / module.getTimeUnit()` is the tempo as a view. See
+The BaseNote supplies a reference frequency in Hz and a time origin in seconds. Its duration supplies the time unit (`base.d`). Notes may also use literal seconds or hertz. Nothing stores a tempo; `60 / module.getTimeUnit()` is the tempo as a view. See
 [`getTimeUnit()`](#gettimeunit). `createModuleJSON()` writes source text verbatim, so a saved
 module stays in the syntax it was written in.
 
@@ -68,7 +66,7 @@ too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js`).
 module.baseNote  // Note — the same object as module.notes[0]
 ```
 
-The reference note. Everything else in a composition is ultimately expressed against it.
+The reference note. Expressions such as `base.f` and `base.d` read its properties.
 
 ### nextId
 

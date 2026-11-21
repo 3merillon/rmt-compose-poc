@@ -30,7 +30,7 @@ A note has six variables, addressed by the `VAR` indices in `src/binary-note.js`
 | 4 | `ATTACK` | `attack` | interpretation |
 | 5 | `RELEASE` | `release` | interpretation |
 
-`FIRST_INTERPRETATION_VAR` is `3`. The language variables relate a note to other notes; the BaseNote holds the only absolute values (a frequency in Hz, a start and a duration in seconds, with `base.d` the time unit). The interpretation variables say how a note sounds: `amplitude` is a relative gain, `attack` and `release` are shares of the note's own duration. There is no stored tempo, beats-per-measure or measure length, and no computed measure length: a measure bar is an ordinary note whose duration is its length.
+`FIRST_INTERPRETATION_VAR` is `3`. The language variables relate a note to other notes; the BaseNote supplies the reference pitch, origin and time unit (`base.d`). The evaluator also accepts literal Hz and seconds in other notes. The interpretation variables say how a note sounds: `amplitude` is a relative gain, `attack` and `release` are shares of the note's own duration. There is no stored tempo, beats-per-measure or measure length, and no computed measure length: a measure bar is an ordinary note whose duration is its length.
 
 ## The machine
 

@@ -107,7 +107,7 @@ This is every topic in `src/` at the current commit. Payloads are exact.
 | `player:requestPause` | — | modals, workspace commits, history restore, the note widget | `player.js` — stops playback before a mutating edit |
 | `player:octaveChange` | `{ noteId, direction: 'up' \| 'down' }` | the ▲/▼ arrows (note widget and canvas), the perf harness | `player.js` — applies the arrow interval to the frequency expression |
 | `player:selectNote` | `{ noteId }` | note/measure creation, so the new note lands selected | `player.js` |
-| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library icon is dropped on a note | `player.js` — grafts the module in |
+| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library tile is dropped on a note, a measure triangle or the BaseNote | `player.js` — grafts the module in |
 
 ### history (undo / redo)
 
@@ -127,11 +127,11 @@ The WebGL2 workspace previews a gesture on the GPU and emits a commit event on r
 | Event | Payload | Emitted on |
 |---|---|---|
 | `workspace:noteMoveCommit` | `{ noteId, newStartSec }` | drag of a single note |
-| `workspace:groupMoveCommit` | `{ ids, deltaSec }` | drag of a multi-selection |
+| `workspace:groupMoveCommit` | `{ ids, deltaSec }` | drag of a selected note or triangle in a group |
 | `workspace:noteResizeCommit` | `{ noteId, newDurationSec }` | drag of a note's right edge |
 | `workspace:measureResizeCommit` | `{ measureId, newStartSec }` | drag of a measure bar |
-| `workspace:marqueeCommit` | `{ ids, additive }` | marquee release — **emitted even when `ids` is empty**, so a drag across nothing clears the selection |
-| `workspace:multiSelectToggle` | `{ id }` | long-press on a note (the touch path into multi-select) |
+| `workspace:marqueeCommit` | `{ ids, additive, touch }` | Rectangle release. IDs can include note bodies and measure handles. An empty additive rectangle preserves the active group. |
+| `workspace:multiSelectToggle` | `{ id, touch? }` | Shift-click an item, or long-press a note or triangle on touch. The hold toggles before a subsequent drag. |
 
 All six are consumed by `player.js`.
 

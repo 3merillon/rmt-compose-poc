@@ -46,7 +46,7 @@ Choose a name from the dropdown and a **`Save`** button appears. Click it to pin
 
 Both actions pause playback and can be undone.
 
-Measure bars have no instrument — they carry only a start time, so the row is absent.
+A measure bar carries a start time and duration. It is silent and has no instrument row.
 
 ### For everything else
 

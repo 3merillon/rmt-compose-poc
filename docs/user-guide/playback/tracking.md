@@ -9,7 +9,7 @@ description: Keep the playhead centred while a module plays, and understand what
 
 ## Turning it on
 
-The toggle is in the **right-hand group of the top bar**, between **Reset View** and the settings gear — not next to the transport, which is on the left.
+The toggle is in the **right-hand group of the top bar**, between **Reset View** and the settings gear.
 
 ![The top bar: transport on the left; Reset View, the playhead-tracking toggle and the settings gear on the right](/img/top-bar.png)
 
@@ -31,7 +31,7 @@ Two of these surprise people:
 
 **Horizontal panning is locked the whole time**, not only during playback. With tracking on and the transport stopped, dragging sideways does nothing. Vertical dragging still works, so you can still move through the frequency axis.
 
-**Zoom stops following your cursor.** With the horizontal axis locked, zooming is anchored to the middle of the viewport instead of the point under the pointer, so the view cannot drift sideways out from under the playhead. On touch, pinch-zoom re-centres the same way and one-finger panning becomes vertical-only.
+**Zoom holds the playhead in the middle.** The horizontal zoom anchor is the centre of the viewport. The vertical wheel-zoom anchor stays under the pointer, so you can still aim at a particular pitch. On touch, pinch-zoom keeps the playhead centred and one-finger panning becomes vertical-only.
 
 ## Turning it off
 

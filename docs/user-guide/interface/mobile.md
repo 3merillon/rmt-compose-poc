@@ -90,7 +90,7 @@ If the icons are too small to hit comfortably, raise **Icon size** in [Settings 
 | Hover ring and cursor hints show you what a region does | No hover — the regions are still there, they just cannot preview themselves |
 | `Ctrl/Cmd+Z` to undo, `Ctrl/Cmd+Y` or `Ctrl/Cmd+Shift+Z` to redo | Use the **Undo** and **Redo** entries in the "+" menu, or the buttons in the library toolbar |
 
-Undo and redo are the app's *only global* keyboard shortcuts — the rest of the keyboard surface is `Escape`, scoped to whichever panel or dialog is in front of you. So unless you have a hardware keyboard attached there is effectively no keyboard path on a phone, and everything is reachable by touch. See [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
+Undo and redo are the app's *only global* keyboard shortcuts. The group widget also uses Enter for its value fields, and some panels and dialogs handle Escape. So unless you have a hardware keyboard attached there is effectively no keyboard path on a phone, and everything is reachable by touch. See [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
 
 ## Pinch-zoom belongs to the app
 

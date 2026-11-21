@@ -15,7 +15,7 @@ RMT Compose is pointer-first. The only global keyboard shortcuts are **undo and 
 | `Ctrl + Y` / `Cmd + Y` | Redo |
 | `Ctrl + Shift + Z` / `Cmd + Shift + Z` | Redo |
 
-All of them are ignored while the focus is in a text field, a textarea, or any editable element — so typing an expression into the note widget never triggers them.
+All of them are ignored while focus is on an input (including a slider), a textarea, or editable content — so typing an expression into the note widget never triggers them.
 
 The module bar's toolbar carries the same pair as buttons (`Undo (Ctrl+Z)` / `Redo (Ctrl+Y)`), as does the "+" menu. All of them drive one shared history.
 
@@ -25,9 +25,9 @@ The module bar's toolbar carries the same pair as buttons (`Undo (Ctrl+Z)` / `Re
 
 | Where | What Escape does |
 |---|---|
-| Focus inside the **Settings panel** | Closes the panel. But if the focus is in a text, number or select field, it **blurs the field** instead — press it twice to close the panel from there. |
+| Focus inside the **Settings panel** | Closes the panel from a panel button. In a text, number or select field it blurs the field. Use the panel’s **×** to close it after focus leaves the panel. |
 | Focus inside the **group widget** | Clears the multi-note selection. The same as its **×** (*Clear selection*). |
-| A **confirmation dialog** is open | Cancels it. (The Cancel button also holds focus when the dialog opens, so `Enter` cancels too.) |
+| A shared confirmation, such as group **Delete all**, is open | Cancels it. **Cancel** initially has focus. In a note-widget dialog such as **Clean Slate**, click **Cancel**. |
 | Focus in the **module-bar search field** | Closes the search field. |
 
 There is no global "Escape to deselect". To clear a selection, click empty canvas or use the group widget's **×**.
@@ -46,6 +46,8 @@ Shift is load-bearing in three places. On touch, a **long-press — 500 ms with 
 A hold on an item toggles it before a subsequent marquee drag. Before the half-second threshold, moving more than about 8 px, putting a second finger down, or lifting early all cancel it, so panning, pinch-zoom and ordinary note drags are untouched.
 
 See [Multi-Note Selection](/user-guide/notes/selection) for what you can do with a group once you have one.
+
+Inside the group widget, **Enter** in the ratio field scales the selected property. **Enter** in the colour field applies the colour.
 
 ## Native browser behaviour
 

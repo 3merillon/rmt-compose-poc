@@ -101,10 +101,9 @@ Pick a variable in **Change**, type an expression or a ratio, and choose how it 
 **× changes each note once.** A selected note whose value is read, through the same variable, from
 another selected note follows that note: it is not multiplied itself, or it would change twice.
 Transpose a chord whose third and fifth hang off its root by `3/2` and only the root is
-multiplied; the third and the fifth follow it, and the chord keeps its intervals. Select both
-basses of the canon and multiply their frequency by `3/2`: the 70 notes of the first bass are
-multiplied, and the 58 of the second, each written as `(3/2) * [n].f` of a note of the first,
-follow. The same holds for notes outside the selection: whatever reads a changed note follows it,
+multiplied; the third and the fifth follow it, and the chord keeps its intervals. In the canon, 57 green answering notes take their pitches a fifth above blue notes. The green A in bar 5 instead reads the following red E. Scaling a mixed selection follows the written pitch links in each case. [Trace the bar-five exception](/tutorials/workflows/canon-and-cadences#follow-the-exception-in-bar-5).
+
+The same holds for notes outside the selection: whatever reads a changed note follows it,
 as it does for any edit.
 
 **× on duration** changes every length by the ratio, and a note that begins where another ends

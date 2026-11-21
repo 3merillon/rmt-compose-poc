@@ -92,6 +92,8 @@ note.properties  // { color: string | null, instrument: string | null, measure: 
 lets `module.findInstrument()` resolve it from the note's player, and failing that the configurable default instrument. `measure`
 defaults to `false` and marks a measure bar; see [`isMeasureNote()`](#ismeasurenote).
 
+An optional `properties.repeat` on the BaseNote stores the expression for pitch transposition between loop passes. It has no slot among the six compiled note variables.
+
 ### module
 
 ```javascript
@@ -144,6 +146,7 @@ Reads through `module.getEvaluationCache()`, which evaluates first if anything i
 | `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release` | `Fraction` |
 | `color`, `instrument` | `string \| null` (straight from `note.properties` — no module needed) |
 | `measure` | `boolean` (straight from `note.properties`) |
+| `repeat` | The stored loop-transposition expression when present, otherwise `undefined` or `null` |
 | any `<name>String` | `string \| null` — the expression **source text**, via `getExpressionSource()` (no module needed) |
 | any of the six expression names, when unresolvable or when `note.module` is `null` | `null` |
 | any other name | `null` |
@@ -153,6 +156,10 @@ note.getVariable('frequency').valueOf()   // 394.5
 note.getVariable('frequencyString')       // '[1].f * (3/2)'
 note.getVariable('color')                 // 'rgba(255,0,0,0.5)'
 ```
+
+### getExactVariable()
+
+Use `note.getExactVariable(name)` when serializing a result or building a new expression from it. It returns the exact fraction, symbolic irrational or approximate value recorded by evaluation. `getVariable()` supplies the numeric fraction used by compatibility callers.
 
 ### setVariable()
 
@@ -363,9 +370,7 @@ Exported from `src/note.js`. True for a note whose `measure` property is `true`,
 BaseNote (id `0`). It accepts a `Note` or a plain note object from JSON (it reads
 `note.properties.measure` on the first and `note.measure` on the second).
 
-A measure bar is a silent note with a start and a duration, no frequency, and the flag. The flag is
-display only: evaluation treats a bar like any other note, and the editor draws it as a dashed line
-with a triangle instead of a rest. A silent note without the flag is a silence (rest). It is saved
+A measure bar is a silent note with a start and a duration, no frequency, and the flag. The evaluator reads its expressions normally. The editor uses the flag to draw a triangle, edit the bar chain, accept library drops and offer duration edits in a measure-only group. A silent note without the flag is a silence (rest). It is saved
 as `"measure": true` in the module JSON. `Module.getMeasureNotes()` collects every bar;
 `Module.generateMeasures()` creates them.
 
