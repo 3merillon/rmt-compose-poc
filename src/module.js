@@ -1055,6 +1055,8 @@ export class Module {
     let ids;
     if (partial) {
       ids = this._historyIds;
+      // Some controls write a plain property and supply its ID at capture.
+      if (Array.isArray(tracked)) for (const id of tracked) ids.add(Number(id));
     } else {
       const keys = Object.keys(this.notes);
       ids = keys.map(Number);

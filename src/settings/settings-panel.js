@@ -468,7 +468,7 @@ function buildAudioTab(container) {
       const v = validateLoopRatio({ n: parseInt(nIn.value, 10), d: parseInt(dIn.value, 10) }, { n: 1, d: 1 });
       setModuleRepeat(m, repeatExprForRatio(v.n, v.d));
       try {
-        const snap = moduleSnapshot(m);
+        const snap = moduleSnapshot(m, true);
         eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap });
         eventBus.emit('history:capture', { label: v.n === v.d ? 'Repeat as written' : `Repeat ${v.n}/${v.d}`, ...snap });
       } catch {}

@@ -433,7 +433,18 @@ Three parts of it used to cost the size of the whole module, whatever the edit c
 `scripts/test-edit-cost.mjs` (in `npm test`) holds all three to what they replaced, and
 `scripts/perf/compare-edits.mjs` runs the same edits and undos on two servers and compares the
 autosave, both history stacks, evaluated values and the renderer's CPU and GPU buffers.
-The sequence also swaps the selected note twice and returns selection to the BaseNote.
+The sequence also swaps selection, edits notes and groups through their widgets, resets
+inherited instruments, and undoes and redoes a group edit.
+
+The note and group widgets now pass the edited IDs to history and request an incremental
+renderer sync. The IDs include properties written directly, such as a reset to an inherited
+instrument. Timings below cover the synchronous Save or Apply handler in headless Edge.
+
+| Edit | 100,000 notes | 250,000 notes | 500,000 notes |
+|---|---:|---:|---:|
+| Note colour | 188 → 5.8 ms | 409 → 6.8 ms | 929 → 6.5 ms |
+| Note frequency | 132 → 7.3 ms | 329 → 7.0 ms | 880 → 9.7 ms |
+| Two-note group colour | 138 → 1.5 ms | 348 → 1.6 ms | 792 → 2.0 ms |
 
 Headless Edge, `bench-commit-pairs.mjs`, the median of the commit p50s over 5 back-to-back pairs
 (the server that goes first alternates):

@@ -471,7 +471,8 @@ any other is serialized again (`noteJSONText()`, `src/module.js:88`). Every note
 an edit by any route is seen, including one that writes `note.expressions` or `note.properties`
 directly. Nothing is kept for a colour or instrument that is an object, or for an expression with
 bytecode and no source text. History and autosave receive the same canonical text from `moduleSnapshot()`
-(`src/store/history.js:183`). Workspace moves, resizes and octave edits supply a known change set.
+(`src/store/history.js:183`). Workspace moves, resizes and octave edits use the tracked changes.
+The note and group widgets also supply the IDs of notes whose plain properties they edited.
 `scripts/test-edit-cost.mjs` holds it to `JSON.stringify(createModuleJSON())` on every library
 module and through edits by every route.
 

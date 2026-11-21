@@ -69,6 +69,19 @@ async function run(browser, base) {
     const a = withF[Math.floor(withF.length / 2)], b = withF[Math.floor(withF.length / 3)], c = withF[1] ?? withF[0];
     const startOf = (id) => P.getModuleRef().getNoteById(id).getVariable('startTime').valueOf();
     const durOf = (id) => P.getModuleRef().getNoteById(id).getVariable('duration').valueOf();
+    const select = ids => P.emit('workspace:marqueeCommit', { ids, additive: false });
+    const noteRow = key => [...document.querySelectorAll('#note-widget .variable-row')]
+      .find(row => row.querySelector('.variable-name')?.textContent === key);
+    const enter = (input, value) => {
+      input.value = value;
+      if (input.value !== value) throw new Error('Missing control value ' + value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const editNote = (key, inputSelector, value) => {
+      const row = noteRow(key);
+      enter(row.querySelector(inputSelector), value);
+      [...row.querySelectorAll('button')].find(button => button.textContent === 'Save').click();
+    };
     const plan = [
       ['octave up ' + a, () => P.emit('player:octaveChange', { noteId: a, direction: 'up' })],
       ['octave down ' + b, () => P.emit('player:octaveChange', { noteId: b, direction: 'down' })],
@@ -86,7 +99,39 @@ async function run(browser, base) {
       ['redo', () => P.emit('history:redo')],
       ['select ' + a, () => P.emit('player:selectNote', { noteId: a })],
       ['select ' + c, () => P.emit('player:selectNote', { noteId: c })],
-      ['select base', () => P.emit('player:selectNote', { noteId: 0 })]
+      ['select base', () => P.emit('player:selectNote', { noteId: 0 })],
+      ['note colour', () => {
+        select([a]);
+        editNote('color', '.raw-value-input', '#18a27d');
+        if (mod().notes[a].properties.color !== '#18a27d') throw new Error('Note colour');
+      }],
+      ['note frequency', () => editNote('frequency', '.raw-value-input', '(3/2) * base.f')],
+      ['note instrument', () => {
+        editNote('instrument', '.instrument-select', 'square-wave');
+        if (mod().notes[a].properties.instrument !== 'square-wave') throw new Error('Note instrument');
+      }],
+      ['inherit instrument', () => {
+        [...noteRow('instrument').querySelectorAll('button')].find(button => button.textContent === 'Use Inherited').click();
+        if (mod().notes[a].properties.instrument !== null) throw new Error('Inherited instrument');
+      }],
+      ['group colour', () => {
+        select([a, b]);
+        enter(document.querySelector('input[aria-label="Colour"]'), '#7826bb');
+        document.querySelector('[data-action="group-color"]').click();
+        if ([a, b].some(id => mod().notes[id].properties.color !== '#7826bb')) throw new Error('Group colour');
+      }],
+      ['group one player', () => {
+        enter(document.querySelector('select[aria-label="Instrument"]'), 'triangle-wave');
+        document.querySelector('[data-action="group-instrument-one"]').click();
+        if (![a, b].some(id => mod().notes[id].properties.instrument === 'triangle-wave')) throw new Error('Group instrument');
+      }],
+      ['group inherit instrument', () => {
+        enter(document.querySelector('select[aria-label="Instrument"]'), '');
+        document.querySelector('[data-action="group-instrument"]').click();
+        if ([a, b].some(id => mod().notes[id].properties.instrument !== null)) throw new Error('Group inherit');
+      }],
+      ['undo widget edit', () => P.emit('history:undo')],
+      ['redo widget edit', () => P.emit('history:redo')]
     ];
     const settle = () => new Promise((res) => requestAnimationFrame(() => setTimeout(res, 50)));
     const out = [];

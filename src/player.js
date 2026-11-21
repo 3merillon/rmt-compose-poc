@@ -3447,7 +3447,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
             evaluatedNotes = myModule.evaluateModule();
             setEvaluatedNotes(evaluatedNotes);
-            updateVisualNotes(evaluatedNotes);
+            updateVisualNotes(evaluatedNotes, true);
             createMeasureBars();
             invalidateModuleEndTimeCache();
             try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
@@ -3456,7 +3456,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 : op === 'instrumentOnePlayer' ? `Instrument ${text || 'inherited'} (one player)`
                 : op === 'color' ? 'Colour'
                 : `${varName} ${GROUP_OP_WORD[op]}${op === 'inherit' ? '' : ' ' + String(text).trim()}`;
-            try { captureSnapshot(`${what} on ${r.changed.length} Notes`); } catch {}
+            try { captureSnapshot(`${what} on ${r.changed.length} Notes`, r.changed); } catch {}
         }
 
         const parts = [`${r.changed.length} note${r.changed.length === 1 ? '' : 's'} changed`];

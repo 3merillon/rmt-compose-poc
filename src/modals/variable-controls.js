@@ -680,12 +680,12 @@ function buildInstrumentControl(value, note, externalFunctions) {
       const evaluated = moduleInstance.evaluateModule();
       setEvaluatedNotes(evaluated);
       if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(evaluated);
+        externalFunctions.updateVisualNotes(evaluated, true);
       }
       refreshModals(note, null);
       // History snapshot: instrument change
       try {
-        const snap = moduleSnapshot(getModule());
+        const snap = moduleSnapshot(getModule(), [note.id]);
         // Ensure baseline exists so first action can be undone independently
         try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
         eventBus.emit('history:capture', { label: `Edit instrument Note ${note.id}`, ...snap });
@@ -710,12 +710,12 @@ function buildInstrumentControl(value, note, externalFunctions) {
         const evaluated = moduleInstance.evaluateModule();
         setEvaluatedNotes(evaluated);
         if (typeof externalFunctions.updateVisualNotes === 'function') {
-          externalFunctions.updateVisualNotes(evaluated);
+          externalFunctions.updateVisualNotes(evaluated, true);
         }
         refreshModals(note, null);
         // History snapshot: instrument reset to inherited
         try {
-          const snap = moduleSnapshot(getModule());
+          const snap = moduleSnapshot(getModule(), [note.id]);
           // Ensure baseline exists so first action can be undone independently
           try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
           eventBus.emit('history:capture', { label: `Reset instrument Note ${note.id}`, ...snap });
@@ -873,7 +873,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
             return;
           }
           try {
-            const snap = moduleSnapshot(getModule());
+            const snap = moduleSnapshot(getModule(), [note.id]);
             try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
             eventBus.emit('history:capture', { label: text ? `Repeat ${text}` : 'Repeat as written', ...snap });
           } catch {}
@@ -890,11 +890,11 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           const evaluated = moduleInstance.evaluateModule();
           setEvaluatedNotes(evaluated);
           if (typeof externalFunctions.updateVisualNotes === 'function') {
-            externalFunctions.updateVisualNotes(evaluated);
+            externalFunctions.updateVisualNotes(evaluated, true);
           }
           // History snapshot: color edit
           try {
-            const snap = moduleSnapshot(getModule());
+            const snap = moduleSnapshot(getModule(), [note.id]);
             // Ensure baseline exists so first color change (first action) can be undone
             try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
             eventBus.emit('history:capture', { label: `Edit color Note ${note.id}`, ...snap });
@@ -911,11 +911,11 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           const evaluated = moduleInstance.evaluateModule();
           setEvaluatedNotes(evaluated);
           if (typeof externalFunctions.updateVisualNotes === 'function') {
-            externalFunctions.updateVisualNotes(evaluated);
+            externalFunctions.updateVisualNotes(evaluated, true);
           }
           refreshModals(note, measureId);
           try {
-            const snap = moduleSnapshot(getModule());
+            const snap = moduleSnapshot(getModule(), [note.id]);
             try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
             eventBus.emit('history:capture', { label: `Reset ${key} Note ${note?.id}`, ...snap });
           } catch {}
@@ -969,7 +969,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         const evaluated = moduleInstance.evaluateModule();
         setEvaluatedNotes(evaluated);
         if (typeof externalFunctions.updateVisualNotes === 'function') {
-          externalFunctions.updateVisualNotes(evaluated);
+          externalFunctions.updateVisualNotes(evaluated, true);
         }
         if (typeof externalFunctions.createMeasureBars === 'function') {
           externalFunctions.createMeasureBars();
@@ -981,7 +981,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         // History snapshot: generic variable edit
         try {
           const idLabel = (measureId !== null && measureId !== undefined) ? `Measure ${measureId}` : `Note ${note?.id}`;
-          const snap = moduleSnapshot(getModule());
+          const snap = moduleSnapshot(getModule(), [note.id]);
           // Ensure baseline exists so first action can be undone independently
           try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
           eventBus.emit('history:capture', { label: `Edit ${key} ${idLabel}`, ...snap });
