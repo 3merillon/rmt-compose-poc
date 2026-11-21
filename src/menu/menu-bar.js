@@ -26,7 +26,8 @@ const menuAPI = (function() {
     let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedDefaultHeight = false, targetFitHeight = null;
 
     // Module drop mode: 'start' = drop at target note's start, 'end' = drop at target note's end
-    let moduleDropMode = 'start';
+    const defaultModuleDropMode = 'end';
+    let moduleDropMode = defaultModuleDropMode;
 
     // === Manifest v2 support (Phase 6.1) ===
     // The library is described by a single top-level manifest,
@@ -875,7 +876,7 @@ const menuAPI = (function() {
         if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
             return Promise.resolve(false);
         }
-        if (uiState.dropMode === 'start' || uiState.dropMode === 'end') moduleDropMode = uiState.dropMode;
+        moduleDropMode = ['start', 'end'].includes(uiState.dropMode) ? uiState.dropMode : defaultModuleDropMode;
         const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
 
         return loadLibraryManifest().then(manifest => {
@@ -2183,6 +2184,7 @@ const menuAPI = (function() {
     }
 
     function reloadModuleIcons() {
+        moduleDropMode = defaultModuleDropMode;
         domCache.iconsContainer.innerHTML = '';
         categoryContainers = [];
         libraryManifest = null; // bust the in-memory cache so a fresh manifest is fetched

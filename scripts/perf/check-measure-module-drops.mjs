@@ -40,8 +40,10 @@ try {
   await page.click('#group-widget [data-action="copy-to-modules"]');
   const copy = await page.locator('.icon[data-name="Selection (1 note and 3 measures)"]').evaluate(el => el.moduleData);
   assert.deepEqual(copy.notes.map(n => !!n.measure), [false, true, true, true]);
-  for (const end of [false, true]) {
-    await page.evaluate(end => document.querySelector(end ? '.library-drop-end-btn' : '.library-drop-start-btn').click(), end);
+  await page.locator('.group-widget-close').click();
+  assert.equal(await page.locator('.library-drop-end-btn').getAttribute('aria-pressed'), 'true');
+  for (const end of [true, false]) {
+    if (!end) await page.locator('.library-drop-start-btn').click();
     for (const target of targets) {
       const first = await drop(target, copy);
       const got = await page.evaluate(({ target, first, end }) => {
