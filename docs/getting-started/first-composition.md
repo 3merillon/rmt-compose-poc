@@ -7,7 +7,9 @@ description: Hear the opening canon, lengthen its first bass note, and hear the 
 
 Open [RMT Compose](https://rmt.world) in a fresh browser session. The opening score is a canon. Listen to a few seconds, change one blue bass note and hear what happens to the phrase that follows it.
 
-![The opening canon on the frequency and time grid](/img/workspace-overview.png)
+![Opening canon with the first blue bass note outlined beside the orange BaseNote](/img/workspace-overview.png)
+
+*The selected rectangle starts the blue bass line. The next blue rectangle, slightly higher and to its right, is note 11.*
 
 ## Listen to the opening
 

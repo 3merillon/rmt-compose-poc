@@ -23,7 +23,9 @@ Selecting two or more notes or measure triangles opens the group widget. A touch
 
 ## In the workspace
 
-![The workspace with a note selected, showing its ring, the ▲/▼ arrow column on its left edge and the resize tab on its right](/img/workspace-overview.png)
+![A selected bass note and the outlined notes connected to it in the score](/img/dependency-lines.png)
+
+*Drag the middle of the selected rectangle to move its start. The right edge changes its length.*
 
 ### Moving a note
 

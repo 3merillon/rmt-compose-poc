@@ -21,7 +21,9 @@ editable, and the fastest way to add to it is to select some notes and press one
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
 | **Custom** | 3 | `canon`, `canon base` and `canon melody` — and where your own modules land |
 
-![The module bar showing coloured module tiles grouped into labelled sections](/img/module-library-icons.png)
+![The Intervals section begins with 1/1, 9/8, 32/27, 81/64 and 4/3 tiles](/img/module-library-icons.png)
+
+*Read each interval as a fraction. The small line underneath gives its size in cents.*
 
 Tiles are drawn from the module's metadata. An interval shows its ratio as a stacked fraction with a
 cents caption (`3 / 2`, `702¢`); a chord shows its name with the colon ratio underneath

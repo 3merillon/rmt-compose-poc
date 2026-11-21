@@ -57,7 +57,7 @@ Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate
 
 ## Appearance
 
-![The Settings panel on the Appearance tab, showing the theme dropdown, the three note-geometry sliders, and the colour pickers grouped under Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
+![Appearance settings for theme, note geometry, detail cutoff, envelope display and release tails](/img/settings-appearance.png)
 
 | Control | Type | Range | Default | Hint shown |
 |---|---|---|---|---|

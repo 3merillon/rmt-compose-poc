@@ -33,7 +33,7 @@ The method-chain syntax of earlier versions is retired; see
 Open the note widget, find the property row, and type into its **`Raw:`** field. A **`Save`**
 button appears as soon as you type. Nothing changes until you press it.
 
-![The note widget with a variable row expanded, showing the Evaluated: readout and the Raw: expression field with its Save button](/img/note-widget.png)
+![The widget for note 11 shows the raw expression [10].t + [10].d and its evaluated start of 0.3 seconds](/img/note-widget.png)
 
 The **`Evaluated:`** line above it is read-only — it shows the value the expression currently
 produces.

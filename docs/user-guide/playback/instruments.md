@@ -33,7 +33,9 @@ The app shows these names exactly as written.
 
 Click a note to open the note widget. The `instrument` row is the last of the variable rows, below `color` and above the Add Note / Silence section.
 
-![The note widget for a selected note, showing its variables and the instrument row](/img/note-widget.png)
+![The instrument row for note 11 shows Inherited: sine-wave · plays with [10]](/img/instrument-widget.png)
+
+*Note 11 uses the instrument of the player headed by note 10.*
 
 Above the dropdown, one line tells you where the note's instrument comes from:
 

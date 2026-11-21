@@ -12,7 +12,9 @@ Select notes, silences and measure triangles together to move them in time, chan
 
 On desktop, a single remaining item opens its own widget. On touch, the first long-press opens a one-item group so you can add or remove further items with a tap.
 
-![The workspace during a marquee drag: a rubber-band rectangle over several notes, the notes it crosses ringed in white, and the group widget in the bottom-right corner showing the count](/img/multi-select-marquee.png)
+![A selection rectangle crosses the early canon notes, with intersected notes outlined](/img/multi-select-marquee.png)
+
+*While the pointer is down, the rectangle previews the selection. Release it to open the group widget.*
 
 ## Before you start: unlock the notes
 
@@ -127,6 +129,10 @@ The right-hand resize tab and [▲/▼ arrows](/user-guide/notes/transposing) st
 ### Try a mixed group in the opening canon
 
 Shift-click the first two blue bass notes and the first measure triangle. On touch, hold the first blue note, lift and tap the other two items. Check for **2 notes and 1 measure**. Under **Change**, choose **duration**, enter `2` and press **×**. The bar grows from 2.4 to 4.8 seconds and the two short bass notes from 0.15 to 0.30 seconds. Their following notes still read the ends of their predecessors. Undo to compare.
+
+![The group widget shows two notes and one measure, with duration selected and 2 entered](/img/mixed-group-duration.png)
+
+*Press × to double each selected length.*
 
 To reuse the group, press **Copy to Modules** and find **Selection (2 notes and 1 measure)** in **Custom**. Drag the tile onto the orange BaseNote. The workspace gains two notes and a measure. Undo removes that import while leaving the tile available.
 

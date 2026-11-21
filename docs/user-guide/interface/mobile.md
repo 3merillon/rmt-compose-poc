@@ -9,7 +9,9 @@ RMT Compose runs in a mobile browser. It is the same app, not a cut-down version
 
 Touch is a first-class path, not a retrofit. Every target on a note — the body, the pull tab, the ▲/▼ arrows — is a real hit region that responds to a finger exactly as it does to a mouse. Nothing in the workspace is hover-only.
 
-![RMT Compose running on a phone: the top bar, the module bar and the workspace canvas](/img/mobile-layout.png)
+![The red, blue and green canon voices in a narrow touch viewport, with measure handles at the bottom](/img/mobile-layout.png)
+
+*Tap a note to inspect it. The small triangles along the bottom select measures.*
 
 ## The gestures
 

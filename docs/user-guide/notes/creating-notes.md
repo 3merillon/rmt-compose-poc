@@ -15,7 +15,9 @@ There are three ways to get notes into a composition: the [note widget](/user-gu
 
 Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE / REFERENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section, on the last bar of a chain — no note creation.)
 
-![The note widget open on a note, showing the Evaluated and Raw rows for start time, duration and frequency, and the ADD NOTE / SILENCE / REFERENCE section below them](/img/note-widget.png)
+![Creation controls for note 11, with Note and At End selected](/img/create-note-widget.png)
+
+*At End fills Start Time with [11].t + [11].d. The teal section creates a new item from note 11.*
 
 1. **Choose a kind.** `Note` (selected by default), `Silence`, `Reference` or `Key change`. Choosing `Silence` hides the Frequency field — a silence is exactly a note with no frequency. `Reference` keeps only the Frequency field: a pitch outside time (a tonic, a key, a chord root) that notes relate to and that never sounds. `Key change` keeps Frequency and Start Time: the same, from that start on. Started from a reference, a new note's start defaults to the reference's start (a key change) or `base.t`, and its duration to `base.d`, since a reference has no length to borrow.
 2. **Choose a position.** `At Start` or `At End`, with **`At End` selected by default**. This toggle only appears when you clicked a note or a silence; the BaseNote has no position toggle.

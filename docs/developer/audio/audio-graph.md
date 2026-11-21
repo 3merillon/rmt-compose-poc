@@ -142,7 +142,7 @@ changes — the zipper. Same lesson as the
 
 ## Settings
 
-![The Audio tab of the Settings panel, with Master volume, Default instrument, the Play tempered switch, a Room / Reverb group and the start of the Stereo width group](/img/settings-audio.png)
+![Audio settings for master volume, default instrument, voice limit, loop transposition and tempered playback](/img/settings-audio.png)
 
 `AudioGraph` subscribes directly to `settingsStore.subscribe(fn)` — **not** to the eventBus —
 and handles everything in `_onSettings({ path, settings })`. It ignores any path that does

@@ -9,7 +9,9 @@ Click one thing in the workspace — a note, a silence, a measure bar's triangle
 
 The widget fits itself to what you clicked. A measure bar shows two rows; the BaseNote shows its own set and a different delete button. Nothing is greyed out — sections that don't apply are simply not there.
 
-![The note widget open on a note, showing the evaluated and raw value of each variable](/img/note-widget.png)
+![Note 11’s start, duration and frequency, each with an evaluated value and a raw expression](/img/note-widget.png)
+
+*Note 11 starts at 0.3 seconds. Its first raw field shows where that time comes from.*
 
 ## Opening and closing
 

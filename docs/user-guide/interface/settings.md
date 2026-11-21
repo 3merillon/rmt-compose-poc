@@ -47,7 +47,7 @@ Every control writes to the settings store on change. The store re-validates, pe
 
 ## Appearance
 
-![The Settings panel open on the Appearance tab, showing the Theme dropdown, the three note-geometry sliders and the colour pickers grouped under Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
+![Appearance settings for theme, note geometry, detail cutoff, envelope display and release tails](/img/settings-appearance.png)
 
 | Control | Range | Default |
 |---|---|---|
@@ -90,7 +90,7 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 
 ## Audio
 
-![The Settings panel open on the Audio tab, showing master volume, default instrument, the Pure / Tempered switch, the Room / Reverb section and the start of the Stereo width section](/img/settings-audio.png)
+![Audio settings for master volume, default instrument, voice limit, loop transposition and tempered playback](/img/settings-audio.png)
 
 | Control | Range | Default |
 |---|---|---|

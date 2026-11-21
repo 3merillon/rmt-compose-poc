@@ -9,7 +9,7 @@ The look of the app is a **theme**: a set of colours plus three numbers that sha
 
 Open the [Settings panel](/user-guide/interface/settings) from the top-bar gear and stay on the first tab.
 
-![The Settings panel open on the Appearance tab, showing the Theme dropdown, the three note-geometry sliders and the colour pickers grouped under Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
+![Appearance settings for theme, note geometry, detail cutoff, envelope display and release tails](/img/settings-appearance.png)
 
 ## The four presets
 
@@ -22,11 +22,19 @@ Open the [Settings panel](/user-guide/interface/settings) from the top-bar gear 
 
 ![The workspace and top bar in the Classic Orange theme: dark navy background with an amber accent](/img/theme-classic-orange.png)
 
+*Classic Orange*
+
 ![The workspace and top bar in the Slate Cyan theme: dark blue-slate background with a sky-cyan accent](/img/theme-slate-cyan.png)
+
+*Slate Cyan*
 
 ![The workspace and top bar in the Mono Light theme: off-white background with a burnt-orange accent and near-black text](/img/theme-mono-light.png)
 
+*Mono Light*
+
 ![The workspace and top bar in the High Contrast theme: pure black background with white note borders and a yellow accent](/img/theme-high-contrast.png)
+
+*High Contrast*
 
 Each preset's accent, background and note-border colours:
 

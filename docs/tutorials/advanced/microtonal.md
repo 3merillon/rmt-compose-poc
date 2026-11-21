@@ -244,7 +244,7 @@ Reverb is **on by default** (25% wet, 1.8 s decay). It smears the beating you ar
 Open the Settings panel from the top-bar gear, go to the **Audio** tab and switch off
 **Enable reverb** before any tuning comparison.
 
-![The Audio tab of the Settings panel, showing the Enable reverb toggle, room size, decay, damping, pre-delay and reverb amount controls](/img/settings-audio.png)
+![Room and reverb controls for size, decay, damping, pre-delay and reverb amount](/img/settings-reverb.png)
 
 ### Use sustained notes
 

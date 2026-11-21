@@ -17,6 +17,10 @@ Select the green A under the held red F. Open its frequency expression. These ar
 | A in the answering bass | Note 81 reads `(2/3) * [83].f` | Note 127 reads `(2/3) * [24].f` |
 | Following E in the theme | Note 83 | Note 24 |
 
+![White-outlined green A, note 81, with pitch links to the red theme in bar 5](/img/canon-bar-five.png)
+
+*The red F at upper left reads the selected green A. The A reads the next red note, E, at upper right.*
+
 Read the pitches from the E backward. The A sits a fifth below the E, and the held F sits a minor sixth above the A. That puts the F at `16/15` of the following E. The pitches resolve down by a just semitone. Time runs the other way. In the startup score the E begins at `[72].t + [72].d`, while the green A copies note 63’s duration and begins four units after its start. Pitch and start time can follow different parents, including a pitch that sounds later.
 
 To hear the dependency, select startup note 81. On its **Frequency** row, replace the **Raw** expression with `(3/4) * [83].f` and press **Save**. The green A and the held red F both rise by 9/8. The following E holds its pitch. Undo the edit with **Ctrl/Cmd+Z** and play bar 5 again.

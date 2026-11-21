@@ -16,7 +16,7 @@ For comparisons of nearly coincident partials, temporarily turn reverb off so th
 Open the Settings panel from the **top-bar gear** → **Audio** tab → switch off **Enable reverb**.
 :::
 
-![The Audio tab of the Settings panel showing Enable reverb, Room size, Decay, Damping, Pre-delay and Reverb amount controls](/img/settings-audio.png)
+![Room and reverb controls for size, decay, damping, pre-delay and reverb amount](/img/settings-reverb.png)
 
 While you are there:
 

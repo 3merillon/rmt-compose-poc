@@ -33,7 +33,7 @@ the selected limit.
 
 Click the **gear** in the [top bar](/user-guide/interface/top-bar) and choose the **Audio** tab. The panel is not modal — leave it open and keep composing; every change applies immediately, during playback.
 
-![The Settings panel, Audio tab: master volume, default instrument, the Play tempered switch, the reverb section, and the start of the stereo width section](/img/settings-audio.png)
+![Audio settings for master volume, default instrument, voice limit, loop transposition and tempered playback](/img/settings-audio.png)
 
 | Control | Range | Default | What it does |
 |---|---|---|---|

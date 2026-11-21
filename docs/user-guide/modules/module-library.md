@@ -11,7 +11,9 @@ That is the point. A module does not store "A4 = 440 Hz followed by C♯5". It s
 
 So the library is not a bag of samples to paste. It is a set of relationships you graft onto what you already have.
 
-![Module library tiles: coloured squares showing stacked fractions with cents for intervals, chord names with colon ratios, and wrapped names for melodies and scales](/img/module-library-icons.png)
+![The Intervals section begins with 1/1, 9/8, 32/27, 81/64 and 4/3 tiles](/img/module-library-icons.png)
+
+*Read each interval as a fraction. The small line underneath gives its size in cents.*
 
 ## What ships
 
