@@ -159,6 +159,35 @@ const passes = new Set(lt.map(([, p]) => p));
 check('loop transposition 9/8: each pass a whole tone above the last, folded into an octave', lt.length > 0 && bad.length === 0 && passes.size >= 6,
   `${lt.length} voices over passes ${[...passes].sort((a, b) => a - b).join(',')}; pass 6 at ${(lt.find(([, p]) => p === 6) || [0, 0, NaN])[2].toFixed?.(6)} (531441/524288 = ${(531441 / 524288).toFixed(6)})${bad.length ? '; wrong: ' + JSON.stringify(bad.slice(0, 3)) : ''}`);
 
+// A symbolic or explicitly approximate factor has no Fraction n/d fields.
+// Check the frequency the scheduler actually gave a voice on the next pass.
+const repeatPitches = await page.evaluate(async () => {
+  const engine = window.__ae;
+  const mod = window.__rmtPerf.getModuleRef();
+  const dt = await import('/src/player/display-transpose.js');
+  const notes = await engine.preparePlayback(mod, 0);
+  const head = notes.find(n => n.startTime === 0 && n.frequency && n.instrument);
+  if (!head) throw new Error('Expected a sounding note at time zero');
+  const ratios = [];
+  try {
+    for (const repeat of ['2^(1/6)', '~(3/2)']) {
+      dt.setModuleRepeat(mod, repeat);
+      const ratio = dt.moduleRepeatRatio(mod);
+      engine.play([head], { transpose: { ratio, fold: true, offset: 1 } });
+      const [voice] = engine.activeOscillators;
+      ratios.push(voice.frequency / head.frequency);
+      engine.stopAll();
+    }
+  } finally {
+    engine.stopAll();
+    dt.setModuleRepeat(mod, null);
+  }
+  return ratios;
+});
+check('symbolic and approximate repeats reach the sounding voice',
+  Math.abs(repeatPitches[0] - 2 ** (1 / 6)) < 1e-12 && Math.abs(repeatPitches[1] - 1.5) < 1e-12,
+  repeatPitches.join(', '));
+
 // 10. The same through the player and on screen: a module that repeats 9/8, looped with Shift+click on Play.
 await page.evaluate(async () => { const DT = await import('/src/player/display-transpose.js'); DT.setModuleRepeat(window.__rmtPerf.getModuleRef(), '9/8'); });
 const label = () => page.evaluate(() => `${window.__rmtRenderer._baseFracNum}/${window.__rmtRenderer._baseFracDen}`);

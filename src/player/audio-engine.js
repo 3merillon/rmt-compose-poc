@@ -1,3 +1,4 @@
+import { toNumber as exactToNumber } from '../value/exact.ts';
 import { toNumber } from '../utils/fraction-num.js';
 import { InstrumentManager, envelopeGainAt } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
@@ -559,7 +560,7 @@ export class AudioEngine {
     if (pass === 0) return 1;
     let f = s.passFactors.get(pass);
     if (f === undefined) {
-      try { f = toNumber(passTransposition(s.transposeRatio, pass, s.transposeFold), 1); } catch { f = 1; }
+      try { f = exactToNumber(passTransposition(s.transposeRatio, pass, s.transposeFold), 1); } catch { f = 1; }
       if (!(f > 0)) f = 1;
       s.passFactors.set(pass, f);
     }
