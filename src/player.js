@@ -1233,9 +1233,16 @@ document.addEventListener('DOMContentLoaded', async function() {
                         const moduleEnd = getModuleEndTime();
                         if (!isFinite(t)) t = 0;
                         t = Math.max(0, Math.min(moduleEnd, t));
+                        // Park the transport before drawing the new position. An active
+                        // playhead reads the audio clock and would overwrite this click.
+                        if (isPlaying) {
+                            if (!isPaused) loopPassOffset = currentPass();
+                            stop(false);
+                        } else {
+                            ++playbackRequest;
+                        }
                         playheadTime = t;
                         updatePlayhead();
-                        if (isPlaying) { stop(false); }
                         event.stopPropagation();
                         event.preventDefault();
 
@@ -2920,8 +2927,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (isPlaying && !isPaused && !isFadingOut) {
                 // Score time, through the engine's time map: at a live tempo the
                 // playhead moves with the sound, and a rate change does not jump it.
-                const se = audioEngine.scoreElapsed();
-                const elapsed = se == null ? (audioContext.currentTime - currentTime + totalPausedTime) : playbackFromTime + se;
+                const elapsed = playbackPosition() ?? (audioContext.currentTime - currentTime + totalPausedTime);
                 if (loopPeriod > 0) {
                     // Looping. The audio pump wraps on its own, so the playhead just
                     // follows the same clock modulo the pass length — it never restarts
@@ -3546,12 +3552,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
     }
 
+    // Hold the chosen position while the first chord is being queued.
+    function playbackPosition() {
+        const elapsed = audioEngine.scoreElapsed();
+        return elapsed == null ? null : playbackFromTime + Math.max(0, elapsed);
+    }
+
     // The pass the playback in flight is in now (for a seek or a restart).
     function currentPass() {
         if (!playTranspose) return loopPassOffset;
         if (loopPeriod > 0) {
-            const se = audioEngine.scoreElapsed();
-            const elapsed = se == null ? 0 : playbackFromTime + se;
+            const elapsed = playbackPosition() ?? 0;
             return playTranspose.offset + (elapsed <= 0 ? 0 : Math.floor(elapsed / loopPeriod));
         }
         return playTranspose.offset;
@@ -3634,8 +3645,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isFadingOut = true;
 
         const currentPauseTime = audioContext.currentTime - currentTime;
-        const se = audioEngine.scoreElapsed();
-        let pos = se == null ? currentPauseTime + totalPausedTime : playbackFromTime + se;
+        let pos = playbackPosition() ?? (currentPauseTime + totalPausedTime);
         // Pause keeps the pass being heard: Play resumes in that key.
         if (playTranspose) loopPassOffset = playTranspose.offset + (loopPeriod > 0 && pos > 0 ? Math.floor(pos / loopPeriod) : 0);
         // Wrap into the module. After the first pass this clock runs past the module
@@ -3875,7 +3885,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         // Where the playhead is, in the new time unit: every time scales with base.d.
         const wasPlaying = isPlaying && !isPaused && !isFadingOut;
         let pos = playheadTime;
-        if (wasPlaying) { const se = audioEngine.scoreElapsed(); if (se != null) pos = playbackFromTime + se; }
+        if (wasPlaying) pos = playbackPosition() ?? pos;
         if (loopPeriod > 0 && pos > 0) pos = pos % loopPeriod;
         if (isPlaying || isPaused) stop(false);
         try {
