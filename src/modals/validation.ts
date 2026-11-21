@@ -3,7 +3,10 @@ import { compiler } from '../expression-compiler.js';
 import { isLegacyExpression } from '../migrate/legacy-syntax.js';
 import { findDependencyCycle } from '../variable-deps.js';
 
-export function validateExpression(moduleInstance, noteId, expression, variableType) {
+import type { Module } from '../module.js';
+import type { BinaryExpression } from '../binary-note.js';
+
+export function validateExpression(moduleInstance: Module, noteId: number, expression: unknown, variableType: string) {
     const expr = String(expression ?? '').trim();
     if (!expr) {
         throw new Error('Expression cannot be empty or undefined');
@@ -23,7 +26,7 @@ export function validateExpression(moduleInstance, noteId, expression, variableT
  * variable ends up reading itself. `[5].d * 2` as note 5's startTime is fine;
  * `[5].t + 1` as note 5's startTime is not.
  */
-function assertNoDependencyCycle(moduleInstance, noteId, variableType, binary) {
+function assertNoDependencyCycle(moduleInstance: Module, noteId: number, variableType: string, binary: BinaryExpression) {
     const cycle = findDependencyCycle(moduleInstance, noteId, variableType, binary);
     if (!cycle) return;
     if (cycle.length === 1) {
@@ -35,7 +38,7 @@ function assertNoDependencyCycle(moduleInstance, noteId, variableType, binary) {
 /**
  * Validate DSL expression
  */
-function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
+function validateDSLExpression(moduleInstance: Module, noteId: number, expr: string, variableType: string) {
     // Validate DSL syntax
     const validation = validateDSL(expr);
     if (!validation.valid) {
@@ -47,7 +50,7 @@ function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
     try {
         binary = compileDSL(expr);
     } catch (e) {
-        throw new Error(`Invalid DSL expression: ${e.message}`);
+        throw new Error(`Invalid DSL expression: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     // Check for self-reference and circular dependencies, on what it compiled to
@@ -61,7 +64,7 @@ function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
  * Whether saving `expression` as this variable would make a variable depend
  * on itself (a direct self-reference counts).
  */
-export function detectCircularDependency(moduleInstance, noteId, expression, variableType) {
+export function detectCircularDependency(moduleInstance: Module, noteId: number, expression: unknown, variableType: string) {
     const expr = String(expression ?? '').trim();
     let binary;
     try {

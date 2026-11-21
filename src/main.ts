@@ -5,8 +5,8 @@ import { InstrumentManager, SynthInstrument } from './instruments/instrument-man
 import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
 import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
 import { initStackClick } from './stack-click.js';
-import { initViewport } from './utils/viewport.js';
-import { initNumberSteppers } from './ui/number-stepper.js';
+import { initViewport } from './utils/viewport.ts';
+import { initNumberSteppers } from './ui/number-stepper.ts';
 import { eventBus } from './utils/event-bus.js';
 import { modals } from './modals/index.js';
 import { audioEngine } from './player/audio-engine.js';
@@ -98,7 +98,7 @@ async function initApp() {
     // top-bar gear. The old "Settings…" entry in the + menu is gone — the gear is
     // always visible, so the menu entry was a second door to the same room.
     try {
-        const { settingsStore } = await import('./settings/settings-store.js');
+        const { settingsStore } = await import('./settings/settings-store.ts');
         const { toggleSettingsPanel } = await import('./settings/settings-panel.js');
         // Touch the store so it loads + emits 'settings:loaded' early.
         settingsStore.getAll();
@@ -109,7 +109,7 @@ async function initApp() {
             gearBtn.addEventListener('click', () => toggleSettingsPanel());
             // Track the panel's REAL state, so the gear also un-lights when the
             // panel is closed from its own × or with Escape.
-            eventBus.on('settings:panelToggled', ({ open }) => {
+            eventBus.on('settings:panelToggled', ({ open }: { open: boolean }) => {
                 gearBtn.classList.toggle('open', !!open);
                 gearBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
             });

@@ -29,14 +29,14 @@
  * the body renders itself from that array.
  */
 
-import { showConfirmation } from '../utils/confirm-dialog.js';
+import { showConfirmation } from '../utils/confirm-dialog.ts';
 import {
   makeDraggableWidget,
   TOP_HEADER_HEIGHT,
   MIN_BUFFER,
-} from '../utils/draggable-widget.js';
-import { raisePanel } from '../utils/panel-stack.js';
-import { viewportWidth, viewportHeight } from '../utils/viewport.js';
+} from '../utils/draggable-widget.ts';
+import { raisePanel } from '../utils/panel-stack.ts';
+import { viewportWidth, viewportHeight } from '../utils/viewport.ts';
 
 // ---- the action registry ------------------------------------------------
 //
@@ -49,7 +49,19 @@ import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 //
 // Today there is exactly one. Transpose / quantize / set-instrument drop in here
 // without touching anything else.
-const GROUP_ACTIONS = [
+export interface GroupEdit {
+  op: 'set' | 'scale' | 'inherit' | 'instrument' | 'instrumentOnePlayer' | 'color';
+  varName?: string | null;
+  text?: string;
+}
+interface Callbacks {
+  onDeleteAll: (() => void) | null;
+  onClear: (() => void) | null;
+  onCopyToModules: (() => void) | null;
+  onGroupEdit: ((edit: GroupEdit) => void) | null;
+}
+interface ActionContext { count: number; callbacks: Callbacks; hide: () => void }
+const GROUP_ACTIONS: { id: string; label: string; hint: string; danger?: boolean; handler(ctx: ActionContext): void }[] = [
   {
     id: 'copy-to-modules',
     label: 'Copy to Modules',
@@ -71,19 +83,19 @@ const GROUP_ACTIONS = [
 
 // ---- state --------------------------------------------------------------
 
-let root = null;        // #group-widget — the static element from index.html
-let headerEl = null;
-let countEl = null;
-let labelEl = null;
-let bodyEl = null;
-let drag = null;        // handle from makeDraggableWidget
+let root: HTMLElement | null = null;        // #group-widget — the static element from index.html
+let headerEl: HTMLElement | null = null;
+let countEl: HTMLElement | null = null;
+let labelEl: HTMLElement | null = null;
+let bodyEl: HTMLElement | null = null;
+let drag: ReturnType<typeof makeDraggableWidget> | null = null;        // handle from makeDraggableWidget
 let built = false;      // listeners + actions wired exactly once
 let placed = false;     // has it been given its first position?
 
 let count = 0;
 let measureCount = 0;
 
-export function selectionLabel(total, measures) {
+export function selectionLabel(total: number, measures: number) {
   const notes = total - measures;
   const parts = [];
   if (notes || !measures) parts.push(`${notes} note${notes === 1 ? '' : 's'}`);
@@ -91,8 +103,8 @@ export function selectionLabel(total, measures) {
   return parts.join(' and ');
 }
 // The caller (player.js) owns the selection; we only hold its callbacks.
-const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null, onGroupEdit: null };
-let instrumentSelect = null;   // filled from the caller's instrument list
+const callbacks: Callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null, onGroupEdit: null };
+let instrumentSelect: HTMLSelectElement | null = null;   // filled from the caller's instrument list
 
 // ---- the CHANGE section -------------------------------------------------
 //
@@ -108,7 +120,7 @@ const CHANGE_VARS = [
   { name: 'frequency', placeholder: '3/2  or  2^(1/12)', inherits: false },
   { name: 'duration', placeholder: '2', inherits: false },
 ];
-const CHANGE_HINT = {
+const CHANGE_HINT: Record<string, string> = {
   amplitude: 'Set writes the expression to every note. × multiplies each note’s own value; notes that read it from a selected note follow. Inherit removes the notes’ own value.',
   attack: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
   release: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
@@ -132,8 +144,8 @@ const CHANGE_HINT = {
  *        apply one edit to the selection: op 'set' | 'scale' | 'inherit' | 'instrument' | 'color'
  * @param {string[]} o.instruments  the instruments the INSTRUMENT list offers
  */
-export function showGroupWidget({ count: n = 0, measureCount: bars = 0, onDeleteAll = null, onClear = null, onCopyToModules = null, onGroupEdit = null, instruments = null } = {}) {
-  if (!ensureRoot()) return;
+export function showGroupWidget({ count: n = 0, measureCount: bars = 0, onDeleteAll = null, onClear = null, onCopyToModules = null, onGroupEdit = null, instruments = null }: Partial<Callbacks> & { count?: number; measureCount?: number; instruments?: string[] | null } = {}) {
+  if (!ensureRoot() || !root) return;
 
   callbacks.onCopyToModules = onCopyToModules;
   callbacks.onGroupEdit = onGroupEdit;
@@ -161,7 +173,7 @@ export function hideGroupWidget() {
  * A count of 0 means the selection is gone: the widget hides itself rather than
  * offering actions on nothing.
  */
-export function updateGroupWidgetCount(n, bars = 0) {
+export function updateGroupWidgetCount(n: number, bars = 0) {
   if (!root) return;
   setCount(n, bars);
   if (count === 0) { hideGroupWidget(); return; }
@@ -177,7 +189,7 @@ export function isGroupWidgetVisible() {
 // The delete policy, stated as it actually behaves: the selected notes go, and
 // everything that depended on them is LIBERATED (its expressions are inlined),
 // so the rest of the piece does not move.
-function confirmDeleteAll(ctx) {
+function confirmDeleteAll(ctx: ActionContext) {
   const n = ctx.count;
   if (n <= 0) return;
   const description = selectionLabel(n, measureCount);
@@ -204,7 +216,8 @@ function clearSelection() {
 
 // ---- DOM ----------------------------------------------------------------
 
-function setCount(n, bars) {
+function setCount(n: number, bars: number) {
+  if (!countEl || !labelEl || !bodyEl || !root) return;
   count = n;
   measureCount = bars;
   const description = selectionLabel(count, measureCount);
@@ -214,13 +227,13 @@ function setCount(n, bars) {
   root.setAttribute('aria-label', description + ' selected');
 
   const onlyMeasures = count > 0 && count === measureCount;
-  const variable = bodyEl.querySelector('[data-section="change"] select');
+  const variable = bodyEl.querySelector<HTMLSelectElement>('[data-section="change"] select')!;
   for (const option of variable.options) option.disabled = onlyMeasures && option.value !== 'duration';
   if (variable.selectedOptions[0]?.disabled) {
     variable.value = 'duration';
     variable.dispatchEvent(new Event('change'));
   }
-  for (const section of bodyEl.querySelectorAll('[data-section="instrument"], [data-section="color"]')) {
+  for (const section of bodyEl.querySelectorAll<HTMLElement>('[data-section="instrument"], [data-section="color"]')) {
     section.hidden = onlyMeasures;
   }
 }
@@ -247,25 +260,25 @@ function ensureRoot() {
     handle: headerEl,
     onMove: fitHeight,
     isVisible: isGroupWidgetVisible,
-    ignoreDragStart: (e) => e.target.classList.contains('group-widget-close'),
+    ignoreDragStart: (e) => e.target instanceof Element && e.target.classList.contains('group-widget-close'),
   });
 
   built = true;
   return true;
 }
 
-function edit(op, varName, text) {
+function edit(op: GroupEdit['op'], varName: string | null, text?: string) {
   if (typeof callbacks.onGroupEdit === 'function') callbacks.onGroupEdit({ op, varName, text });
 }
 
-function el(tag, cls, text) {
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string | null, text?: string) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
   return e;
 }
 
-function smallButton(label, action, onClick, title) {
+function smallButton(label: string, action: string, onClick: () => void, title?: string) {
   const b = el('button', 'group-widget-btn group-widget-btn-small', label);
   b.type = 'button';
   b.dataset.action = action;
@@ -338,15 +351,15 @@ function renderInstrumentSection() {
   sec.appendChild(row);
   const row2 = el('div', 'group-widget-row');
   row2.append(
-    smallButton('Each note its own player', 'group-instrument', () => edit('instrument', null, instrumentSelect.value),
+    smallButton('Each note its own player', 'group-instrument', () => edit('instrument', null, instrumentSelect!.value),
       'Sets the instrument on every selected note: each becomes the first note of a player of its own.'),
-    smallButton('One player', 'group-instrument-one', () => edit('instrumentOnePlayer', null, instrumentSelect.value),
+    smallButton('One player', 'group-instrument-one', () => edit('instrumentOnePlayer', null, instrumentSelect!.value),
       'Sets the instrument on the notes that start the selection\'s lines; the others inherit it along them.'));
   sec.appendChild(row2);
   return sec;
 }
 
-function fillInstruments(list) {
+function fillInstruments(list: string[]) {
   if (!instrumentSelect) return;
   const keep = instrumentSelect.value;
   instrumentSelect.innerHTML = '';
@@ -377,6 +390,7 @@ function renderColorSection() {
 }
 
 function renderActions() {
+  if (!bodyEl) return;
   bodyEl.innerHTML = '';
 
   bodyEl.appendChild(renderChangeSection());
@@ -422,7 +436,7 @@ function renderActions() {
 
 // Escape inside the widget drops the selection — the same thing its × does.
 // Scoped to the panel, so it can only fire when focus is already in here.
-function onKeydown(e) {
+function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return;
   e.stopPropagation();
   clearSelection();
@@ -433,7 +447,7 @@ function onKeydown(e) {
 // contract as updateNoteWidgetHeight() / updatePanelHeight() — the drag clamp
 // only guarantees the HEADER stays on screen, so the header is the floor.
 function fitHeight() {
-  if (!root || !isGroupWidgetVisible()) return;
+  if (!root || !headerEl || !isGroupWidgetVisible()) return;
   const available = viewportHeight() - root.getBoundingClientRect().top - MIN_BUFFER;
   const floor = headerEl.offsetHeight;
   root.style.maxHeight = Math.max(floor, available) + 'px';
@@ -444,6 +458,7 @@ function fitHeight() {
 // workspace, on top of the very notes you would then want to shift-click.
 // Afterwards the user's dragged position wins.
 function placeDefault() {
+  if (!root) return;
   const w = root.offsetWidth;
   const h = root.offsetHeight;
   const left = Math.max(MIN_BUFFER, viewportWidth() - w - MIN_BUFFER);

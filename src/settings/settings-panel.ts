@@ -23,27 +23,28 @@
  */
 
 import { MAX_MODULE_NOTES } from '../limits.js';
-import { settingsStore } from './settings-store.js';
-import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.js';
-import { THEME_PRESETS, getPreset } from '../theme/presets.js';
+import { settingsStore } from './settings-store.ts';
+import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.ts';
+import { THEME_PRESETS, getPreset } from '../theme/presets.ts';
 import { eventBus } from '../utils/event-bus.js';
 import { moduleSnapshot } from '../store/history.js';
-import { showConfirmation } from '../utils/confirm-dialog.js';
+import { showConfirmation } from '../utils/confirm-dialog.ts';
 import {
   makeDraggableWidget,
   TOP_HEADER_HEIGHT,
   MIN_BUFFER,
-} from '../utils/draggable-widget.js';
-import { raisePanel } from '../utils/panel-stack.js';
+} from '../utils/draggable-widget.ts';
+import { raisePanel } from '../utils/panel-stack.ts';
 import { getModule } from '../store/app-state.js';
 import { moduleRepeatRatio, setModuleRepeat, repeatExprForRatio } from '../player/display-transpose.js';
 import { validateLoopRatio } from '../player/loop-transpose.js';
 import { isRational as isRationalValue, toText as exactTextOf } from '../value/exact.js';
-import { viewportWidth, viewportHeight } from '../utils/viewport.js';
+import { viewportWidth, viewportHeight } from '../utils/viewport.ts';
 
 // Themeable color tokens exposed as individual pickers (key + friendly label),
 // grouped for readability.
-const COLOR_TOKEN_GROUPS = [
+type ColorToken = keyof (typeof THEME_PRESETS)[string]['tokens'];
+const COLOR_TOKEN_GROUPS: { title: string; tokens: [ColorToken, string][] }[] = [
   { title: 'Interface', tokens: [
     ['accent', 'Accent'], ['bg', 'Background'], ['surface', 'Panel surface'],
     ['surfaceBorder', 'Panel border'], ['textPrimary', 'Text'], ['textSecondary', 'Muted text'],
@@ -58,20 +59,21 @@ const COLOR_TOKEN_GROUPS = [
   ]},
 ];
 
-let root = null;         // .rmt-set-panel — built once, then shown/hidden
-let currentTab = 'appearance';
-let bodyEl = null;
-let headerEl = null;
-let tabsEl = null;
-let drag = null;         // handle from makeDraggableWidget
-let unsubscribe = null;  // settingsStore subscription, live only while open
+type Tab = keyof typeof TAB_BUILDERS;
+let root: HTMLDivElement | null = null;         // .rmt-set-panel — built once, then shown/hidden
+let currentTab: Tab = 'appearance';
+let bodyEl: HTMLDivElement | null = null;
+let headerEl: HTMLDivElement | null = null;
+let tabsEl: HTMLDivElement | null = null;
+let drag: ReturnType<typeof makeDraggableWidget> | null = null;         // handle from makeDraggableWidget
+let unsubscribe: (() => void) | null = null;  // settingsStore subscription, live only while open
 let placed = false;      // has the panel been given its first position?
 
 // Control re-seeders for the tab currently rendered. Rebuilt by renderTab(),
 // run when the store changes underneath us.
-let syncers = [];
+let syncers: { controlEl: Element | null; fn: () => void }[] = [];
 // Teardowns for listeners owned by the current tab's controls.
-let disposers = [];
+let disposers: (() => void)[] = [];
 
 // Same 8-tooth gear as the top-bar button, so the header names its own opener.
 const GEAR_SVG = `<svg class="rmt-set-gear" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
@@ -90,7 +92,7 @@ const MIN_USEFUL_HEIGHT = 200;
 
 // A tab's id doubles as its settings section name — "Reset this tab" resets the
 // section of the same name, so the two must not drift apart.
-const TABS = [
+const TABS: { id: Tab; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'arrows', label: 'Arrows' },
   { id: 'audio', label: 'Audio' },
@@ -104,25 +106,25 @@ const TABS = [
 const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'fm-epiano', 'harmonium', 'harmonium-soft', 'piano', 'violin'];
 
 // Quick-pick intervals for the Arrows tab (name, n, d).
-const ARROW_PRESETS = [
+const ARROW_PRESETS: [string, number, number][] = [
   ['Octave', 2, 1], ['Fifth', 3, 2], ['Fourth', 4, 3],
   ['Major 3rd', 5, 4], ['Whole tone', 9, 8], ['Syntonic comma', 81, 80],
 ];
 
-function cents(n, d) {
+function cents(n: number, d: number) {
   return 1200 * Math.log2(n / d);
 }
 
 // ---- small DOM helpers --------------------------------------------------
 
-function el(tag, cls, text) {
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string | null, text?: string) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
   return e;
 }
 
-function row(labelText, controlEl, hintText) {
+function row(labelText: string, controlEl: Element, hintText?: string) {
   const r = el('div', 'rmt-set-row');
   const lab = el('label', 'rmt-set-label', labelText);
   r.appendChild(lab);
@@ -137,7 +139,7 @@ function row(labelText, controlEl, hintText) {
 // Register a re-seeder for a control. `el` is the control the user could be
 // interacting with; while it has focus we leave it alone rather than yanking
 // the value out from under a drag or a half-typed number.
-function addSync(controlEl, fn) {
+function addSync(controlEl: Element | null, fn: () => void) {
   syncers.push({ controlEl, fn });
 }
 
@@ -148,7 +150,7 @@ function syncControls() {
   }
 }
 
-function toggle(path) {
+function toggle(path: string) {
   const input = el('input');
   input.type = 'checkbox';
   input.className = 'rmt-set-toggle';
@@ -158,12 +160,12 @@ function toggle(path) {
   return input;
 }
 
-function slider(path, min, max, step, fmt) {
+function slider(path: string, min: number, max: number, step: number, fmt?: (v: string) => string) {
   const wrap = el('div', 'rmt-set-slider-wrap');
   const input = el('input');
   input.type = 'range';
-  input.min = min; input.max = max; input.step = step;
-  input.value = settingsStore.get(path);
+  input.min = String(min); input.max = String(max); input.step = String(step);
+  input.value = String(settingsStore.get(path));
   const out = el('span', 'rmt-set-slider-val', fmt ? fmt(input.value) : String(input.value));
   input.addEventListener('input', () => {
     settingsStore.set(path, parseFloat(input.value));
@@ -173,24 +175,24 @@ function slider(path, min, max, step, fmt) {
   wrap.appendChild(out);
   addSync(input, () => {
     const v = settingsStore.get(path);
-    input.value = v;
-    out.textContent = fmt ? fmt(v) : String(v);
+    input.value = String(v);
+    out.textContent = fmt ? fmt(String(v)) : String(v);
   });
   return wrap;
 }
 
-function numberInput(path, min, max, step) {
+function numberInput(path: string, min: number, max: number, step: number) {
   const input = el('input');
   input.type = 'number';
   input.className = 'rmt-set-number';
-  input.min = min; input.max = max; input.step = step;
-  input.value = settingsStore.get(path);
+  input.min = String(min); input.max = String(max); input.step = String(step);
+  input.value = String(settingsStore.get(path));
   input.addEventListener('change', () => settingsStore.set(path, parseFloat(input.value)));
-  addSync(input, () => { input.value = settingsStore.get(path); });
+  addSync(input, () => { input.value = String(settingsStore.get(path)); });
   return input;
 }
 
-function select(path, options) {
+function select(path: string, options: (string | [string, string])[]) {
   const sel = el('select', 'rmt-set-select');
   const cur = settingsStore.get(path);
   for (const opt of options) {
@@ -202,14 +204,14 @@ function select(path, options) {
     sel.appendChild(o);
   }
   sel.addEventListener('change', () => settingsStore.set(path, sel.value));
-  addSync(sel, () => { sel.value = settingsStore.get(path); });
+  addSync(sel, () => { sel.value = String(settingsStore.get(path)); });
   return sel;
 }
 
 // ---- tab builders -------------------------------------------------------
 
 // Effective color for a token = preset value overlaid with the user's override.
-function effectiveColor(tokenKey) {
+function effectiveColor(tokenKey: ColorToken) {
   const appearance = settingsStore.get('appearance') || {};
   const preset = getPreset(appearance.themeId);
   const ov = appearance.overrides || {};
@@ -217,7 +219,7 @@ function effectiveColor(tokenKey) {
 }
 
 // A color-picker row that writes to appearance.overrides.<tokenKey>.
-function colorRow(tokenKey, label) {
+function colorRow(tokenKey: ColorToken, label: string) {
   const wrap = el('div', 'rmt-set-color');
   const input = el('input');
   input.type = 'color';
@@ -240,7 +242,7 @@ function colorRow(tokenKey, label) {
 }
 
 // <input type=color> only accepts #rrggbb; coerce shorthand/other forms.
-function normalizeHex(c) {
+function normalizeHex(c: unknown) {
   if (typeof c !== 'string') return '#000000';
   let h = c.trim();
   if (/^#([0-9a-f]{3})$/i.test(h)) {
@@ -249,7 +251,7 @@ function normalizeHex(c) {
   return /^#([0-9a-f]{6})$/i.test(h) ? h : '#000000';
 }
 
-function buildAppearanceTab(container) {
+function buildAppearanceTab(container: HTMLElement) {
   const presetOptions = Object.values(THEME_PRESETS).map((p) => [p.id, p.name]);
 
   // Preset dropdown — selecting a theme applies its full color set and clears
@@ -305,17 +307,17 @@ function buildAppearanceTab(container) {
   controls.append(cutoff, never, neverLabel);
   const detailRow = row('Reduce detail above', controls,
     'Visible notes. Above this count, only the selected or hovered note keeps its controls and labels.');
-  detailRow.firstElementChild.htmlFor = cutoff.id;
-  detailRow.lastElementChild.id = 'rmt-detail-cutoff-hint';
-  cutoff.setAttribute('aria-describedby', detailRow.lastElementChild.id);
+  detailRow.firstElementChild!.setAttribute('for', cutoff.id);
+  detailRow.lastElementChild!.id = 'rmt-detail-cutoff-hint';
+  cutoff.setAttribute('aria-describedby', detailRow.lastElementChild!.id);
   const warning = el('div', 'rmt-detail-warning',
     'Choosing Never can slow down panning, zooming and playback when many notes are visible.');
   warning.id = 'rmt-never-detail-warning';
-  never.setAttribute('aria-describedby', detailRow.lastElementChild.id + ' ' + warning.id);
+  never.setAttribute('aria-describedby', detailRow.lastElementChild!.id + ' ' + warning.id);
   detailRow.appendChild(warning);
   const syncCutoff = () => {
     cutoff.disabled = settingsStore.get('appearance.neverReduceDetail');
-    if (document.activeElement !== cutoff) cutoff.value = settingsStore.get('appearance.detailCutoff');
+    if (document.activeElement !== cutoff) cutoff.value = String(settingsStore.get('appearance.detailCutoff'));
   };
   syncCutoff();
   addSync(null, syncCutoff);
@@ -357,7 +359,7 @@ function buildAppearanceTab(container) {
   container.appendChild(clearRow);
 }
 
-function buildArrowsTab(container) {
+function buildArrowsTab(container: HTMLElement) {
   container.appendChild(row('Show note arrows', toggle('arrows.enabled'), 'Turn the ▲/▼ interval arrows on notes off entirely.'));
 
   const modeSel = select('arrows.mode', [['reciprocal', 'Reciprocal (up ×r, down ÷r)'], ['independent', 'Independent up/down']]);
@@ -366,23 +368,23 @@ function buildArrowsTab(container) {
   // Ratio editor for "up"
   const up = settingsStore.get('arrows.up');
   const ratioWrap = el('div', 'rmt-set-ratio');
-  const nIn = el('input'); nIn.type = 'number'; nIn.min = 1; nIn.className = 'rmt-set-number'; nIn.value = up.n;
+  const nIn = el('input'); nIn.type = 'number'; nIn.min = String(1); nIn.className = 'rmt-set-number'; nIn.value = String(up.n);
   const slash = el('span', 'rmt-set-ratio-slash', '/');
-  const dIn = el('input'); dIn.type = 'number'; dIn.min = 1; dIn.className = 'rmt-set-number'; dIn.value = up.d;
+  const dIn = el('input'); dIn.type = 'number'; dIn.min = String(1); dIn.className = 'rmt-set-number'; dIn.value = String(up.d);
   const centsOut = el('span', 'rmt-set-cents', `${cents(up.n, up.d).toFixed(1)}¢`);
   const commit = () => {
     const n = parseInt(nIn.value, 10), d = parseInt(dIn.value, 10);
     settingsStore.set('arrows.up', { n, d, label: null });
     const v = settingsStore.get('arrows.up');
-    nIn.value = v.n; dIn.value = v.d;
+    nIn.value = String(v.n); dIn.value = String(v.d);
     centsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
   };
   nIn.addEventListener('change', commit);
   dIn.addEventListener('change', commit);
   addSync(null, () => {
     const v = settingsStore.get('arrows.up');
-    if (nIn !== document.activeElement) nIn.value = v.n;
-    if (dIn !== document.activeElement) dIn.value = v.d;
+    if (nIn !== document.activeElement) nIn.value = String(v.n);
+    if (dIn !== document.activeElement) dIn.value = String(v.d);
     centsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
   });
   ratioWrap.append(nIn, slash, dIn, centsOut);
@@ -392,23 +394,23 @@ function buildArrowsTab(container) {
   // mode (in reciprocal mode `down` auto-derives and the row would just lie).
   const down = settingsStore.get('arrows.down');
   const downWrap = el('div', 'rmt-set-ratio');
-  const dnIn = el('input'); dnIn.type = 'number'; dnIn.min = 1; dnIn.className = 'rmt-set-number'; dnIn.value = down.n;
+  const dnIn = el('input'); dnIn.type = 'number'; dnIn.min = String(1); dnIn.className = 'rmt-set-number'; dnIn.value = String(down.n);
   const downSlash = el('span', 'rmt-set-ratio-slash', '/');
-  const ddIn = el('input'); ddIn.type = 'number'; ddIn.min = 1; ddIn.className = 'rmt-set-number'; ddIn.value = down.d;
+  const ddIn = el('input'); ddIn.type = 'number'; ddIn.min = String(1); ddIn.className = 'rmt-set-number'; ddIn.value = String(down.d);
   const downCentsOut = el('span', 'rmt-set-cents', `${cents(down.n, down.d).toFixed(1)}¢`);
   const commitDown = () => {
     const n = parseInt(dnIn.value, 10), d = parseInt(ddIn.value, 10);
     settingsStore.set('arrows.down', { n, d, label: null });
     const v = settingsStore.get('arrows.down');
-    dnIn.value = v.n; ddIn.value = v.d;
+    dnIn.value = String(v.n); ddIn.value = String(v.d);
     downCentsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
   };
   dnIn.addEventListener('change', commitDown);
   ddIn.addEventListener('change', commitDown);
   addSync(null, () => {
     const v = settingsStore.get('arrows.down');
-    if (dnIn !== document.activeElement) dnIn.value = v.n;
-    if (ddIn !== document.activeElement) ddIn.value = v.d;
+    if (dnIn !== document.activeElement) dnIn.value = String(v.n);
+    if (ddIn !== document.activeElement) ddIn.value = String(v.d);
     downCentsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
   });
   downWrap.append(dnIn, downSlash, ddIn, downCentsOut);
@@ -428,7 +430,7 @@ function buildArrowsTab(container) {
     chip.type = 'button';
     chip.addEventListener('click', () => {
       settingsStore.set('arrows.up', { n, d, label: null });
-      nIn.value = n; dIn.value = d;
+      nIn.value = String(n); dIn.value = String(d);
       centsOut.textContent = `${cents(n, d).toFixed(1)}¢`;
     });
     chips.appendChild(chip);
@@ -444,18 +446,18 @@ function buildArrowsTab(container) {
   addSync(null, applyDim);
 }
 
-function buildAudioTab(container) {
-  const pct = (v) => `${Math.round(v * 100)}%`;
+function buildAudioTab(container: HTMLElement) {
+  const pct = (v: number | string) => `${Math.round(Number(v) * 100)}%`;
   const volWrap = slider('audio.masterVolume', 0, 1, 0.01, pct);
   container.appendChild(row('Master volume', volWrap));
   // The transport slider in the top bar only WRITES the setting when the drag
   // ends, so the store can't drive this one mid-drag. Follow its live echo, so
   // the two knobs move together in both directions.
-  const volInput = volWrap.querySelector('input');
-  const volOut = volWrap.querySelector('.rmt-set-slider-val');
-  disposers.push(eventBus.on('audio:masterVolumeInput', ({ value }) => {
+  const volInput = volWrap.querySelector('input')!;
+  const volOut = volWrap.querySelector('.rmt-set-slider-val')!;
+  disposers.push(eventBus.on('audio:masterVolumeInput', ({ value }: { value: number }) => {
     if (volInput === document.activeElement) return;   // don't fight the user
-    volInput.value = value;
+    volInput.value = String(value);
     volOut.textContent = pct(value);
   }));
 
@@ -477,14 +479,14 @@ function buildAudioTab(container) {
     // Not a setting: the current module's own repeat (its BaseNote's `repeat`),
     // saved with it; Clean Slate and a new composition start at 1/1.
     const wrap = el('div', 'rmt-set-ratio');
-    const nIn = el('input'); nIn.type = 'number'; nIn.min = 1; nIn.className = 'rmt-set-number';
-    const dIn = el('input'); dIn.type = 'number'; dIn.min = 1; dIn.className = 'rmt-set-number';
+    const nIn = el('input'); nIn.type = 'number'; nIn.min = String(1); nIn.className = 'rmt-set-number';
+    const dIn = el('input'); dIn.type = 'number'; dIn.min = String(1); dIn.className = 'rmt-set-number';
     const centsOut = el('span', 'rmt-set-cents', '');
     const show = () => {
       const m = getModule();
       let r = null;
       try { r = m ? moduleRepeatRatio(m) : null; } catch {}
-      if (!r) { nIn.value = 1; dIn.value = 1; centsOut.textContent = '0.0¢'; nIn.disabled = dIn.disabled = false; return; }
+      if (!r) { nIn.value = String(1); dIn.value = String(1); centsOut.textContent = '0.0¢'; nIn.disabled = dIn.disabled = false; return; }
       if (isRationalValue(r)) {
         if (nIn !== document.activeElement) nIn.value = String(r.n);
         if (dIn !== document.activeElement) dIn.value = String(r.d);
@@ -529,12 +531,12 @@ function buildAudioTab(container) {
   container.appendChild(row('Decay', slider('audio.reverb.decaySec', 0.1, 12, 0.1, (v) => `${(+v).toFixed(1)} s`)));
   container.appendChild(row('Damping', slider('audio.reverb.damping', 0, 1, 0.01)));
   container.appendChild(row('Pre-delay', slider('audio.reverb.preDelayMs', 0, 200, 1, (v) => `${v} ms`)));
-  container.appendChild(row('Reverb amount', slider('audio.reverb.wet', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`), 'How much reverb is mixed in on top of the dry signal (0% = dry, 100% = fully wet).'));
+  container.appendChild(row('Reverb amount', slider('audio.reverb.wet', 0, 1, 0.01, (v) => `${Math.round(Number(v) * 100)}%`), 'How much reverb is mixed in on top of the dry signal (0% = dry, 100% = fully wet).'));
 
   const stHeader = el('div', 'rmt-set-subhead', 'Stereo width');
   container.appendChild(stHeader);
   container.appendChild(row('Spread notes by pitch', toggle('audio.stereo.enabled'), 'Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position).'));
-  container.appendChild(row('Amount', slider('audio.stereo.width', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`)));
+  container.appendChild(row('Amount', slider('audio.stereo.width', 0, 1, 0.01, (v) => `${Math.round(Number(v) * 100)}%`)));
 
   container.appendChild(el('div', 'rmt-set-subhead', 'Live tempo'));
   container.appendChild(row('Tempo range', tempoRangeControl(), 'The span of the live-tempo slider in the module bar, in BPM. It always reaches the tempo the piece is written at.'));
@@ -547,7 +549,7 @@ function buildAudioTab(container) {
   container.appendChild(note);
 }
 
-function buildLibraryTab(container) {
+function buildLibraryTab(container: HTMLElement) {
   container.appendChild(row('Icon size', slider('library.iconSizePx', 32, 96, 4, (v) => `${v} px`)));
   container.appendChild(row('Show cents', toggle('library.showCents'), 'Display cents alongside ratios in the module library.'));
 }
@@ -556,14 +558,14 @@ function buildLibraryTab(container) {
 // The other half of the bottom-left Scale Controls widget: both write the same
 // `scale.*` settings, so whichever you touch, the other follows.
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 // Scale factors are read as numbers, not rounded percentages — show enough
 // decimals for a 0.001 limit without printing 1.0000000000000002 for 1.
-const fmtScale = (v) => (Number.isFinite(+v) ? String(Math.round(+v * 1000) / 1000) : '');
+const fmtScale = (v: number | string) => (Number.isFinite(+v) ? String(Math.round(+v * 1000) / 1000) : '');
 
 // The [min, max] the given axis's slider spans.
-function scaleBounds(axis) {
+function scaleBounds(axis: 'x' | 'y') {
   const lim = settingsStore.get('scale.limits') || {};
   return axis === 'x' ? [lim.xMin, lim.xMax] : [lim.yMin, lim.yMax];
 }
@@ -571,8 +573,8 @@ function scaleBounds(axis) {
 // A slider paired with an editable number. The slider's detents get coarse once
 // the limits span decades, so the number field is how you land on an exact value
 // (it clamps into the limits — widen those first to go further).
-function scaleControl(axis) {
-  const path = `scale.${axis}`;
+function scaleControl(axis: 'x' | 'y') {
+  const path = `scale.${axis}` as const;
   const wrap = el('div', 'rmt-set-slider-wrap');
   const range = el('input');
   range.type = 'range';
@@ -585,11 +587,11 @@ function scaleControl(axis) {
   const seed = () => {
     const [lo, hi] = scaleBounds(axis);
     const step = scaleStep(lo, hi);
-    range.min = lo; range.max = hi; range.step = step;
-    num.min = lo; num.max = hi;
+    range.min = String(lo); range.max = String(hi); range.step = String(step);
+    num.min = String(lo); num.max = String(hi);
     num.dataset.step = String(step);   // the arrows step like the slider (number-stepper.js)
     const v = settingsStore.get(path);
-    if (range !== document.activeElement) range.value = v;
+    if (range !== document.activeElement) range.value = String(v);
     if (num !== document.activeElement) num.value = fmtScale(v);
   };
 
@@ -620,19 +622,19 @@ function tempoRangeControl() {
     const i = el('input');
     i.type = 'number';
     i.className = 'rmt-set-number';
-    i.step = 1;
-    i.min = TEMPO_HARD_MIN;
-    i.max = TEMPO_HARD_MAX;
+    i.step = String(1);
+    i.min = String(TEMPO_HARD_MIN);
+    i.max = String(TEMPO_HARD_MAX);
     return i;
   };
   const loIn = mk();
   const hiIn = mk();
   const seed = () => {
     const r = settingsStore.get('audio.tempoRange') || {};
-    if (loIn !== document.activeElement) loIn.value = r.min;
-    if (hiIn !== document.activeElement) hiIn.value = r.max;
+    if (loIn !== document.activeElement) loIn.value = String(r.min);
+    if (hiIn !== document.activeElement) hiIn.value = String(r.max);
   };
-  const commit = (edited) => {
+  const commit = (edited: 'lo' | 'hi') => {
     let lo = clamp(Math.round(parseFloat(loIn.value)), TEMPO_HARD_MIN, TEMPO_HARD_MAX);
     let hi = clamp(Math.round(parseFloat(hiIn.value)), TEMPO_HARD_MIN, TEMPO_HARD_MAX);
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) { seed(); return; }
@@ -652,15 +654,15 @@ function tempoRangeControl() {
   return wrap;
 }
 
-function limitControl(axis) {
+function limitControl(axis: 'x' | 'y') {
   const wrap = el('div', 'rmt-set-range');
   const mk = () => {
     const i = el('input');
     i.type = 'number';
     i.className = 'rmt-set-number';
     i.step = 'any';
-    i.min = SCALE_HARD_MIN;
-    i.max = SCALE_HARD_MAX;
+    i.min = String(SCALE_HARD_MIN);
+    i.max = String(SCALE_HARD_MAX);
     return i;
   };
   const loIn = mk();
@@ -674,7 +676,7 @@ function limitControl(axis) {
 
   // Whichever field you just edited wins; the other gives way by a decade rather
   // than the edit being rejected.
-  const commit = (edited) => {
+  const commit = (edited: 'lo' | 'hi') => {
     let lo = clamp(parseFloat(loIn.value), SCALE_HARD_MIN, SCALE_HARD_MAX);
     let hi = clamp(parseFloat(hiIn.value), SCALE_HARD_MIN, SCALE_HARD_MAX);
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) { seed(); return; }
@@ -698,7 +700,7 @@ function limitControl(axis) {
   return wrap;
 }
 
-function buildScaleTab(container) {
+function buildScaleTab(container: HTMLElement) {
   container.appendChild(row('Horizontal (time)', scaleControl('x'), 'How far apart notes sit along the time axis.'));
   container.appendChild(row('Vertical (pitch)', scaleControl('y'), 'How far apart octaves sit along the frequency axis.'));
 
@@ -754,10 +756,10 @@ function releaseTab() {
   syncers = [];
 }
 
-function selectTab(id) {
+function selectTab(id: Tab) {
   currentTab = id;
   if (!root) return;
-  root.querySelectorAll('.rmt-set-tab').forEach((t) => {
+  root.querySelectorAll<HTMLElement>('.rmt-set-tab').forEach((t) => {
     t.classList.toggle('active', t.dataset.tab === id);
   });
   renderTab();
@@ -785,13 +787,14 @@ function updatePanelHeight() {
   // Floor is the HEADER alone, not header+tabs: the drag clamp only guarantees
   // the handle stays on screen, so anything taller would hang off the bottom
   // when the panel is parked at the very bottom. (Same floor as the note widget.)
-  const floor = headerEl.offsetHeight;
+  const floor = headerEl!.offsetHeight;
   root.style.maxHeight = Math.max(floor, available) + 'px';
 }
 
 // First open only: park it top-right, under the bars and clear of the note
 // widget (which lives bottom-left). Afterwards the user's dragged position wins.
 function placeDefault() {
+  if (!root) return;
   const width = root.offsetWidth;
   const left = Math.max(MIN_BUFFER, viewportWidth() - width - MIN_BUFFER);
   // DEFAULT_TOP clears both bars, but on a landscape phone the whole screen is barely
@@ -875,25 +878,26 @@ function buildPanel() {
     handle: headerEl,
     onMove: updatePanelHeight,
     isVisible: isSettingsPanelOpen,
-    ignoreDragStart: (e) => e.target.classList.contains('rmt-set-close'),
+    ignoreDragStart: (e) => e.target instanceof Element && e.target.classList.contains('rmt-set-close'),
   });
 }
 
 // Scoped to the panel, so it can only fire when focus is already inside it —
 // unlike the old document-level listener, which closed the panel on any Escape.
 // Inside a field, Escape belongs to the field: it bails out of the edit.
-function onKeydown(e) {
+function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return;
   const t = e.target;
-  const isField = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT') &&
+  const isField = (t instanceof HTMLInputElement || t instanceof HTMLSelectElement) &&
     t.type !== 'checkbox' && t.type !== 'range';
   e.stopPropagation();
   if (isField) { t.blur(); return; }
   closeSettingsPanel();
 }
 
-export function openSettingsPanel(tabId) {
+export function openSettingsPanel(tabId?: Tab) {
   if (!root) buildPanel();
+  if (!root) return;
   if (tabId) currentTab = tabId;
 
   root.classList.add('rmt-set-open');
@@ -923,7 +927,7 @@ export function closeSettingsPanel() {
   emitPanelState();
 }
 
-export function toggleSettingsPanel(tabId) {
+export function toggleSettingsPanel(tabId?: Tab) {
   if (isSettingsPanelOpen()) closeSettingsPanel();
   else openSettingsPanel(tabId);
 }

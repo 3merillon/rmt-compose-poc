@@ -26,14 +26,15 @@ function elideDigits(v: bigint) {
  * @param {object} frac - Fraction (BigInt-backed) or duck-typed {s,n,d}
  * @returns {{text: string, title: string} | null}
  */
-export function hugeFractionDisplay(frac: { n?: number | bigint; d?: number | bigint; s: bigint | number } | null | undefined) {
-  const n = frac?.n;
-  const d = frac?.d;
+export function hugeFractionDisplay(frac: unknown) {
+  if (!frac || typeof frac !== 'object' || !('n' in frac) || !('d' in frac)) return null;
+  const { n, d } = frac;
   if (typeof n !== 'bigint' || typeof d !== 'bigint') return null;
   if (bigDigits(n) + bigDigits(d) <= EXACT_DIGIT_LIMIT) return null;
-  const signed = frac!.s < 0n ? -n : n;
+  const s = 's' in frac && (typeof frac.s === 'bigint' || typeof frac.s === 'number') ? frac.s : 1n;
+  const signed = s < 0n ? -n : n;
   return {
-    text: `≈${toNumber(frac).toPrecision(8)}`,
+    text: `≈${toNumber({s, n, d}).toPrecision(8)}`,
     title: `${elideDigits(signed)}/${elideDigits(d)}`
   };
 }

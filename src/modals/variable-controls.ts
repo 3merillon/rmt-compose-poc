@@ -1,8 +1,13 @@
 // Modularized variable controls for the Modals panel
 // Creates a single "variable row" for a given key/value pair
 // API: createVariableControls(key, value, note, measureId, externalFunctions)
+import type { Module } from '../module.ts';
+import type { Note } from '../note.ts';
+import type { InspectorHooks, InspectorRow } from './inspector-types.ts';
+import type { ArrowRatio } from '../settings/settings-schema.ts';
+import type { EvaluationRecord } from '../model-types.ts';
 import { setModuleRepeat, moduleRepeatRatio } from '../player/display-transpose.js';
-import { validateExpression } from './validation.js';
+import { validateExpression } from './validation.ts';
 import { eventBus } from '../utils/event-bus.js';
 import { moduleSnapshot } from '../store/history.js';
 import Fraction from 'fraction.js';
@@ -11,11 +16,11 @@ import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric
 import { decompileToDSL, compileDSL } from '../dsl/index.js';
 import { isIrrational, isApprox, toText as exactText, toNumber as exactToNumber } from '../value/exact.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
-import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
-import { settingsStore } from '../settings/settings-store.js';
+import { escapeHtml, validateColorInput } from '../utils/html-escape.ts';
+import { settingsStore } from '../settings/settings-store.ts';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { toNumber } from '../utils/fraction-num.js';
-import { hugeFractionDisplay } from './fraction-display.js';
+import { hugeFractionDisplay } from './fraction-display.ts';
 import { EXPRESSION_VARS, isMeasureNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
 
@@ -33,12 +38,12 @@ function pauseIfPlaying() {
 }
 
 // Every note's evaluated variables, for evaluating a free-standing expression
-function buildEvalCache(moduleInstance) {
-  const cache = new Map();
+function buildEvalCache(moduleInstance: Module) {
+  const cache = new Map<number, Partial<EvaluationRecord>>();
   for (const id in moduleInstance?.notes || {}) {
     const n = moduleInstance.notes[id];
     if (!n || typeof n.getVariable !== 'function') continue;
-    const rec = {};
+    const rec: Partial<EvaluationRecord> = {};
     try { for (const v of EXPRESSION_VARS) rec[v] = n.getVariable(v); } catch {}
     cache.set(parseInt(id, 10), rec);
   }
@@ -46,7 +51,7 @@ function buildEvalCache(moduleInstance) {
 }
 
 // The time unit (base.d) when it is a usable positive value, else null
-function positiveTimeUnit(moduleInstance) {
+function positiveTimeUnit(moduleInstance: Module | null) {
   try {
     const d = moduleInstance?.baseNote?.getVariable?.('duration');
     return (d && typeof d.compare === 'function' && d.compare(0) > 0) ? d : null;
@@ -55,13 +60,13 @@ function positiveTimeUnit(moduleInstance) {
   }
 }
 
-function isApproximate(frac, value) {
+function isApproximate(frac: (Fraction & { _irrational?: boolean; _floatValue?: number }) | null, value: InspectorRow) {
   return !!(value?.isCorrupted || value?.isTransitivelyCorrupted || frac?._irrational || frac?._floatValue !== undefined);
 }
 
 // "= 100 BPM": the time unit read as a tempo, 60 / base.d (a view; nothing stores it)
-function bpmHintText(unit, value) {
-  if (!unit || typeof unit.compare !== 'function' || unit.compare(0) <= 0) return null;
+function bpmHintText(unit: unknown, value: InspectorRow) {
+  if (!(unit instanceof Fraction) || typeof unit.compare !== 'function' || unit.compare(0) <= 0) return null;
   const bpm = new Fraction(60).div(unit);
   const approx = isApproximate(unit, value);
   if (!approx && bpm.d === 1n) return `= ${bpm.s * bpm.n} BPM`;
@@ -72,8 +77,8 @@ function bpmHintText(unit, value) {
 }
 
 // "= 4 time units": a bar's length over the time unit, d / base.d
-function timeUnitsHintText(duration, unit, value) {
-  if (!duration || typeof duration.div !== 'function' || !unit) return null;
+function timeUnitsHintText(duration: unknown, unit: Fraction | null, value: InspectorRow) {
+  if (!(duration instanceof Fraction) || typeof duration.div !== 'function' || !unit) return null;
   const k = duration.div(unit);
   const plural = k.equals(1) ? '' : 's';
   if (isApproximate(duration, value)) {
@@ -86,7 +91,7 @@ function timeUnitsHintText(duration, unit, value) {
   return `= ${txt} time unit${plural}`;
 }
 
-function makeHint(text, block = false) {
+function makeHint(text: string, block = false) {
   const hint = document.createElement(block ? 'div' : 'span');
   hint.className = 'value-hint';
   hint.textContent = text;
@@ -96,7 +101,7 @@ function makeHint(text, block = false) {
   return hint;
 }
 
-function recompileNoteAndDependents(noteId, visited = new Set()) {
+function recompileNoteAndDependents(noteId: number, visited = new Set<number>()) {
   const moduleInstance = getModule();
   if (!moduleInstance) return;
   if (visited.has(noteId)) return;
@@ -107,10 +112,10 @@ function recompileNoteAndDependents(noteId, visited = new Set()) {
 
   // Also mark all dependents dirty
   const dependents = moduleInstance.getDependentNotes(noteId);
-  dependents.forEach((depId) => recompileNoteAndDependents(depId, visited));
+  dependents.forEach((depId: number) => recompileNoteAndDependents(depId, visited));
 }
 
-function buildEvaluatedDiv(value) {
+function buildEvaluatedDiv(value: InspectorRow) {
   const evaluatedDiv = document.createElement('div');
   evaluatedDiv.className = 'evaluated-value';
 
@@ -143,7 +148,7 @@ function buildEvaluatedDiv(value) {
   }
 
   // A transposed loop pass: say so beside the value (display-transpose.js)
-  if (Number.isInteger(value?.transposedPass) && value.transposedPass > 0) {
+  if (Number.isInteger(value?.transposedPass) && (value.transposedPass ?? 0) > 0) {
     displayValue += ` (repeat ${value.transposedPass})`;
   }
 
@@ -169,12 +174,12 @@ function buildEvaluatedDiv(value) {
  * @param {string} key - The variable key (frequency, startTime, etc.)
  * @returns {string} DSL-formatted expression
  */
-function convertToDSLDisplay(rawExpr, note, key) {
+function convertToDSLDisplay(rawExpr: unknown, note: Note | null, key: string | null) {
   if (!rawExpr) return '';
 
   try {
     // If note has a compiled binary expression, decompile it to DSL
-    const expr = note?.getExpression?.(key);
+    const expr = key != null ? note?.getExpression?.(key) : null;
     if (expr && !expr.isEmpty()) {
       return decompileToDSL(expr);
     }
@@ -185,7 +190,7 @@ function convertToDSLDisplay(rawExpr, note, key) {
   return rawExpr;
 }
 
-function buildRawEditor(initialRaw, note = null, key = null) {
+function buildRawEditor(initialRaw: unknown, note: Note | null = null, key: string | null = null) {
   const rawDiv = document.createElement('div');
   rawDiv.className = 'raw-value';
 
@@ -199,7 +204,7 @@ function buildRawEditor(initialRaw, note = null, key = null) {
 
   // Convert to DSL format for display
   const displayValue = convertToDSLDisplay(initialRaw, note, key);
-  rawInput.value = displayValue ?? '';
+  rawInput.value = String(displayValue ?? '');
 
   const saveButton = document.createElement('button');
   saveButton.className = 'raw-value-save';
@@ -219,7 +224,7 @@ function buildRawEditor(initialRaw, note = null, key = null) {
     whiteSpace: 'pre-wrap'
   });
 
-  function showError(message) {
+  function showError(message: string) {
     errorDiv.textContent = message;
     errorDiv.style.display = 'block';
     rawInput.style.borderColor = 'var(--rmt-danger, #ff0000)';
@@ -244,7 +249,7 @@ function buildRawEditor(initialRaw, note = null, key = null) {
 }
 
 // Helper to build canonical duration expression: the time unit times n/d, base.d * (n/d)
-function computeDurationExpr(multiplierNum, multiplierDen = 1) {
+function computeDurationExpr(multiplierNum: number, multiplierDen = 1) {
   if (multiplierNum === 1 && multiplierDen === 1) return 'base.d';
   return (multiplierDen === 1)
     ? `base.d * ${multiplierNum}`
@@ -253,10 +258,10 @@ function computeDurationExpr(multiplierNum, multiplierDen = 1) {
 
 // Multiply two rational values and reduce (n1/d1) * (n2/d2).
 // Operands are the fixed picker constants (≤ 7/4), so Number math is exact.
-function mulFrac(n1, d1, n2, d2) {
+function mulFrac(n1: number, d1: number, n2: number, d2: number) {
   let n = n1 * n2;
   let d = d1 * d2;
-  const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) { const t = b; b = a % b; a = t; } return a; };
+  const gcd = (a: number, b: number) => { a = Math.abs(a); b = Math.abs(b); while (b) { const t = b; b = a % b; a = t; } return a; };
   const g = gcd(n, d);
   return [n / g, d / g];
 }
@@ -323,7 +328,7 @@ function ensureModalsStyleInjected() {
   __modalsStyleInjected = true;
 }
 
-function createDurationSelector(rawInput, saveButton, note, value) {
+function createDurationSelector(rawInput: HTMLInputElement, saveButton: HTMLButtonElement, note: Note, value: InspectorRow) {
   ensureModalsStyleInjected();
 
   const container = document.createElement('div');
@@ -355,8 +360,8 @@ function createDurationSelector(rawInput, saveButton, note, value) {
   let selectedBaseIdx = -1;
   let selectedDotIdx  = -1;
 
-  const baseButtons = [];
-  const dotButtons = [];
+  const baseButtons: HTMLButtonElement[] = [];
+  const dotButtons: HTMLButtonElement[] = [];
 
   // Calculate and set expression based on selection
   function commitSelection() {
@@ -490,7 +495,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
         const dur = (value && value.evaluated != null)
           ? value.evaluated
           : (note && typeof note.getVariable === 'function' ? note.getVariable('duration') : null);
-        if (unit && dur && typeof dur.div === 'function') {
+        if (unit && dur instanceof Fraction && typeof dur.div === 'function') {
           m = toNumber(dur.div(unit), NaN);
         }
       } catch {}
@@ -502,7 +507,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
           const moduleInstance = getModule();
           const unit = positiveTimeUnit(moduleInstance);
           const validation = validateExpressionSyntax(raw);
-          if (unit && validation.valid) {
+          if (moduleInstance && unit && validation.valid) {
             // Compile using safe parser
             const binary = compileDSL(raw);
             // Evaluate using safe binary evaluator
@@ -559,9 +564,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
     requestAnimationFrame(computeAndSelect);
   }
   // attach to container so caller can trigger after append
-  container.__preselect = __preselectDurationButtons;
-
-  return container;
+  return Object.assign(container, { __preselect: __preselectDurationButtons });
 }
 
 /**
@@ -570,7 +573,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
  * bar's length (a meter change) carries to the bars that follow.
  * @returns {HTMLElement|null}
  */
-export function createMeasureDurationRow(note, measureId, externalFunctions) {
+export function createMeasureDurationRow(note: Note, measureId: number, externalFunctions: InspectorHooks) {
   const moduleInstance = getModule();
   if (!moduleInstance) return null;
 
@@ -592,7 +595,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
   return createVariableControls('duration', value, bar, measureId, externalFunctions);
 }
 
-function refreshModals(note, measureId) {
+function refreshModals(note: Note, measureId: number | null) {
   try {
     const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
     let clickedEl = null;
@@ -607,12 +610,12 @@ function refreshModals(note, measureId) {
 }
 
 function instrumentsFromManager() {
-  const list = [];
+  const list: string[] = [];
   try {
     const im = getInstrumentManager();
     if (im?.getAvailableInstruments) {
       const all = im.getAvailableInstruments();
-      all.forEach((name) => list.push(name));
+      all.forEach((name: string) => list.push(name));
       return list.sort();
     }
   } catch {}
@@ -620,7 +623,7 @@ function instrumentsFromManager() {
   return ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone'];
 }
 
-function buildInstrumentControl(value, note, externalFunctions) {
+function buildInstrumentControl(value: InspectorRow, note: Note, externalFunctions: InspectorHooks) {
   const container = document.createElement('div');
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
@@ -675,6 +678,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
     try {
       pauseIfPlaying();
       const moduleInstance = getModule();
+      if (!moduleInstance) return;
       const newValue = select.value;
       note.setVariable('instrument', newValue);
       const evaluated = moduleInstance.evaluateModule();
@@ -685,7 +689,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
       refreshModals(note, null);
       // History snapshot: instrument change
       try {
-        const snap = moduleSnapshot(getModule(), [note.id]);
+        const snap = moduleSnapshot(moduleInstance, [note.id]);
         // Ensure baseline exists so first action can be undone independently
         try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
         eventBus.emit('history:capture', { label: `Edit instrument Note ${note.id}`, ...snap });
@@ -705,6 +709,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
       try {
         pauseIfPlaying();
         const moduleInstance = getModule();
+        if (!moduleInstance) return;
         note.properties.instrument = null;
         if (moduleInstance?.markNoteDirty) moduleInstance.markNoteDirty(note.id);
         const evaluated = moduleInstance.evaluateModule();
@@ -715,7 +720,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
         refreshModals(note, null);
         // History snapshot: instrument reset to inherited
         try {
-          const snap = moduleSnapshot(getModule(), [note.id]);
+          const snap = moduleSnapshot(moduleInstance, [note.id]);
           // Ensure baseline exists so first action can be undone independently
           try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
           eventBus.emit('history:capture', { label: `Reset instrument Note ${note.id}`, ...snap });
@@ -732,7 +737,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
   return container;
 }
 
-function addFrequencyOctaveButtons(parent, note) {
+function addFrequencyOctaveButtons(parent: Element, note: Note) {
   // Respect the Settings → Arrows toggle: when arrows are disabled, don't
   // render the note-widget ▲/▼ buttons at all.
   let arrowsCfg = null;
@@ -741,7 +746,7 @@ function addFrequencyOctaveButtons(parent, note) {
     return;
   }
   // Build a human-readable interval label for tooltips (e.g. "×3/2" / "×2/3").
-  const fmtRatio = (r) => {
+  const fmtRatio = (r: ArrowRatio | undefined | null) => {
     if (!r) return '';
     // Loose compare: settings ratios are plain Numbers, but tolerate 1n too
     return r.d == 1 ? `×${r.n}` : `×${r.n}/${r.d}`;
@@ -754,7 +759,7 @@ function addFrequencyOctaveButtons(parent, note) {
   container.style.flexDirection = 'column';
   container.style.marginLeft = 'auto';
 
-  const mkBtn = (cls, text, dir, tip) => {
+  const mkBtn = (cls: string, text: string, dir: 'up' | 'down', tip: string) => {
     const btn = document.createElement('button');
     btn.className = `octave-button ${cls}`;
     Object.assign(btn.style, {
@@ -804,7 +809,7 @@ function addFrequencyOctaveButtons(parent, note) {
 }
 
 // Public API
-export function createVariableControls(key, value, note, measureId, externalFunctions) {
+export function createVariableControls(key: string, value: InspectorRow, note: Note, measureId: number | null, externalFunctions: InspectorHooks) {
   const variableRow = document.createElement('div');
   variableRow.className = 'variable-row';
 
@@ -861,6 +866,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         clearError();
         pauseIfPlaying();
         const moduleInstance = getModule();
+        if (!moduleInstance) return;
         const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
         // The BaseNote's repeat: a relation kept as text, checked by evaluating it
         if (key === 'repeat') {
@@ -873,7 +879,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
             return;
           }
           try {
-            const snap = moduleSnapshot(getModule(), [note.id]);
+            const snap = moduleSnapshot(moduleInstance, [note.id]);
             try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
             eventBus.emit('history:capture', { label: text ? `Repeat ${text}` : 'Repeat as written', ...snap });
           } catch {}
@@ -894,7 +900,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           }
           // History snapshot: color edit
           try {
-            const snap = moduleSnapshot(getModule(), [note.id]);
+            const snap = moduleSnapshot(moduleInstance, [note.id]);
             // Ensure baseline exists so first color change (first action) can be undone
             try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
             eventBus.emit('history:capture', { label: `Edit color Note ${note.id}`, ...snap });
@@ -915,7 +921,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           }
           refreshModals(note, measureId);
           try {
-            const snap = moduleSnapshot(getModule(), [note.id]);
+            const snap = moduleSnapshot(moduleInstance, [note.id]);
             try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
             eventBus.emit('history:capture', { label: `Reset ${key} Note ${note?.id}`, ...snap });
           } catch {}
@@ -953,7 +959,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         // Set the expression string directly - the Note class will compile it to binary
         if (measureId !== null && measureId !== undefined) {
           // Write to measure note
-          const measureNote = moduleInstance.getNoteById(parseInt(measureId, 10));
+          const measureNote = moduleInstance.getNoteById(parseInt(String(measureId), 10));
           if (measureNote) {
             measureNote.setVariable(key + 'String', simplifiedExpression);
           }
@@ -981,14 +987,14 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         // History snapshot: generic variable edit
         try {
           const idLabel = (measureId !== null && measureId !== undefined) ? `Measure ${measureId}` : `Note ${note?.id}`;
-          const snap = moduleSnapshot(getModule(), [note.id]);
+          const snap = moduleSnapshot(moduleInstance, [note.id]);
           // Ensure baseline exists so first action can be undone independently
           try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
           eventBus.emit('history:capture', { label: `Edit ${key} ${idLabel}`, ...snap });
         } catch {}
       } catch (err) {
         console.error('Error saving variable', key, 'for note', note?.id, ':', err);
-        showError(err?.message || 'Could not save expression');
+        showError((err instanceof Error && err.message) || 'Could not save expression');
       }
     });
 

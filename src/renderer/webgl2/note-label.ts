@@ -11,22 +11,22 @@
  * with ≈ ({ approx: true }), so a rounded number never passes as the exact one.
  * The hatching says whether a note is tempered; the label says what it is.
  */
-import * as X from '../../value/exact.js';
+import * as X from '../../value/exact.ts';
 
 export const LINE_LABEL = '\u0000line';
 const MAX_DIGITS = 4;
 const MAX_LINE = 16;
 const APPROX = Object.freeze({ approx: true });
 
-const digits = (b) => (b < 0n ? -b : b).toString().length;
-const fracText = (f) => (f.d === 1n ? `${f.s * f.n}` : `${f.s * f.n}/${f.d}`);
+const digits = (b: bigint) => (b < 0n ? -b : b).toString().length;
+const fracText = (f: X.Rational) => (f.d === 1n ? `${f.s * f.n}` : `${f.s * f.n}/${f.d}`);
 
 /**
  * @param {Fraction|Irrational|Approx} value the note's exact frequency
  * @param {Fraction|Irrational|Approx} base the BaseNote's exact frequency
  * @returns {{num: string, den: string}|{approx: true}|null} null when there is no ratio
  */
-export function noteLabel(value, base) {
+export function noteLabel(value: X.ExactValue | null | undefined, base: X.ExactValue | null | undefined) {
   if (value == null || base == null || X.isZero(base)) return null;
   const r = X.div(value, base);
   if (X.isApprox(r)) return APPROX;

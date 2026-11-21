@@ -2,6 +2,9 @@
 // Exports:
 //   - createAddNoteSection(note, isBase, externalFunctions) => HTMLElement
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
+import type { Note } from '../note.js';
+import type { InspectorHooks } from './inspector-types.ts';
+import type { InputFields, EvaluationRecord } from '../model-types.ts';
 import { eventBus } from '../utils/event-bus.js';
 import { moduleSnapshot } from '../store/history.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
@@ -18,7 +21,7 @@ function pauseIfPlaying() {
   } catch {}
 }
 
-function refreshModals(note, measureId = null) {
+function refreshModals(note: Note | null | undefined, measureId: number | null = null) {
   try {
     const id = (note && note.id !== undefined) ? note.id : measureId;
     let clickedEl = null;
@@ -35,7 +38,7 @@ function refreshModals(note, measureId = null) {
 // The time unit: the reference note's duration
 const TIME_UNIT = 'base.d';
 
-function defaultFrequencyFormulaFor(note) {
+function defaultFrequencyFormulaFor(note: Note) {
   if (!note || !note.id) {
     return `base.f`;
   }
@@ -49,7 +52,7 @@ function defaultFrequencyFormulaFor(note) {
   return `base.f`;
 }
 
-function getDefaultDuration(note) {
+function getDefaultDuration(note: Note) {
   // Try to get the duration expression from the parent note and convert to DSL
   if (note && note.id) {
     try {
@@ -68,7 +71,7 @@ function getDefaultDuration(note) {
   return TIME_UNIT;
 }
 
-function sectionHeader(text) {
+function sectionHeader(text: string) {
   const header = document.createElement('div');
   header.className = 'variable-name';
   header.style.color = '#00ffcc';
@@ -85,7 +88,7 @@ function rowContainer() {
   return row;
 }
 
-function labeledRow(nameText) {
+function labeledRow(nameText: string) {
   const row = rowContainer();
   const name = document.createElement('div');
   name.className = 'variable-name';
@@ -98,12 +101,12 @@ function labeledRow(nameText) {
   return { row, value };
 }
 
-export function createAddMeasureSection(note, measureId, externalFunctions) {
+export function createAddMeasureSection(note: Note, measureId: number | null, externalFunctions: InspectorHooks) {
   const wrap = document.createElement('div');
   wrap.className = 'variable-row';
   const name = document.createElement('div');
   name.className = 'variable-name';
-  name.textContent = (note === getModule().baseNote) ? 'Add New Measure Chain' : 'Add Measure';
+  name.textContent = (note === getModule()?.baseNote) ? 'Add New Measure Chain' : 'Add Measure';
   const val = document.createElement('div');
   val.className = 'variable-value';
 
@@ -128,7 +131,7 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
         : (module.getNoteById(Number(measureId)) || module.baseNote);
       const newMeasures = module.generateMeasures(fromNote, 1);
 
-      newMeasures.forEach((m) => { try { m.getVariable('startTime'); } catch {} });
+      newMeasures.forEach((m: Note) => { try { m.getVariable('startTime'); } catch {} });
 
       // Update UI boundaries
       if (typeof externalFunctions.updateTimingBoundaries === 'function') {
@@ -159,13 +162,13 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
       const last = newMeasures[newMeasures.length - 1];
       if (last) {
         const tri = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(last.id))}"]`);
-        refreshModals(module.getNoteById(parseInt(last.id, 10)), last.id);
+        refreshModals(module.getNoteById(last.id), last.id);
         if (tri) tri.classList.add('selected');
       }
 
       // History snapshot
       try {
-        const snap = module.createModuleJSON ? moduleSnapshot(module) : null;
+        const snap = typeof module.createModuleJSON === 'function' ? moduleSnapshot(module) : null;
         if (snap) eventBus.emit('history:capture', { label: 'Add Measure', ...snap });
       } catch {}
     } catch (e) {
@@ -179,7 +182,7 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
   return wrap;
 }
 
-export function createAddNoteSection(note, isBase, externalFunctions) {
+export function createAddNoteSection(note: Note, isBase: boolean, externalFunctions: InspectorHooks) {
   const addSection = document.createElement('div');
   addSection.className = 'variable-row add-note-section';
   addSection.style.marginBottom = '18px';
@@ -219,7 +222,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   // Notes that only relate, never sound: a frequency alone (a tonic, a key, a chord
   // root, drawn as a line across the workspace), or a frequency and a start (a key
   // change, the same line from that start on).
-  const mkRadio = (value, text, title) => {
+  const mkRadio = (value: string, text: string, title: string): [HTMLInputElement, HTMLLabelElement] => {
     const r = document.createElement('input');
     r.type = 'radio';
     r.name = `addType${isBase ? 'Base' : ''}`;
@@ -245,8 +248,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   addSection.appendChild(modeToggle);
 
   // At start / at end (relative to parent) - only for non-base notes
-  let posToggle = null;
-  let atStartRadio = null;
+  let posToggle: HTMLDivElement | null = null;
+  let atStartRadio: HTMLInputElement | null = null;
   let atEndRadio = null;
 
   if (!isBase) {
@@ -351,7 +354,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
     }
     const startRef = parentId === 0 ? `base.t` : `[${parentId}].t`;
     const durRef = parentId === 0 ? `base.d` : `[${parentId}].d`;
-    stInput.value = atStartRadio.checked ? startRef : `${startRef} + ${durRef}`;
+    stInput.value = atStartRadio!.checked ? startRef : `${startRef} + ${durRef}`;
   }
 
   updateStartTimeFormula();
@@ -366,9 +369,10 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   // Live "evaluated" preview for inputs (best-effort)
   // SECURITY: This function DOES NOT use eval() or new Function().
   // It uses safe binary compilation and evaluation.
-  function safeEval(expr) {
+  function safeEval(expr: string) {
     try {
       const module = getModule();
+      if (!module) return { text: 'Invalid', title: '' };
 
       // First validate the expression syntax
       const validation = validateExpressionSyntax(expr);
@@ -381,14 +385,14 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
       // The preview reads the same getVariable() values as the form displays.
       // LOAD_REF only reads explicit dependencies; inherited values can also read 0.
-      const evalCache = new Map();
+      const evalCache = new Map<number, Partial<EvaluationRecord>>();
       const ids = binary.getDependencySet();
       ids.add(0);
       for (const id of ids) {
         const noteObj = module.notes[id];
         if (noteObj) {
           try {
-            const rec = {};
+            const rec: Partial<EvaluationRecord> = {};
             for (const v of EXPRESSION_VARS) rec[v] = noteObj.getVariable(v);
             evalCache.set(id, rec);
           } catch {}
@@ -402,11 +406,12 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       if (huge) return huge;
       return { text: result.toFraction(), title: '' };
     } catch (e) {
-      console.warn('Add-note preview evaluation failed:', e?.message ?? e);
+      console.warn('Add-note preview evaluation failed:', e instanceof Error ? e.message : e);
       return { text: 'Invalid', title: '' };
     }
   }
-  function setEvalDisplay(span, res) {
+  function setEvalDisplay(span: HTMLSpanElement | null, res: { text: string; title: string }) {
+    if (!span) return;
     span.textContent = res.text;
     if (res.title) span.title = res.title;
     else span.removeAttribute('title');
@@ -501,7 +506,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       }
 
       // Store expressions as strings - they will be compiled safely later
-      const vars = {};
+      const vars: InputFields = {};
       if (hasStart) vars.startTimeString = sFormula;
       if (hasDuration) vars.durationString = dFormula;
 
@@ -561,7 +566,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
       // History snapshot
       try {
-        const snap = module.createModuleJSON ? moduleSnapshot(module) : null;
+        const snap = typeof module.createModuleJSON === 'function' ? moduleSnapshot(module) : null;
         if (snap) {
           const lbl = `Add ${isSilence ? 'Silence' : isReference ? 'Reference' : isKeyChange ? 'Key change' : 'Note'} ${newNote.id}`;
           eventBus.emit('history:capture', { label: lbl, ...snap });
@@ -569,7 +574,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       } catch {}
     } catch (err) {
       console.error('Error creating note:', err);
-      alert('Error creating note: ' + err.message);
+      alert('Error creating note: ' + (err instanceof Error ? err.message : String(err)));
     }
   });
 

@@ -1,41 +1,46 @@
+import type { Note } from '../note.ts';
+import type { Module } from '../module.ts';
+import type { ExpressionName } from '../model-types.ts';
+import type { ExactValue } from '../value/exact.ts';
+import type { InspectorHooks, InspectorRow } from './inspector-types.ts';
 import Fraction from 'fraction.js';
 import { getDisplayTransposition, shownFrequency, moduleRepeatRatio } from '../player/display-transpose.js';
 import { isRational, shadow as shadowOf, toText as exactText, toNumber as exactNumber } from '../value/exact.js';
-import { createVariableControls, createMeasureDurationRow } from './variable-controls.js';
-import { createAddNoteSection, createAddMeasureSection } from './note-creation.js';
-import { createEvaluateSection, createDeleteSection, createSelectSection } from './note-actions.js';
+import { createVariableControls, createMeasureDurationRow } from './variable-controls.ts';
+import { createAddNoteSection, createAddMeasureSection } from './note-creation.ts';
+import { createEvaluateSection, createDeleteSection, createSelectSection } from './note-actions.ts';
 import {
     validateExpression,
     detectCircularDependency,
     invalidateDependencyGraphCache
-} from './validation.js';
+} from './validation.ts';
 import { eventBus } from '../utils/event-bus.js';
 import { moduleSnapshot } from '../store/history.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
-import { escapeHtml } from '../utils/html-escape.js';
+import { escapeHtml } from '../utils/html-escape.ts';
 import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr, valueFactor } from '../utils/value-expr.js';
 import { isMeasureNote, isReferenceNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
-import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
-import { raisePanel } from '../utils/panel-stack.js';
-import { viewportHeight } from '../utils/viewport.js';
+import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.ts';
+import { raisePanel } from '../utils/panel-stack.ts';
+import { viewportHeight } from '../utils/viewport.ts';
 
-const domCache = {
+const domCache: Record<'noteWidget' | 'closeWidgetBtn' | 'widgetContent' | 'widgetTitle', HTMLElement | null> = {
     noteWidget: null,
     closeWidgetBtn: null,
     widgetContent: null,
     widgetTitle: null
 };
 
-let currentSelectedNote = null;
-let currentMeasureId = null;
+let currentSelectedNote: Note | null = null;
+let currentMeasureId: number | null = null;
 
 // A freshly-opened note widget is a compact card. Its content (every variable, with its
 // expression) is far taller than this and scrolls; the card only grows past 300px if the
 // user drags it somewhere with room to fit more.
 const DEFAULT_OPEN_HEIGHT = 300;
 
-let externalFunctions = {
+let externalFunctions: InspectorHooks = {
     updateVisualNotes: null,
     updateBaseNoteFraction: null,
     updateBaseNotePosition: null,
@@ -55,7 +60,7 @@ let externalFunctions = {
     selectRelatedNotes: null
 };
 
-export function setExternalFunctions(functions) {
+export function setExternalFunctions(functions: Partial<InspectorHooks>) {
     Object.assign(externalFunctions, functions);
 }
 
@@ -63,7 +68,7 @@ export function getExternalFunctions() {
     return externalFunctions;
 }
 
-function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
+function batchClassOperation(elements: ArrayLike<Element>, classesToAdd: string[] = [], classesToRemove: string[] = []) {
     if (!elements || elements.length === 0) return;
     
     const BATCH_SIZE = 50;
@@ -85,7 +90,7 @@ function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) 
     }
 }
 
-export function showNoteVariables(note, clickedElement, measureId = null) {
+export function showNoteVariables(note: Note, clickedElement: Element | null, measureId: number | null = null) {
     // Guard against early calls before the module is registered
     const moduleInstance = (typeof getModule === 'function') ? getModule() : null;
     if (!moduleInstance || !moduleInstance.baseNote) {
@@ -100,13 +105,14 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
 
     const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
-    if (effectiveNoteId === undefined) {
+    if (effectiveNoteId == null) {
         console.error("No valid note id found for dependency highlighting.");
         return;
     }
     
     const widgetContent = domCache.widgetContent;
     const widgetTitle = domCache.widgetTitle;
+    if (!domCache.noteWidget || !widgetContent || !widgetTitle) return;
 
     // This function is both "open the widget on a note" and "rebuild the widget in place"
     // (an octave arrow, a saved variable, an added note, a changed arrow setting all come
@@ -172,7 +178,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     
     // Add creation sections
     const shouldShowAddMeasure = note === moduleInstance.baseNote ||
-        (measureId !== null && externalFunctions.isLastMeasureInChain(measureId));
+        (measureId !== null && externalFunctions.isLastMeasureInChain?.(measureId));
     
     if (shouldShowAddMeasure) {
         const measureSection = createAddMeasureSection(note, measureId, externalFunctions);
@@ -234,12 +240,14 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
 // Seed the Raw editor with a parseable exact form when no source string exists.
 // Fraction toString() prints repeating decimals like '0.(3)', which won't re-parse;
 // toFraction() gives 'n/d' which both expression formats accept.
-function rawValueSeed(v) {
-    return (v && typeof v.toFraction === 'function') ? v.toFraction() : String(v);
+function rawValueSeed(v: unknown) {
+    return (v && typeof v === 'object' && 'toFraction' in v && typeof v.toFraction === 'function') ? v.toFraction() : String(v);
 }
 
 // The interpretation variables: how a note sounds, not what it relates to.
-const INTERPRETATION_VARS = ['amplitude', 'attack', 'release'];
+type Interpretation = 'amplitude' | 'attack' | 'release';
+const INTERPRETATION_VARS: Interpretation[] = ['amplitude', 'attack', 'release'];
+const isInterpretation = (key: string): key is Interpretation => (INTERPRETATION_VARS as readonly string[]).includes(key);
 const INTERPRETATION_CORRUPT = {
     amplitude: CORRUPT.AMPLITUDE,
     attack: CORRUPT.ATTACK,
@@ -253,7 +261,7 @@ const INTERPRETATION_CORRUPT = {
 // release), flagged as inherited or default, and Raw is empty. A silence has
 // nothing to sound, so it only gets a row for a variable it carries anyway
 // (hand-written JSON).
-function collectInterpretation(note, module, depGraph, name) {
+function collectInterpretation(note: Note, module: Module, depGraph: ReturnType<Module['getDependencyGraph']> | null, name: Interpretation): InspectorRow | null {
     const isBase = note === module.baseNote;
     const hasOwn = note.hasExpression(name);
     if (!isBase && !hasOwn && !note.getVariable('frequency')) return null;
@@ -273,15 +281,16 @@ function collectInterpretation(note, module, depGraph, name) {
 
     return {
         evaluated,
-        raw: hasOwn ? (note.variables[name + 'String'] || '') : '',
+        raw: hasOwn ? (note.variables[`${name}String`] || '') : '',
         isInherited: !hasOwn && !isBase && !isDefault,
         isDefault,
         isCorrupted: !isDefault && isCorrupted
     };
 }
 
-function collectVariables(note, measureId, moduleInstance) {
-    let variables = {};
+function collectVariables(note: Note, measureId: number | null, moduleInstance: Module) {
+    const variables: Record<string, InspectorRow> = {};
+    const fields: Record<string, unknown> = note.variables;
     const module = moduleInstance || (typeof getModule === 'function' ? getModule() : null);
     if (!module || !module.baseNote) {
         return variables;
@@ -289,7 +298,7 @@ function collectVariables(note, measureId, moduleInstance) {
 
     // Get corruption status from dependency graph
     const depGraph = typeof module.getDependencyGraph === 'function' ? module.getDependencyGraph() : null;
-    const noteId = note?.id ?? (measureId !== null ? parseInt(measureId, 10) : null);
+    const noteId = note?.id ?? (measureId !== null ? parseInt(String(measureId), 10) : null);
     const isNoteCorrupted = depGraph && noteId !== null && typeof depGraph.isNoteCorrupted === 'function'
         ? depGraph.isNoteCorrupted(noteId)
         : false;
@@ -314,12 +323,12 @@ function collectVariables(note, measureId, moduleInstance) {
         Object.keys(note.variables).forEach(key => {
             // amplitude, attack and release get their rows whether or not the BaseNote defines them
             const baseKey = key.endsWith('String') ? key.slice(0, -6) : key;
-            if (INTERPRETATION_VARS.includes(baseKey)) return;
+            if (isInterpretation(baseKey)) return;
             if (key === 'color' || key === 'instrument') placeInterpretation();
             if (!key.endsWith('String')) {
                 variables[key] = {
                     evaluated: note.getVariable(key),
-                    raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
+                    raw: fields[key + 'String'] || rawValueSeed(fields[key]),
                     isCorrupted: false // BaseNote is never corrupted
                 };
             }
@@ -339,7 +348,7 @@ function collectVariables(note, measureId, moduleInstance) {
             };
         }
     } else if (measureId !== null) {
-        const noteInstance = module.getNoteById(parseInt(measureId, 10));
+        const noteInstance = module.getNoteById(parseInt(String(measureId), 10));
         if (noteInstance && typeof noteInstance.getVariable === 'function') {
             variables.startTime = {
                 evaluated: noteInstance.getVariable('startTime'),
@@ -352,7 +361,7 @@ function collectVariables(note, measureId, moduleInstance) {
     } else {
         const variableNames = ['startTime', 'duration', 'frequency', ...INTERPRETATION_VARS, 'color'];
         // Map variable names to their corruption flag bits
-        const flagMap = { startTime: CORRUPT.START_TIME, duration: CORRUPT.DURATION, frequency: CORRUPT.FREQUENCY };
+        const flagMap: Record<string, number> = { startTime: CORRUPT.START_TIME, duration: CORRUPT.DURATION, frequency: CORRUPT.FREQUENCY };
 
         // Check if frequency is transitively corrupted (for display purposes only)
         const freqTransitivelyCorrupted = depGraph && noteId !== null
@@ -360,12 +369,12 @@ function collectVariables(note, measureId, moduleInstance) {
             && depGraph.isFrequencyTransitivelyCorrupted(noteId);
 
         variableNames.forEach(key => {
-            if (INTERPRETATION_VARS.includes(key)) {
+            if (isInterpretation(key)) {
                 const entry = collectInterpretation(note, module, depGraph, key);
                 if (entry) variables[key] = entry;
                 return;
             }
-            if (note.variables && note.variables[key] !== undefined) {
+            if (note.variables && fields[key] !== undefined) {
                 const propertyCorrupted = (corruptionFlags & (flagMap[key] || 0)) !== 0;
 
                 if (key === 'color') {
@@ -374,7 +383,7 @@ function collectVariables(note, measureId, moduleInstance) {
                 } else {
                     variables[key] = {
                         evaluated: note.getVariable(key),
-                        raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
+                        raw: fields[key + 'String'] || rawValueSeed(fields[key]),
                         isCorrupted: propertyCorrupted,
                         // For frequency, flag if transitively corrupted (for display purposes)
                         isTransitivelyCorrupted: key === 'frequency' && freqTransitivelyCorrupted
@@ -405,7 +414,7 @@ function collectVariables(note, measureId, moduleInstance) {
     if (note && note === module.baseNote) {
         let rr = null;
         try { rr = moduleRepeatRatio(module); } catch {}
-        const cents = (v) => (1200 * Math.log2(exactNumber(v))).toFixed(1);
+        const cents = (v: ExactValue) => (1200 * Math.log2(exactNumber(v))).toFixed(1);
         variables.repeat = {
             evaluated: rr ? `${exactText(rr)} each repeat (${cents(rr)}¢)` : 'none: repeats as written',
             raw: note.properties.repeat || '',
@@ -417,9 +426,9 @@ function collectVariables(note, measureId, moduleInstance) {
     // The exact value of each evaluated row (src/value/exact.js), for the
     // display: an irrational value is shown in its exact form, ≈ only marks an
     // approximation.
-    const owner = note || (measureId !== null ? module.getNoteById(parseInt(measureId, 10)) : null);
+    const owner = note || (measureId !== null ? module.getNoteById(parseInt(String(measureId), 10)) : null);
     if (owner && typeof owner.getExactVariable === 'function') {
-        for (const name of ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release']) {
+        for (const name of ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'] as const) {
             const row = variables[name];
             if (!row || row.isDefault) continue;
             const from = (row.isInherited && owner !== module.baseNote) ? module.baseNote : owner;
@@ -433,7 +442,7 @@ function collectVariables(note, measureId, moduleInstance) {
     if (shown.factor && variables.frequency && !variables.frequency.isDefault) {
         const row = variables.frequency;
         try {
-            const base = row.exact != null ? row.exact : row.evaluated;
+            const base = row.exact ?? (row.evaluated instanceof Fraction ? row.evaluated : null);
             if (base != null) {
                 const v = shownFrequency(base);
                 row.exact = v;
@@ -451,7 +460,7 @@ export function clearSelection() {
       externalFunctions.clearLastSelectedNote();
     }
 
-    domCache.noteWidget.classList.remove('visible');
+    domCache.noteWidget?.classList.remove('visible');
     currentSelectedNote = null;
     currentMeasureId = null;
     
@@ -470,7 +479,7 @@ export function clearSelection() {
     
     if (externalFunctions.originalNoteOrder) {
       externalFunctions.originalNoteOrder.forEach((noteData, noteId) => {
-        const note = getModule().getNoteById(parseInt(noteId, 10));
+        const note = getModule()?.getNoteById(parseInt(String(noteId), 10));
         if (note && externalFunctions.restoreNotePosition) {
           externalFunctions.restoreNotePosition(note);
         }
@@ -484,8 +493,8 @@ export function updateNoteWidgetHeight() {
     const widget = domCache.noteWidget;
     if (!widget) return;
 
-    const header = widget.querySelector('.note-widget-header');
-    const content = widget.querySelector('.note-widget-content');
+    const header = widget.querySelector<HTMLElement>('.note-widget-header');
+    const content = widget.querySelector<HTMLElement>('.note-widget-content');
     if (!header || !content) return;
     
     const headerHeight = header.offsetHeight;
@@ -554,7 +563,7 @@ export function updateNoteWidgetHeight() {
 function addDraggableNoteWidget() {
     const widget = domCache.noteWidget;
     if (!widget) return;
-    const header = widget.querySelector('.note-widget-header');
+    const header = widget.querySelector<HTMLElement>('.note-widget-header');
     if (!header) return;
 
     makeDraggableWidget({
@@ -562,11 +571,11 @@ function addDraggableNoteWidget() {
         handle: header,
         onMove: updateNoteWidgetHeight,
         isVisible: () => widget.classList.contains('visible'),
-        ignoreDragStart: (e) => e.target.classList.contains('note-widget-close'),
+        ignoreDragStart: (e) => e.target instanceof Element && e.target.classList.contains('note-widget-close'),
     });
 }
 
-export function showDeleteConfirmation(noteId) {
+export function showDeleteConfirmation(noteId: number) {
     const overlay = document.createElement('div');
     overlay.className = 'delete-confirm-overlay';
 
@@ -587,7 +596,7 @@ export function showDeleteConfirmation(noteId) {
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
         try { eventBus.emit('player:requestPause'); } catch {}
-        externalFunctions.deleteNoteAndDependencies(noteId);
+        externalFunctions.deleteNoteAndDependencies?.(noteId);
         document.body.removeChild(overlay);
     });
 
@@ -613,7 +622,7 @@ export function showDeleteConfirmation(noteId) {
     document.body.appendChild(overlay);
 }
 
-export function showDeleteConfirmationKeepDependencies(noteId) {
+export function showDeleteConfirmationKeepDependencies(noteId: number) {
     const overlay = document.createElement('div');
     overlay.className = 'delete-confirm-overlay';
 
@@ -634,7 +643,7 @@ export function showDeleteConfirmationKeepDependencies(noteId) {
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
         try { eventBus.emit('player:requestPause'); } catch {}
-        externalFunctions.deleteNoteKeepDependencies(noteId);
+        externalFunctions.deleteNoteKeepDependencies?.(noteId);
         document.body.removeChild(overlay);
     });
 
@@ -679,7 +688,7 @@ export function showCleanSlateConfirmation() {
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
         try { eventBus.emit('player:requestPause'); } catch {}
-        externalFunctions.cleanSlate();
+        externalFunctions.cleanSlate?.();
         document.body.removeChild(overlay);
     });
 
@@ -707,7 +716,7 @@ export function showCleanSlateConfirmation() {
 
 // ===== Evaluation and Liberation helpers ported from legacy modals.js =====
 
-function showNotification(message, type = 'info') {
+function showNotification(message: string, type = 'info') {
     const notification = document.createElement('div');
     notification.textContent = message;
     Object.assign(notification.style, {
@@ -734,38 +743,43 @@ function showNotification(message, type = 'info') {
 // exact value (src/utils/value-expr.js): a tempered pitch stays the power it is,
 // `base.f * 2^(7/12)`. null when the value cannot be written exactly (an
 // approximation): the note then keeps the expression it has.
-function baseRelativeExpr(note, varName, moduleInstance) {
+function baseRelativeExpr(note: Note, varName: ExpressionName, moduleInstance: Module) {
     const v = note.getExactVariable(varName);
     if (v == null) return null;
     const base = moduleInstance.baseNote;
     switch (varName) {
-        case 'startTime':
-            return startTimeExpr(v, base.getExactVariable('startTime'), base.getExactVariable('duration'));
+        case 'startTime': {
+            const anchor = base.getExactVariable('startTime');
+            return anchor && startTimeExpr(v, anchor, base.getExactVariable('duration'));
+        }
         case 'duration':
             return timeUnitsExpr(v, base.getExactVariable('duration'));
-        case 'frequency':
-            return frequencyExpr(v, base.getExactVariable('frequency'));
+        case 'frequency': {
+            const anchor = base.getExactVariable('frequency');
+            return anchor && frequencyExpr(v, anchor);
+        }
         case 'amplitude': {
             // base.a is the piece-wide gain, so the note is written as a ratio of
             // it and goes on following it (1 when the BaseNote sets none)
             const baseA = base.hasExpression('amplitude') ? base.getExactVariable('amplitude') : moduleInstance.findAmplitude(base);
-            return amplitudeExpr(v, baseA);
+            return baseA && amplitudeExpr(v, baseA);
         }
         default:
             return null;
     }
 }
 
-export function evaluateNoteToBaseNote(noteId) {
+export function evaluateNoteToBaseNote(noteId: number) {
     const moduleInstance = getModule();
-    const note = moduleInstance.getNoteById(parseInt(noteId, 10));
+    if (!moduleInstance) return;
+    const note = moduleInstance.getNoteById(parseInt(String(noteId), 10));
     if (!note) {
         console.error("Note not found:", noteId);
         return;
     }
 
     // A measure bar has a start and a length (its duration), nothing that sounds
-    const variablesToProcess = isMeasureNote(note)
+    const variablesToProcess: ExpressionName[] = isMeasureNote(note)
         ? ['startTime', 'duration']
         : ['startTime', 'duration', 'frequency', 'amplitude'];
     let success = true;
@@ -773,7 +787,7 @@ export function evaluateNoteToBaseNote(noteId) {
     // Every value is read before any expression changes
     const newExprs = [];
     for (const varName of variablesToProcess) {
-        if (!note.variables[varName + 'String']) continue;
+        if (!note.variables[`${varName}String`]) continue;
         const newExpr = baseRelativeExpr(note, varName, moduleInstance);
         if (newExpr) newExprs.push([varName, newExpr]);
     }
@@ -810,6 +824,7 @@ export function evaluateNoteToBaseNote(noteId) {
 // Optimized version using batch operations to avoid per-note overhead
 export function evaluateEntireModule() {
     const moduleInstance = getModule();
+    if (!moduleInstance) return;
     const noteIds = Object.keys(moduleInstance.notes).map(id => parseInt(id, 10)).filter(id => id !== 0);
 
     // Collect all expression updates in a single pass. Every value is read
@@ -821,7 +836,7 @@ export function evaluateEntireModule() {
         if (!note) continue;
 
         // A measure bar has a start and a length (its duration), nothing that sounds
-        const names = isMeasureNote(note)
+        const names: ExpressionName[] = isMeasureNote(note)
             ? ['startTime', 'duration']
             : ['startTime', 'duration', 'frequency', 'amplitude'];
         for (const varName of names) {
@@ -859,8 +874,10 @@ export function evaluateEntireModule() {
 }
 
 // ===== Feature: Liberate dependencies (replace references with raw values) =====
-export function liberateDependencies(noteId) {
-    const selectedNote = getModule().getNoteById(noteId);
+export function liberateDependencies(noteId: number) {
+    const moduleInstance = getModule();
+    if (!moduleInstance) return;
+    const selectedNote = moduleInstance.getNoteById(noteId);
     if (!selectedNote) return;
 
     const currentSelected = selectedNote;
@@ -870,23 +887,24 @@ export function liberateDependencies(noteId) {
         return;
     }
 
-    let selectedRaw = {};
-    ["startTime", "duration", "frequency"].forEach(varName => {
-        if (selectedNote.variables[varName + "String"]) {
-            selectedRaw[varName] = selectedNote.variables[varName + "String"];
+    const selectedRaw: Record<string, string> = {};
+    (["startTime", "duration", "frequency"] as const).forEach(varName => {
+        const source = selectedNote.variables[`${varName}String`];
+        if (source) {
+            selectedRaw[varName] = source;
         } else {
             // The exact value: an irrational one exactly, an approximate one with ~
             const exact = selectedNote.getExactVariable(varName);
             selectedRaw[varName] = (exact == null)
                 ? ((varName === "frequency") ? "1" : "0")
-                : valueFactor(exact);
+                : valueFactor(exact)!;
         }
     });
     // amplitude, attack and release only when the note defines its own; left
     // undefined, references to them are replaced by the BaseNote's (what the
     // note was inheriting).
     for (const varName of INTERPRETATION_VARS) {
-        const own = selectedNote.variables[varName + "String"];
+        const own = selectedNote.variables[`${varName}String`];
         if (own) selectedRaw[varName] = own;
     }
 
@@ -894,10 +912,10 @@ export function liberateDependencies(noteId) {
         externalFunctions.updateDependentRawExpressions(noteId, selectedRaw);
     }
 
-    const dependents = getModule().getDependentNotes(noteId);
-    dependents.forEach(depId => { getModule().markNoteDirty(depId); });
+    const dependents = moduleInstance.getDependentNotes(noteId);
+    dependents.forEach((depId: number) => { moduleInstance.markNoteDirty(depId); });
 
-    const evaluated = getModule().evaluateModule();
+    const evaluated = moduleInstance.evaluateModule();
     setEvaluatedNotes(evaluated);
     if (typeof externalFunctions.updateVisualNotes === 'function') {
         externalFunctions.updateVisualNotes(evaluated);
@@ -911,14 +929,14 @@ export function liberateDependencies(noteId) {
     }
     showNoteVariables(currentSelected, newElem);
     try {
-        const snap = moduleSnapshot(getModule());
+        const snap = moduleSnapshot(moduleInstance);
         eventBus.emit('history:capture', { label: `Liberate Dependencies ${noteId}`, ...snap });
     } catch {}
     showNotification('Dependencies liberated successfully!', 'success');
 }
 
 // ===== Confirmation dialogs =====
-export function showLiberateConfirmation(noteId) {
+export function showLiberateConfirmation(noteId: number) {
     const overlay = document.createElement('div');
     overlay.className = 'delete-confirm-overlay';
 
@@ -969,7 +987,7 @@ export function showLiberateConfirmation(noteId) {
     document.body.appendChild(overlay);
 }
 
-export function showEvaluateConfirmation(noteId) {
+export function showEvaluateConfirmation(noteId: number) {
     const overlay = document.createElement('div');
     overlay.className = 'delete-confirm-overlay';
 
@@ -1074,7 +1092,7 @@ export function init() {
     domCache.widgetContent = document.querySelector('.note-widget-content');
     domCache.widgetTitle = document.getElementById('note-widget-title');
 
-    domCache.closeWidgetBtn.addEventListener('click', () => {
+    domCache.closeWidgetBtn?.addEventListener('click', () => {
         clearSelection();
     });
 
@@ -1084,7 +1102,7 @@ export function init() {
     // Accept refresh requests from other modules (to avoid window.modals usage)
     try {
         eventBus.on('modals:requestRefresh', ({ note, measureId, clickedElement }) => {
-            showNoteVariables(note, clickedElement, measureId ?? null);
+            if (note) showNoteVariables(note, clickedElement ?? null, measureId ?? null);
         });
         // A transposed loop moved to another pass: the open widget shows its values.
         eventBus.on('display:transposition', () => {
@@ -1097,7 +1115,7 @@ export function init() {
     // those settings can change while the widget is open — rebuild it rather than
     // leave buttons that disagree with the workspace.
     try {
-        eventBus.on('settings:changed', ({ path }) => {
+        eventBus.on('settings:changed', ({ path }: { path: string }) => {
             const p = String(path ?? '');
             if (p !== '' && p !== 'arrows' && !p.startsWith('arrows.')) return;
             if (!currentSelectedNote) return;

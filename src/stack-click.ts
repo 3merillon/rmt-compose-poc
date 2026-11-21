@@ -1,24 +1,25 @@
-export let updateStackClickSelectedNote = function(noteId) { };
+export let updateStackClickSelectedNote = function(noteId: number | string | null) { };
 export function initStackClick() {
   let stackClickState = {
-    stackedNotes: [],
+    stackedNotes: [] as (string | null)[],
     currentIndex: -1,
     processingSimulatedClick: false,
-    stackedTriangles: [],
+    stackedTriangles: [] as (string | null)[],
     triangleCurrentIndex: -1,
     processingTriangleClick: false
   };
 
   const DEBUG = false;
-  function log(...args) {
+  function log(...args: unknown[]) {
     if (DEBUG) console.log("[Stack-Click]", ...args);
   }
   // Provide a module-exported hook for external updates instead of window.*
-  updateStackClickSelectedNote = function(noteId) {
+  updateStackClickSelectedNote = function(noteId: number | string | null) {
     log("External update of selected note ID to:", noteId);
   };
 
   window.addEventListener('click', function(event) {
+    if (!(event.target instanceof Element)) return;
     const clickedItem = event.target.closest('.note-rect, .note-content');
     if (!clickedItem) return;
     
@@ -50,8 +51,11 @@ export function initStackClick() {
     
     if (stackClickState.processingSimulatedClick && (x === 0 && y === 0)) {
       log("Using original click position for simulated click");
-      effectiveX = event.detail.originalX || x;
-      effectiveY = event.detail.originalY || y;
+      const detail: unknown = event.detail;
+      if (typeof detail === 'object' && detail !== null) {
+        if ('originalX' in detail && typeof detail.originalX === 'number') effectiveX = detail.originalX || x;
+        if ('originalY' in detail && typeof detail.originalY === 'number') effectiveY = detail.originalY || y;
+      }
     }
     
     const elementsAtPoint = document.elementsFromPoint(effectiveX, effectiveY);
@@ -142,7 +146,7 @@ export function initStackClick() {
           view: window,
           clientX: effectiveX,
           clientY: effectiveY,
-          detail: { originalX: effectiveX, originalY: effectiveY }
+          detail: 0 // MouseEvent.detail is a Web IDL long. The coordinates are in clientX/Y.
         });
         
         nextNoteElement.dispatchEvent(clickEvent);
@@ -165,7 +169,7 @@ export function initStackClick() {
               view: window,
               clientX: effectiveX,
               clientY: effectiveY,
-              detail: { originalX: effectiveX, originalY: effectiveY }
+              detail: 0 // MouseEvent.detail is a Web IDL long. The coordinates are in clientX/Y.
             });
             
             firstNoteElement.dispatchEvent(clickEvent);
@@ -183,7 +187,8 @@ export function initStackClick() {
   }, true);
   
   document.addEventListener('click', function(event) {
-    const clickedTriangle = event.target.closest('.measure-bar-triangle');
+    if (!(event.target instanceof Element)) return;
+    const clickedTriangle = event.target.closest<HTMLElement>('.measure-bar-triangle');
     if (!clickedTriangle) return;
     
     log("Clicked triangle:", clickedTriangle);
@@ -205,8 +210,11 @@ export function initStackClick() {
     
     if (stackClickState.processingTriangleClick && (x === 0 && y === 0)) {
       log("Using original click position for simulated triangle click");
-      effectiveX = event.detail.originalX || x;
-      effectiveY = event.detail.originalY || y;
+      const detail: unknown = event.detail;
+      if (typeof detail === 'object' && detail !== null) {
+        if ('originalX' in detail && typeof detail.originalX === 'number') effectiveX = detail.originalX || x;
+        if ('originalY' in detail && typeof detail.originalY === 'number') effectiveY = detail.originalY || y;
+      }
     }
     
     const elementsAtPoint = document.elementsFromPoint(effectiveX, effectiveY);
@@ -280,7 +288,7 @@ export function initStackClick() {
       
       stackClickState.triangleCurrentIndex = nextIndex;
       
-      const nextTriangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(nextTriangleId))}"]`);
+      const nextTriangleElement = document.querySelector<HTMLElement>(`.measure-bar-triangle[data-note-id="${CSS.escape(String(nextTriangleId))}"]`);
       
       if (nextTriangleElement) {
         event.preventDefault();
@@ -298,7 +306,7 @@ export function initStackClick() {
           view: window,
           clientX: effectiveX,
           clientY: effectiveY,
-          detail: { originalX: effectiveX, originalY: effectiveY }
+          detail: 0 // MouseEvent.detail is a Web IDL long. The coordinates are in clientX/Y.
         });
         
         nextTriangleElement.dispatchEvent(clickEvent);
@@ -311,7 +319,7 @@ export function initStackClick() {
         
         const firstTriangleId = stackClickState.stackedTriangles[0];
         if (firstTriangleId !== clickedTriangleIdStr) {
-          const firstTriangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(firstTriangleId))}"]`);
+          const firstTriangleElement = document.querySelector<HTMLElement>(`.measure-bar-triangle[data-note-id="${CSS.escape(String(firstTriangleId))}"]`);
           if (firstTriangleElement) {
             bringTriangleToFront(firstTriangleElement);
             
@@ -323,7 +331,7 @@ export function initStackClick() {
               view: window,
               clientX: effectiveX,
               clientY: effectiveY,
-              detail: { originalX: effectiveX, originalY: effectiveY }
+              detail: 0 // MouseEvent.detail is a Web IDL long. The coordinates are in clientX/Y.
             });
             
             firstTriangleElement.dispatchEvent(clickEvent);
@@ -342,7 +350,7 @@ export function initStackClick() {
     }
   }, true);
   
-  function bringTriangleToFront(triangleElement) {
+  function bringTriangleToFront(triangleElement: HTMLElement) {
     const allTriangles = document.querySelectorAll('.measure-bar-triangle');
     
     let highestZIndex = 0;
@@ -355,7 +363,7 @@ export function initStackClick() {
   }
   
   document.addEventListener('mousedown', function(event) {
-    if (!event.target.closest('.note-rect, .note-content, .note-widget, .measure-bar-triangle, .rmt-set-panel, #group-widget')) {
+    if (!(event.target instanceof Element) || !event.target.closest('.note-rect, .note-content, .note-widget, .measure-bar-triangle, .rmt-set-panel, #group-widget')) {
       log("Clicked on background, resetting stack");
       stackClickState.stackedNotes = [];
       stackClickState.currentIndex = -1;

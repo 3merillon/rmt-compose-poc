@@ -10,6 +10,8 @@
  * several, the note's current start parent wins, then the one that starts latest,
  * then the lowest id. Only for notes written in the DSL.
  */
+import type { Module } from '../module.js';
+import type { Note } from '../note.js';
 import { isMeasureNote } from '../note.js';
 import { compiler } from '../expression-compiler.js';
 import { findDependencyCycle } from '../variable-deps.js';
@@ -18,19 +20,20 @@ import { toNumber } from './fraction-num.js';
 // A drop compares the separately converted start and duration used by the snap
 // rule. Store only the range of those ends for each occupied block of IDs.
 const RANGE_SIZE = 128;
-const endRanges = new WeakMap();
+type EndRanges = Map<number, { min: number; max: number }>;
+const endRanges = new WeakMap<Module, { revision: number; blocks: EndRanges }>();
 
-function* candidates(module, landing, tolerance) {
+function* candidates(module: Module, landing: number, tolerance: number): Generator<number | string> {
   if (typeof module.evaluationChangesSince !== 'function') {
     yield* Object.keys(module.notes);
     return;
   }
   const values = module.getEvaluationCache();
   let index = endRanges.get(module);
-  if (index?.revision !== module._evaluationRevision) {
+  if (!index || index.revision !== module._evaluationRevision) {
     const dirty = index && module.evaluationChangesSince(index.revision);
-    const blocks = dirty ? index.blocks : new Map();
-    const include = (id, block) => {
+    const blocks: EndRanges = dirty && index ? index.blocks : new Map();
+    const include = (id: number, block: number) => {
       const note = module.notes[id];
       if (!note) return;
       const record = note.module === module ? values.get(note.id) : null;
@@ -45,7 +48,7 @@ function* candidates(module, landing, tolerance) {
       } else blocks.set(block, { min: end, max: end });
     };
     if (dirty) {
-      const touched = new Set();
+      const touched = new Set<number>();
       for (const id of dirty) touched.add(Math.floor(id / RANGE_SIZE));
       for (const block of touched) {
         blocks.delete(block);
@@ -77,7 +80,7 @@ function* candidates(module, landing, tolerance) {
 }
 
 /** The start expression that follows note `id`. */
-export const followExpr = (id) => `[${id}].t + [${id}].d`;
+export const followExpr = (id: number) => `[${id}].t + [${id}].d`;
 
 /**
  * @param {object} module
@@ -86,7 +89,7 @@ export const followExpr = (id) => `[${id}].t + [${id}].d`;
  * @param {object|null} [currentParent] the start parent the plain rule would use
  * @returns {object|null} the note to follow, or null
  */
-export function findFollowedNote(module, note, newStartSec, currentParent = null) {
+export function findFollowedNote(module: Module, note: Note, newStartSec: number, currentParent: { id: number } | null = null) {
   try {
     if (!module || !note || !Number.isFinite(newStartSec)) return null;
     if (!note?.variables?.startTimeString) return null;
