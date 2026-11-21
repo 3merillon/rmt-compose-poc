@@ -53,6 +53,8 @@ const SCENES = [
   { name: 'selected-hub-zoomed', setup: { selectHub: true, zoom: 2.5 } },
   { name: 'hover-note', setup: { hoverFirst: true } },
   { name: 'selected-and-hover', setup: { selectHub: true, hoverFirst: true } },
+  { name: 'drag-mixed-rings', setup: { dragRings: true } },
+  { name: 'drag-resize-rings', setup: { dragRings: true, resize: true } },
 ];
 
 async function applyScene(page, setup) {
@@ -65,6 +67,7 @@ async function applyScene(page, setup) {
     if (window.__CULL_OFF) r.__cullOff = true;
     if (window.__METRICS_MEMO_OFF) r.__metricsMemoOff = true;
     if (window.__ATLAS_CACHE_OFF) r.__atlasCacheOff = true;
+    if (r._dragActive) { r.clearDragOffsetPreview(); r.setMultiSelection([]); }
     try { r.setHoverNoteId(null); } catch {}
     try { r.setHoverMeasureId(null); } catch {}
 
@@ -96,6 +99,24 @@ async function applyScene(page, setup) {
       });
     }
 
+    if (s.dragRings) {
+      cam.scale = 1;
+      cam.onChange();
+      // Put the first note at the centre so the screenshots actually show the
+      // moving and stationary rings, independent of the preceding pan.
+      const x = r.posSize[0] + r.posSize[2] / 2, y = r.posSize[1] + r.posSize[3] / 2;
+      cam.tx += innerWidth / 2 - (r.matrix[0] * x + r.matrix[6]);
+      cam.ty += innerHeight / 2 - (r.matrix[4] * y + r.matrix[7]);
+      cam.onChange();
+      const ids = Array.from(r._instanceNoteIds.subarray(0, Math.min(r.instanceCount, 128)));
+      const anchor = ids[0];
+      r.sync({ module: P.getModuleRef(), evaluatedNotes: P.getEvaluatedNotesRef(),
+        xScaleFactor: r.currentXScaleFactor || 1, yScaleFactor: r.currentYScaleFactor || 1, selectedNoteId: anchor });
+      r.setMultiSelection(ids);
+      r.setDragOffsetPreview({ noteIds: ids.filter((_, i) => i % 3 !== 2), anchorId: anchor,
+        dxWorld: s.resize ? 0 : 24, dwWorld: s.resize ? 15 : 0 });
+      if (!r._dragActive) throw new Error('Expected active drag rings');
+    }
     if (s.hoverFirst) {
       const mod = P.getModuleRef();
       const ids = Object.keys(mod.notes).map(Number).filter((i) => i !== 0).sort((a, b) => a - b);

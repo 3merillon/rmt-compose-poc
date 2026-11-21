@@ -185,7 +185,7 @@ signal.
 ### Viewport culling
 
 The per-note overlay loop — pull tab, interval arrows, fraction divider, silence band, and all of a
-note's text runs — is culled against the viewport (`renderer.js:7381-7412`). Every overlay is
+note's text runs — is culled against the viewport (`renderer.js:7353-7384`). Every overlay is
 scissored to that note's own rect, so a note entirely off-canvas cannot produce a single pixel; the
 cull is *exact*, not an approximation, which is why the picture stays pixel-identical.
 
@@ -207,15 +207,15 @@ O(N): it fires when a hub note with ~1000 dependents is selected.
 - **No drag active:** `u_dragOffset` is `(0,0)` for every ring, so the whole bucket shares identical
   uniforms. The indices are gathered into one reused buffer and drawn in **one** instanced call —
   999 draws collapse to 6. Pixel-identical: the ring shader reads only `a_posSize` per instance.
-- **Drag active:** per-instance drag offsets differ (moving vs anchor vs static), so the exact
-  per-instance loop is kept for correctness.
+- **During a drag**, consecutive rings with the same offset share a draw. The anchor and
+  stationary notes use zero offset. The runs preserve the original order.
 
 ## Dependency highlights
 
 ![Dependency lines radiating from a selected note, colour-coded by property](/img/dependency-lines.png)
 
 Selecting a note lights up its relatives, colour-coded by **which property** of the selected note
-would move them (`renderer.js:3290-3354`):
+would move them (`renderer.js:3262-3326`):
 
 | Property | Colour | RGBA (dependency / dependent) |
 |---|---|---|
@@ -234,7 +234,7 @@ During a drag the property being edited stays at full brightness and the other t
 Every theme preset defines `depFrequency` / `depStartTime` / `depDuration`, `themeManager` passes them
 to `renderer.setThemeColors()`, and the renderer stores them on `this._themeColors`
 (`renderer.js:373-375`) — but **nothing reads them back**. Every draw path uses the hard-coded
-literals above (`renderer.js:3310-3328`, `5396-5404`). Switching theme does not change a dependency
+literals above (`renderer.js:3282-3300`, `5396-5404`). Switching theme does not change a dependency
 ring or link-line colour. Do not document these tokens as working.
 :::
 
@@ -269,12 +269,12 @@ document or build on it.
 
 The live path:
 
-- `RendererAdapter.pickAllAt()` (`renderer.js:9668`) — measure triangles (top) → base circle → the
+- `RendererAdapter.pickAllAt()` (`renderer.js:9640`) — measure triangles (top) → base circle → the
   note stack. Returns hits top-most first.
-- `RendererAdapter.pickAt()` (`renderer.js:3872`) — a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt()` (`renderer.js:3844`) — a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), a fast world-space AABB reject, then a precise **rounded-rect** test so
   the corners of a note are not selectable.
-- `hitTestSubRegion()` (`renderer.js:3935`) — which *sub-region* was hit (pull tab, arrow column).
+- `hitTestSubRegion()` (`renderer.js:3907`) — which *sub-region* was hit (pull tab, arrow column).
   Only runs once a note body is hit, and respects the rounded interior.
 
 There is **no spatial index**, and measurement says none is warranted: `pickAt` is **0.017 ms at 5,000

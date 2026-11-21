@@ -9,10 +9,10 @@ description: How RendererAdapter draws the whole score in one WebGL2 canvas — 
 selection rings, measure bars, octave guides, dependency lines, and all text — into a single
 WebGL2 canvas. There is no DOM element per note.
 
-The pipeline is **instanced**. Every visual class that scales with note count is uploaded once
-into per-instance typed arrays and drawn with **one `drawArraysInstanced` call**, not one call
-per note. The file issues 53 `drawArraysInstanced` calls across all its passes and **zero**
-`drawElements` — there is no index buffer anywhere, so there is no 16-bit instance cap.
+The pipeline is **instanced**. Note bodies and overlays share typed arrays and use
+`drawArraysInstanced` for visible ranges. Highlight rings also share a draw when
+consecutive instances use the same drag offset. These passes use no index buffer,
+so 16-bit element indices do not limit instance count.
 
 The renderer is a passive drawing surface. It owns no interaction state: `Workspace`
 (`src/renderer/webgl2/workspace.js`) feeds it a camera basis and preview state, and `player.js` feeds
@@ -64,7 +64,7 @@ and `player.js`'s own loop keep running every frame. What is gated is the body o
 bottom of the file wrap it in turn. The outermost wrapper is the one that matters:
 
 ```javascript
-// renderer.js:11272 — the gate
+// renderer.js:11244 — the gate
 const _prevRender = proto._render;
 proto._render = function () {
   if (!this.needsRedraw) return;
@@ -74,7 +74,7 @@ proto._render = function () {
 ```
 
 ::: warning The overlay passes are not frame-idempotent
-The innermost `_render()` has *always* early-returned on `!this.needsRedraw` (`renderer.js:3186`),
+The innermost `_render()` has *always* early-returned on `!this.needsRedraw` (`renderer.js:3158`),
 but that alone was never enough. The passes layered on top of it by the wrappers — note overlays,
 measure bars, dependency lines, marquee — were called **unconditionally**, so an idle frame still
 paid the full per-note cost of every one of them and re-blended their output onto an uncleared
@@ -82,7 +82,7 @@ canvas. Measured before the outer gate landed: **46 ms/frame at 5k notes, 1034 m
 with the picture on screen never changing.
 
 If you add a pass, add it **inside** the gate, and assume it is *not* safe to run twice on the same
-frame. The marquee wrapper (`renderer.js:11427`) has to snapshot `needsRedraw` *before* delegating
+frame. The marquee wrapper (`renderer.js:11399`) has to snapshot `needsRedraw` *before* delegating
 and bail if it was false, precisely because re-blending a translucent rectangle over itself darkens
 it.
 :::
@@ -235,7 +235,7 @@ There are 22 GL programs. The order below is the flattened wrapper chain; nothin
 the clear, and octave guides are drawn **late**, not first.
 
 1. Clear (colour + depth)
-2. **Note bodies** — an instanced draw for each visible range, in the original depth order (`renderer.js:3281`)
+2. **Note bodies** — an instanced draw for each visible range, in the original depth order (`renderer.js:3253`)
 3. Dependency-highlight rings, then the multi-selection ring — `_drawRingIdxList()`
 4. Selection ring / fill wash, hover ring
 5. Playhead
@@ -252,7 +252,7 @@ Everything below is added by the prototype wrappers at the bottom of the file:
 
 ### Viewport culling
 
-The per-note overlay loop (step 6) is culled against the viewport (`renderer.js:7381-7412`). Every
+The per-note overlay loop (step 6) is culled against the viewport (`renderer.js:7353-7384`). Every
 overlay it emits is scissored to that note's own rect, so a note entirely off-canvas cannot produce
 a single pixel — the cull is **exact**, not an approximation, which is why the picture stays
 pixel-identical. Without it, overlay cost scaled with the size of the *module*; with it, it scales
@@ -272,18 +272,17 @@ Note bodies need no cull: they are one instanced draw regardless of how many are
 
 ### The dependency-ring pass
 
-`_drawRingIdxList(indices, rgba, borderPx)` (`renderer.js:2988`) draws one bucket of rings. It has
-two paths:
+`_drawRingIdxList(indices, rgba, borderPx)` (`renderer.js:2988`) draws one bucket of rings in order.
 
 - **No drag active** — `u_dragOffset` is `(0,0)` for every ring, so the whole bucket shares
   identical uniforms. The indices are gathered into one reused buffer and drawn in **one instanced
   call**. Selecting a hub note with ~1000 dependents costs 6 draws, not 999. This is pixel-identical:
   the ring shader reads only `a_posSize` per instance, and WebGL rasterizes instances in order, so
   same-colour overlap blends the same.
-- **Drag active** — per-instance drag offsets differ (moving vs anchor vs static), so the exact
-  per-instance loop is kept for correctness.
+- **During a drag**, each consecutive run of rings with the same drag offset shares an
+  instanced draw. The shader receives the original per-ring offset and blends overlaps in order.
 
-Ring colours are **hardcoded** in `_render()` (`renderer.js:3310-3328`), one triple per property,
+Ring colours are **hardcoded** in `_render()` (`renderer.js:3282-3300`), one triple per property,
 with dimmed variants used during a drag:
 
 | Property | Colour | Parent chain (`dep`) | Dependents (`rdep`) |
@@ -301,7 +300,7 @@ frequency → duration so overlapping dependencies all stay visible.
 
 All on-note text — ID labels, fraction numerators/denominators, the word "silence", the ▲/▼ arrow
 glyphs, measure and octave-guide labels — is drawn through a single texture atlas and a single
-instanced call (`_drawAtlasGlyphInstances`, `renderer.js:9277`).
+instanced call (`_drawAtlasGlyphInstances`, `renderer.js:9249`).
 
 - One RGBA atlas texture, `min(1024, MAX_TEXTURE_SIZE)` square, glyphs rasterized on demand at
   `text.glyphBasePx` (64) in `Roboto Mono` and packed into rows. A seed set

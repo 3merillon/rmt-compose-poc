@@ -136,14 +136,14 @@ This does **not** mean rAF is descheduled. Both loops still tick every frame —
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
-// renderer.js:3186
+// renderer.js:3158
 if (!this.needsRedraw) return;
 this.needsRedraw = false;
 ```
 
 That inner gate existed before, and did nothing, for two reasons. First, the passes layered on top of
 `_render()` by the prototype wrappers ran unconditionally, so an idle frame still paid for all of
-them — an outer gate now wraps the whole chain (`renderer.js:11272`; see
+them — an outer gate now wraps the whole chain (`renderer.js:11244`; see
 [the redraw gate](/developer/rendering/webgl2-renderer#the-frame-loop-and-the-redraw-gate)). Second,
 two callers dirtied the scene on every frame. Both now short-circuit:
 
@@ -261,12 +261,12 @@ DOM per note and no draw call per note.
 
 | Pass | Where |
 |---|---|
-| Note bodies in visible instance ranges | `renderer.js:3281` |
-| Silence dashed rings, fraction dividers, pull-tab and arrow backgrounds | `src/renderer/webgl2/renderer.js:7050`, `:7063`, `:7980`, `:8037`, `:8112` |
-| Octave guides | `renderer.js:5674` |
-| Measure bars and measure triangles | `renderer.js:6383`, `:6405` |
+| Note bodies in visible instance ranges | `renderer.js:3253` |
+| Silence dashed rings, fraction dividers, pull-tab and arrow backgrounds | `src/renderer/webgl2/renderer.js:7022`, `:7035`, `:7952`, `:8009`, `:8084` |
+| Octave guides | `renderer.js:5646` |
+| Measure bars and measure triangles | `renderer.js:6355`, `:6377` |
 | Dependency link-lines | instanced, per-property buckets |
-| All overlay text | glyph atlas run, `renderer.js:9305` |
+| All overlay text | glyph atlas run, `renderer.js:9277` |
 
 The shared rect VAO (`renderer.js:2816-2905`) binds one per-vertex attribute — the unit quad
 `a_unit` (location 0, divisor 0) — plus **six per-instance** attributes: `a_posSize` (1), `a_color`
@@ -283,25 +283,30 @@ never draw-call count. The governing rule is **keep it O(visible), not O(module)
 approach O(N): it fires when a highly-connected note is selected (a hub with ~1000 dependents) and
 the scene keeps redrawing for other reasons (hover, playhead).
 
-- **No drag active** (`renderer.js:3028`): `u_dragOffset` is `(0,0)` for every ring, so the whole
+- **No drag active** (`renderer.js:3036`): `u_dragOffset` is `(0,0)` for every ring, so the whole
   bucket shares identical uniforms. The indices are gathered into one reused `_depRingBatch` buffer
   and drawn in **one** instanced call — 999 draws and 999 `bufferData` uploads collapse to 6 and 6
   per selection. It is pixel-identical: the ring shader reads only `a_posSize` per instance, and
   WebGL rasterises instances in order, so same-colour overlap blends the same.
-- **Drag active** (`renderer.js:3062`): per-instance drag offsets differ (moving vs anchor vs
-  static), so the exact per-instance loop is kept for correctness.
+- **During a drag**, consecutive rings with the same offset share an upload and draw
+  (`renderer.js:3047`). A change between moving and stationary rings starts a new run.
+  The anchor keeps its own position and the rings retain their original blending order.
 
 Three callers share it: the dependents rings, the full parent-chain rings, and the multi-selection
 ring.
 
-Ring colours (`renderer.js:3310-3328`) are property-specific — orange = frequency, teal = startTime,
+With the 4,999-dependent hub selected, the median real pointer move fell from 34.2 to
+19.9 ms at 100k, 46.5 to 20.0 ms at 250k and 42.1 to 25.3 ms at 500k.
+The run includes pointer dispatch and drawing the dependency lines.
+
+Ring colours (`renderer.js:3282-3300`) are property-specific — orange = frequency, teal = startTime,
 purple = duration — and dim the properties a drag is *not* changing. Parent-chain rings are drawn at
 `ringThicknessPxAtZoom1 × 1.5` (3 px), dependents at `× 1.0` (2 px), in the order startTime →
 frequency → duration so overlapping dependencies all stay visible.
 
 ### Viewport culling
 
-`renderer.js:7381-7412`. The per-note overlay loop — pull tab, interval arrows, fraction divider,
+`renderer.js:7353-7384`. The per-note overlay loop — pull tab, interval arrows, fraction divider,
 silence band, and **all** of that note's text runs — is culled against the viewport. Every overlay
 it emits is scissored to that note's own rect, so a note entirely off-canvas cannot produce a single
 pixel. The cull is therefore *exact*, not an approximation, which is why the picture stays
@@ -331,10 +336,10 @@ Rebuilt every pointermove → now built **once per gesture**:
   then `Array.from()`'d it. Both are now created once and handed back by reference.
 - The `workspace.js` note-drag path built `new Set([noteId, ...cachedDependents])` per move. Now
   cached on the interaction.
-- `renderer.setDragOffsetPreview` (`renderer.js:4137`) re-derived `_dragMovingIds` plus an index
+- `renderer.setDragOffsetPreview` (`renderer.js:4109`) re-derived `_dragMovingIds` plus an index
   array it then **sorted** — every move. Now short-circuits on an identity check against the
   caller's `Set`.
-- `renderer.setDragOverlay` (`renderer.js:10206`) rebuilt a `Set` via `movingIds.map(Number)` every
+- `renderer.setDragOverlay` (`renderer.js:10178`) rebuilt a `Set` via `movingIds.map(Number)` every
   move. Now identity-checked, with an allocation-free exact content comparison as the fallback.
   Deliberately *not* a size-only test — that would be unsound.
 
@@ -343,13 +348,13 @@ Per-frame allocations removed from the drag render path:
 - **Dependency-line endpoints** were accumulated into boxed JS arrays and copied into fresh
   `Float32Array`s every frame (~20,000 elements *per property* at 5,000 dependents). They now go
   into pooled, growable `Float32Array`s that hand out `subarray` views (`_linkWriter`,
-  `renderer.js:10037-10071`). A steady-state drag now allocates **nothing**.
+  `renderer.js:10009-10043`). A steady-state drag now allocates **nothing**.
 - The "legacy combined" deps/rdeps arrays were built with `push(...spread)`, converted, uploaded
   every frame — **and never drawn from**. Removed.
 - `getChildrenTreeByAllProperties()` re-ran a full BFS every pointermove, allocating an edge object
   per dependent per property. It is a pure function of the anchor plus module structure, neither of
   which a drag changes, so it is now cached on `anchorId|_posEpoch|_sceneEpoch`
-  (`renderer.js:10670-10677`) — any real edit still invalidates it.
+  (`renderer.js:10642-10649`) — any real edit still invalidates it.
 - Tab/arrow region arrays were re-minted (4 × `Float32Array(N*4)`) every drag frame. Reused.
 - Note-local overlay regions are now keyed on the note's **width**, not on "a drag happened". A
   *move* changes no note's width, so a move-drag no longer recomputes N regions and re-uploads N×4
@@ -365,12 +370,12 @@ actually passed in. The pixel diff caught this; eyeballing would not have.
 
 - `Workspace.pickAt(clientX, clientY, expandCssPx = 2)` (`workspace.js:1931`) tries
   `renderer.pickAllAt()` first, which always exists.
-- `RendererAdapter.pickAllAt` (`renderer.js:9668`) resolves measure triangles (top) → base circle →
+- `RendererAdapter.pickAllAt` (`renderer.js:9640`) resolves measure triangles (top) → base circle →
   note stack.
-- `RendererAdapter.pickAt` (`renderer.js:3872`) is a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt` (`renderer.js:3844`) is a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), with a fast world-space AABB reject followed by a precise rounded-rect
   test so corners do not select.
-- `hitTestSubRegion` (`renderer.js:3935`) resolves *which* sub-region of a note was hit (pull tab,
+- `hitTestSubRegion` (`renderer.js:3907`) resolves *which* sub-region of a note was hit (pull tab,
   arrow column), and only runs once a body hit is confirmed.
 
 The CPU point pick took 1.16 ms per call at 500,000 notes in the initial Edge profile.

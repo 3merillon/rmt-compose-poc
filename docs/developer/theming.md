@@ -238,26 +238,26 @@ actually costs.
 
 | GL element | Token | Source |
 |---|---|---|
-| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:3240` |
-| Silence dashed ring | `noteBorder` | `renderer.js:7843`, `:8077` |
-| BaseNote circle fill | `accent` | `renderer.js:5865` |
-| BaseNote circle border | `noteBorder` | `renderer.js:5866` |
-| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9453`, `:9901` |
-| Note ID labels | `accent` | `renderer.js:7478-7483` |
-| BaseNote fraction label | `accent` | `renderer.js:6585` |
-| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:8223`, `:8276` |
-| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5500` |
-| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5688` |
-| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3570` |
-| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:11380-11385` |
-| Selected-note ring | `selectionRing` | `renderer.js:3449` |
-| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3406` |
+| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:3212` |
+| Silence dashed ring | `noteBorder` | `renderer.js:7815`, `:8049` |
+| BaseNote circle fill | `accent` | `renderer.js:5837` |
+| BaseNote circle border | `noteBorder` | `renderer.js:5838` |
+| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9425`, `:9873` |
+| Note ID labels | `accent` | `renderer.js:7450-7455` |
+| BaseNote fraction label | `accent` | `renderer.js:6557` |
+| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:8195`, `:8248` |
+| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5472` |
+| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5660` |
+| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3542` |
+| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:11352-11357` |
+| Selected-note ring | `selectionRing` | `renderer.js:3421` |
+| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3378` |
 | Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1819-1826` |
-| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5886`, `:6522` |
-| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3524`, `:5969`, `:6494` |
-| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:3304-3306`, `:5918-5920` |
-| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6467-6483` |
-| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:6143-6217`, `:6655-6722`, `:7540`, `:7631` |
+| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5858`, `:6494` |
+| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3496`, `:5941`, `:6466` |
+| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:3276-3278`, `:5890-5892` |
+| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6439-6455` |
+| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:6115-6189`, `:6627-6694`, `:7512`, `:7603` |
 | Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:156-163` |
 
 ### What is baked and cannot be themed
@@ -288,7 +288,7 @@ The hover ring is a worked example of the full path (it is wired this way today)
 
 3. **Make the draw path read the accessor** instead of the literal. For the hover ring that is
    `const hr = this._hoverRingRgba(); gl.uniform4f(uCol, hr[0], hr[1], hr[2], a)`
-   (`renderer.js:3524`), keeping the existing alpha logic.
+   (`renderer.js:3496`), keeping the existing alpha logic.
 
 4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:45-58`):
 

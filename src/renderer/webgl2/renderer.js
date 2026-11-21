@@ -3025,65 +3025,37 @@ export class RendererAdapter {
     }
 
     const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
-    if (!this._dragActive) {
-      // PERFORMANCE (Phase 8): when no drag is active, u_dragOffset is (0,0) for
-      // EVERY note, so the whole bucket shares identical uniforms and can be drawn
-      // in ONE instanced call instead of a per-note loop (up to ~N draws + N
-      // bufferData uploads per bucket -> 1 draw + 1 upload). This is the worst-case
-      // path when a highly-connected note is selected and the scene keeps redrawing
-      // (hover, playhead). The selectionRing shader reads ONLY a_posSize (attrib 1)
-      // per instance, so gathering the bucket into one buffer is pixel-identical;
-      // WebGL rasterizes instances in order, so same-color overlap blends the same.
-      if (uDrag) gl.uniform2f(uDrag, 0.0, 0.0);
-      const need = indices.length * 4;
-      if (!this._depRingBatch || this._depRingBatch.length < need) {
-        this._depRingBatch = new Float32Array(Math.max(need, 64));
-      }
-      const batch = this._depRingBatch;
-      let w = 0;
-      for (let i = 0; i < indices.length; i++) {
-        const idx = indices[i];
-        if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-        const base = idx * 4;
-        const o = w * 4;
-        batch[o + 0] = this.posSize[base + 0];
-        batch[o + 1] = this.posSize[base + 1];
-        batch[o + 2] = this.posSize[base + 2];
-        batch[o + 3] = this.posSize[base + 3];
-        w++;
-      }
-      if (w > 0) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, batch.subarray(0, w * 4), gl.DYNAMIC_DRAW);
-        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-        gl.vertexAttribDivisor(1, 1);
-        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, w);
-      }
-    } else {
-      // Drag active: per-instance drag offset varies (moving notes vs anchor vs
-      // static), so keep the exact per-instance path for correctness.
-      for (let i = 0; i < indices.length; i++) {
-        const idx = indices[i];
-        if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-        const base = idx * 4;
-        const arr = new Float32Array([
-          this.posSize[base + 0],
-          this.posSize[base + 1],
-          this.posSize[base + 2],
-          this.posSize[base + 3]
-        ]);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-        gl.vertexAttribDivisor(1, 1);
-        if (uDrag) {
-          const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
-          const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
-          gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
-        }
-        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-      }
+    // The ring shader reads only position/size and a uniform drag offset.
+    // Draw consecutive rings with the same offset together, in painter order.
+    const need = indices.length * 4;
+    if (!this._depRingBatch || this._depRingBatch.length < need) {
+      this._depRingBatch = new Float32Array(Math.max(need, 64));
     }
+    const batch = this._depRingBatch;
+    let count = 0, moving = false;
+    const flush = () => {
+      if (uDrag) gl.uniform2f(uDrag, moving ? this._dragOffsetX || 0 : 0, moving ? this._dragOffsetW || 0 : 0);
+      gl.bufferData(gl.ARRAY_BUFFER, batch, gl.DYNAMIC_DRAW, 0, count * 4);
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
+      count = 0;
+    };
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    for (const idx of indices) {
+      if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
+      const shifted = !!(this._dragActive && this._dragFlags?.[idx] === 1 &&
+        !(this._dragAnchorIndex != null && idx === (this._dragAnchorIndex | 0)));
+      if (count && shifted !== moving) flush();
+      moving = shifted;
+      const source = idx * 4, target = count * 4;
+      batch[target] = this.posSize[source];
+      batch[target + 1] = this.posSize[source + 1];
+      batch[target + 2] = this.posSize[source + 2];
+      batch[target + 3] = this.posSize[source + 3];
+      count++;
+    }
+    if (count) flush();
 
     // Restore instanced buffer for attribute 1
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
