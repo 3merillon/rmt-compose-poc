@@ -9,7 +9,7 @@ const browser = await chromium.launch({ channel: process.env.RMT_BROWSER_CHANNEL
 try {
   const page = await browser.newPage();
   await page.goto((process.argv[2] || 'http://localhost:3000') + '/?perf=1');
-  await page.waitForFunction(() => (window.__rmtRenderer?.instanceCount ?? 0) > 0);
+  await page.waitForFunction(() => !!window.__rmtPerf?.getModuleRef() && (window.__rmtRenderer?.instanceCount ?? 0) > 0);
   const targets = await page.evaluate(() => {
     const notes = Object.values(window.__rmtPerf!.getModuleRef()!.notes);
     return [0, notes.find(n => n.id && n.hasExpression('frequency'))!.id, notes.find(n => n.properties.measure)!.id];
