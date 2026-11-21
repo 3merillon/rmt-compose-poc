@@ -9,7 +9,7 @@
  * result as numbers:
  *
  *   UNCHANGED   (--compare <git-ref>) every instrument that exists in <git-ref> renders the same from the working
- *               tree: single notes bit for bit, and a five-note figure through the dry chain, the default chain
+ *               tree: single-source notes bit for bit, and a five-note figure through the dry chain, the default chain
  *               (reverb, limiter) and with stereo on to within the browser's own rounding (ROUNDING, below).
  *   TEMPERED   Settings → Audio → Tempered hands the instruments base·2^(round(12·log2(f/base))/12) and changes
  *               nothing else; off, it hands them the module's own frequencies.
@@ -36,8 +36,7 @@
  * Exit code 1 if any check fails. This measures; it does not listen.
  *
  * ROUNDING. Web Audio does not fix the order in which a node sums its inputs, and float addition is not
- * associative. As soon as three or more voices overlap (or one voice is three oscillators, as square-wave and
- * sawtooth-wave are), two renders of the SAME code can differ by a unit in the last place of a float32: 6e-8, about
+ * associative. As soon as three or more voices overlap (or one voice is three oscillators, as vibraphone is), two renders of the SAME code can differ by a unit in the last place of a float32: 6e-8, about
  * −138 dB re the peak, and up to 1e-6 once a filter has recirculated it. One or two single-source voices render
  * bit-identically. So "unchanged" is asserted bit for bit where that is possible and to within TOLERANCE elsewhere,
  * and the working tree is rendered twice to show what the browser alone does. A real change is far larger: a
@@ -51,7 +50,7 @@ import type { PreparedNote } from '../../src/player/audio-engine.ts';
 interface Tone { id: number; instrument: string; freq: number[]; start: number[]; dur: number[] }
 type Settings = Record<string, boolean>;
 interface RenderJob { notes: Tone[]; base: number[]; seconds: number; sampleRate: number; settings?: Settings; volume?: number; mono?: boolean }
-interface Render { t0: number; handed: [string | null, number][]; applied: Record<string, unknown>; registered: string[]; list: PreparedNote[]; pcm: string[] }
+interface Render { t0: number; sources: number; handed: [string | null, number][]; applied: Record<string, unknown>; registered: string[]; list: PreparedNote[]; pcm: string[] }
 interface EnvelopeJob { instrument: string; dur: number; sampleRate: number; peak?: number }
 interface VoiceDescription { name: string; partials: number[] | null; attackSec: number | null; releaseSec: number | null; level: number | null }
 declare global { interface Window { __h: {
@@ -228,12 +227,19 @@ async function installHarness() {
         reseed(0x5eed);
         await engine.graph._regenIR(settingsStore.get('audio.reverb'));
       }
+      // Count the sources actually used for this take. A preset can have a
+      // different implementation in the compared revision (e.g. unison).
+      let sources = 0;
+      const oscillator = ctx.createOscillator.bind(ctx);
+      const bufferSource = ctx.createBufferSource.bind(ctx);
+      ctx.createOscillator = () => { sources++; return oscillator(); };
+      ctx.createBufferSource = () => { sources++; return bufferSource(); };
       const t0 = engine.play(list, { initialVolume: volume });
       const buffer = await ctx.startRendering();
       try { engine.graph.dispose(); } catch {}
 
       return {
-        t0, handed, applied,
+        t0, sources, handed, applied,
         registered: im.getAvailableInstruments(),
         list: list.map((n) => ({ ...n })),
         pcm: mono ? [base64(buffer.getChannelData(0))] : [base64(buffer.getChannelData(0)), base64(buffer.getChannelData(1))],
@@ -405,19 +411,17 @@ const CHAINS = {
 };
 
 const TOLERANCE = 1e-5;   // of full scale (−100 dBFS); see ROUNDING in the header
-// Instruments whose voice is a single source. One note of these has nothing to sum, so it renders bit for bit.
-const ONE_SOURCE = (instrument: string) => !['square-wave', 'sawtooth-wave'].includes(instrument);
 // The fields a prepared note had before this change, for the note-list comparison.
 const oldFields = ({ id, startTime, duration, frequency, instrument, panPos }: PreparedNote) => ({ id, startTime, duration, frequency, instrument, panPos });
 
 // For each instrument: the figure through each chain, then each of its notes alone through the dry chain.
-type Figure = { hash: string; left: Float32Array; right: Float32Array; rms: number; list: ReturnType<typeof oldFields>[]; handed: Render['handed'] };
+type Figure = { hash: string; sources: number; left: Float32Array; right: Float32Array; rms: number; list: ReturnType<typeof oldFields>[]; handed: Render['handed'] };
 async function renderFigures(page: Page, instruments: string[]) {
   const out: Record<string, Figure> = {};
   const run = async (key: string, notes: Tone[], settings: Settings, seconds: number) => {
     const r = await page.evaluate((job) => window.__h.render(job), { notes, base: [BASE, 1], seconds, sampleRate: SR, settings, volume: VOLUME });
     const left = decode(r.pcm[0]), right = decode(r.pcm[1]);
-    out[key] = { hash: sha(r.pcm), left, right, rms: rmsOf(left), list: r.list.map(oldFields), handed: r.handed };
+    out[key] = { hash: sha(r.pcm), sources: r.sources, left, right, rms: rmsOf(left), list: r.list.map(oldFields), handed: r.handed };
   };
   for (const instrument of instruments) {
     for (const [chain, settings] of Object.entries(CHAINS)) await run(`${instrument} / figure / ${chain}`, FIGURE(instrument), settings, 2.4);
@@ -494,7 +498,7 @@ if (COMPARE) {
   await then.close();
 
   const keys = Object.keys(before);
-  const solo = keys.filter((k) => k.endsWith('alone') && ONE_SOURCE(k.split(' / ')[0]));
+  const solo = keys.filter((k) => k.endsWith('alone') && before[k].sources === 1 && after[k].sources === 1);
   const soloSame = solo.filter((k) => before[k].hash === after[k].hash);
   const gap = Object.fromEntries(keys.map((k) => [k, apart(before[k], after[k])]));
   const selfGap = Math.max(...keys.map((k) => apart(after[k], again[k])));
