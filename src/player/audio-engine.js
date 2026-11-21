@@ -7,6 +7,7 @@ import { passTransposition } from './display-transpose.js';
 
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
+const START_FADE = 0.008; // seconds, only at transport start/resume
 
 // Loop guards. A pass shorter than this would let the scheduler spin through
 // hundreds of cycles per lookahead window; a zero/NaN period would spin forever.
@@ -77,6 +78,7 @@ export class AudioEngine {
     // Track currently scheduled/playing voices for pause/stop.
     /** @type {Set<{voice:any,gainNode:GainNode,panner:StereoPannerNode|null}>} */
     this.activeOscillators = new Set();
+    this._transportBuses = new Map();
     // Voices in flight at most, and voices stolen to stay under MAX_VOICES.
     this.voiceStats = { peak: 0, stolen: 0 };
 
@@ -362,8 +364,8 @@ export class AudioEngine {
    * @returns {number} baseStartTime
    */
   play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null, transpose = null } = {}) {
-    // Stop any existing streaming
-    this._stopStreaming();
+    // Retire any voices still sounding from a previous play or pause fade.
+    this.stopAll();
 
     // Schedule notes in time-based batches
     // Create oscillators for notes starting within the next LOOKAHEAD seconds
@@ -761,12 +763,7 @@ export class AudioEngine {
     // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
     const voice = this.instrumentManager.createOscillator(noteData.instrument, frequency);
     const gainNode = ctx.createGain();
-    // A GainNode defaults to 1, and voices are built up to LOOKAHEAD seconds
-    // before they sound. That default is what a pending voice's gain reads back
-    // as, so a fade-out (pauseFade/stopAll) would anchor it at 1.0, cancel its
-    // envelope, and let it start mid-fade at 5x the intended peak — an audible
-    // blast of a note that should never have sounded. Rest at silence instead;
-    // the envelope's setValueAtTime(EPS, start) takes over from here.
+    // Remain silent until the envelope starts on the audio clock.
     gainNode.gain.value = 0;
 
     // The note's amplitude scales the envelope peak. `?? 1` keeps callers that
@@ -823,7 +820,7 @@ export class AudioEngine {
       } catch { panner = null; }
     }
 
-    const bus = this.graph.getBus(noteData.instrument);
+    const bus = this._transportBus(noteData.instrument);
     try {
       voice.connect(gainNode);
       if (panner) {
@@ -855,15 +852,19 @@ export class AudioEngine {
       // The voices this one faded (restored if it is cancelled before it sounds)
       faded: faded.filter(Boolean),
     };
-    this.activeOscillators.add(entry);
+    const voices = this.activeOscillators;
+    const transportBuses = this._transportBuses;
+    voices.add(entry);
     if (this.activeOscillators.size > this.voiceStats.peak) this.voiceStats.peak = this.activeOscillators.size;
 
     const cleanup = () => {
-      if (!this.activeOscillators.has(entry)) return;
-      this.activeOscillators.delete(entry);
+      if (!voices.delete(entry)) return;
       try { voice.disconnect(); } catch {}
       try { gainNode.disconnect(); } catch {}
       try { panner && panner.disconnect(); } catch {}
+      if (!voices.size && transportBuses !== this._transportBuses) {
+        for (const { node } of transportBuses.values()) node.disconnect();
+      }
     };
     // Prefer the node's own 'ended' event; fall back to a timer for wrappers
     // that don't forward onended.
@@ -871,7 +872,7 @@ export class AudioEngine {
       try { voice.onended = cleanup; return; } catch {}
     }
     const cleanupWhenEnded = () => {
-      if (!this.activeOscillators.has(entry)) return;
+      if (!voices.has(entry)) return;
       const remaining = entry.endTime - ctx.currentTime;
       if (remaining <= 0 || ctx.state === 'closed') cleanup();
       else setTimeout(cleanupWhenEnded, Math.max(100, remaining * 1000 + 60));
@@ -996,7 +997,7 @@ export class AudioEngine {
    * Stop the streaming scheduler
    */
   _stopStreaming() {
-    // Cancel any in-flight pause-fade teardown and settle its promise so the
+    // Cancel any in-flight pause notification and settle its promise so the
     // transport state machine (player.js pause().then) doesn't dangle when a
     // new playback supersedes the fade.
     if (this._pauseFadeTimer) {
@@ -1015,96 +1016,84 @@ export class AudioEngine {
     }
   }
 
-  /**
-   * Fade out all active oscillators and stop/cleanup after ramp.
-   * @param {number} rampTime seconds
-   * @returns {Promise<void>}
-   */
-  pauseFade(rampTime = this.GENERAL_VOLUME_RAMP_TIME) {
-    return new Promise((resolve) => {
-      // _stopStreaming() cancels any prior pending fade (and resolves it).
-      this._stopStreaming();
-      const now = this.audioContext.currentTime;
-      for (const entry of this.activeOscillators) {
-        try {
-          const g = entry.gainNode.gain;
-          // Anchor the current value before the fade — cancelScheduledValues
-          // alone leaves a stale past envelope event as the ramp's start point,
-          // which would step the gain down instantly (click) instead of fading.
-          const cur = g.value;
-          g.cancelScheduledValues(now);
-          g.setValueAtTime(cur, now);
-          g.linearRampToValueAtTime(0, now + rampTime);
-        } catch {}
+  // Each transport session feeds its own gain into each instrument's dry/reverb
+  // bus. A fade multiplies the live mix, including attacks, releases and slurs.
+  _transportBus(instrument) {
+    let route = this._transportBuses.get(instrument);
+    if (route) return route.node;
+    const ctx = this.audioContext;
+    const node = ctx.createGain();
+    const start = this._streamingState?.baseStartTime;
+    if (start != null && ctx.currentTime < start + START_FADE) {
+      node.gain.value = 0;
+      node.gain.setValueAtTime(0, start);
+      node.gain.linearRampToValueAtTime(1, start + START_FADE);
+      route = { node, from: 0, to: 1, start, end: start + START_FADE };
+    } else {
+      route = { node, from: 1, to: 1, start: 0, end: 0 };
+    }
+    node.connect(this.graph.getBus(instrument));
+    this._transportBuses.set(instrument, route);
+    return node;
+  }
+
+  _fadeTransport(seconds) {
+    const ctx = this.audioContext;
+    const now = ctx.currentTime;
+    const end = now + Math.max(0, seconds);
+    for (const route of this._transportBuses.values()) {
+      // A quick Stop during Pause can shorten a fade already in flight.
+      if (route.to === 0 && route.end <= end) continue;
+      const fraction = route.end > route.start
+        ? Math.min(1, Math.max(0, (now - route.start) / (route.end - route.start))) : 1;
+      const held = route.from + (route.to - route.from) * fraction;
+      const gain = route.node.gain;
+      if (typeof gain.cancelAndHoldAtTime === 'function') gain.cancelAndHoldAtTime(now);
+      else {
+        gain.cancelScheduledValues(now);
+        // Restore the part of the old ramp before the cut on older browsers.
+        if (fraction > 0 && fraction < 1) gain.linearRampToValueAtTime(held, now);
       }
-      // Store the teardown so a new playback (which calls _stopStreaming) can
-      // cancel it — otherwise this timer would stopAll() the new notes.
+      gain.setValueAtTime(held, now);
+      gain.linearRampToValueAtTime(0, end);
+      Object.assign(route, { from: held, to: 0, start: now, end });
+    }
+    for (const entry of this.activeOscillators) {
+      // A pending attack must never enter the fading mix. Sounding notes keep
+      // their own envelopes until the gate reaches zero or they end naturally.
+      const stop = entry.startTime > now ? now : end;
+      if (stop >= entry.endTime) continue;
+      try { entry.voice.stop(stop); } catch {}
+      entry.endTime = stop;
+    }
+  }
+
+  pauseFade(rampTime = this.GENERAL_VOLUME_RAMP_TIME) {
+    this._stopStreaming();
+    this._fadeTransport(rampTime);
+    return new Promise(resolve => {
+      // This timer settles the UI promise only. Source stops and gain changes
+      // use the audio clock, which can stall or suspend independently of it.
       this._pauseFadeResolve = resolve;
       this._pauseFadeTimer = setTimeout(() => {
         this._pauseFadeTimer = null;
         this._pauseFadeResolve = null;
-        // Voices are already at zero from the fade above — no declick needed.
-        try { this.stopAll(0); } finally { resolve(); }
+        resolve();
       }, Math.max(0, rampTime * 1000));
     });
   }
 
-  /**
-   * Stop all active voices and clear tracking.
-   *
-   * Cutting a sounding voice with stop(now)+disconnect steps the bus from the
-   * voice's instantaneous sample value to zero within one sample. Measured over a
-   * sweep of cut phases, that step reaches 17.5x the natural slew of the sustain
-   * it interrupts — a broadband edge. The reverb send runs at unity, so it hits
-   * the convolver and smears across the IR's full length as a tick plus hiss.
-   * (It rides *under* the note's own reverb tail rather than above it, so it does
-   * not raise the level — but it puts 40 dB of splatter into 1-5 kHz and 57 dB
-   * into >5 kHz that has no business being there. That is the "pshhh" on Stop.)
-   * Fade the voices out first (inaudibly short), then stop and disconnect: the
-   * step then never exceeds the sustain's own slew, at any cut phase.
-   *
-   * @param {number} fadeSec declick fade. Pass 0 when the caller has already
-   *   faded the voices to zero (pauseFade), so teardown isn't delayed twice.
-   */
   stopAll(fadeSec = DECLICK_FADE) {
     this._stopStreaming();
-    const now = this.audioContext.currentTime;
-    const entries = Array.from(this.activeOscillators);
-    // Clear tracking up front so the per-note cleanup() timers bail out (they
-    // check membership) and the deferred disconnect below is the only teardown.
-    this.activeOscillators.clear();
-    if (!entries.length) return;
-
-    const fade = Math.max(0, fadeSec);
-    const stopAt = now + fade;
-
-    for (const entry of entries) {
-      if (fade > 0) {
-        try {
-          const g = entry.gainNode.gain;
-          // Anchor the current value at `now` before ramping — cancelScheduledValues
-          // alone leaves a past envelope event as the ramp's start point, which
-          // would step the gain instead of fading it (the very click we're killing).
-          const cur = g.value;
-          g.cancelScheduledValues(now);
-          g.setValueAtTime(cur, now);
-          g.linearRampToValueAtTime(0, stopAt);
-        } catch {}
-      }
-      // Overrides the stop already scheduled when the note was created. A voice
-      // whose start is still in the future simply never sounds.
-      try { entry.voice.stop(stopAt); } catch {}
+    if (this.activeOscillators.size) {
+      this._fadeTransport(fadeSec);
+      // Ended handlers retain their own set and routes until their sources
+      // finish. A new play has a fresh gate and can start independently.
+      this.activeOscillators = new Set();
+    } else if (this._transportBuses) {
+      for (const { node } of this._transportBuses.values()) node.disconnect();
     }
-
-    const disconnectAll = () => {
-      for (const entry of entries) {
-        try { entry.voice.disconnect(); } catch {}
-        try { entry.gainNode.disconnect(); } catch {}
-        try { entry.panner && entry.panner.disconnect(); } catch {}
-      }
-    };
-    if (fade > 0) setTimeout(disconnectAll, fade * 1000 + 30);
-    else disconnectAll();
+    this._transportBuses = new Map();
   }
 }
 
