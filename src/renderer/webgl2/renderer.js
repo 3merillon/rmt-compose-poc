@@ -1448,7 +1448,17 @@ export class RendererAdapter {
     // The line is pixel-snapped. At score overview scales, several seconds can
     // elapse before it reaches another pixel. Camera changes dirty their own frames.
     const x = this.matrix[0] * this.playheadXWorld + this.matrix[6] - this.canvasOffset.x;
-    if (!this.trackingMode && Math.round(x) !== Math.round(this._lastPlayheadLocalX)) this.needsRedraw = true;
+    if (this.trackingMode || this.needsRedraw) return;
+    const last = this._lastPlayheadLocalX;
+    if (last == null) { this.needsRedraw = true; return; }
+    const left = Math.round(x) - 0.5;
+    const previousLeft = Math.round(last) - 0.5;
+    if (left === previousLeft) return;
+    const width = this._cachedCanvasRect?.width ?? Infinity;
+    const thickness = this._config?.playhead?.thicknessPx ?? 1;
+    // Redraw once to erase a departing line, then leave the stationary score alone.
+    if ((left < width && left + thickness > 0) ||
+        (previousLeft < width && previousLeft + thickness > 0)) this.needsRedraw = true;
   }
 
   // Public API: set hovered note id for hover ring rendering
@@ -6528,7 +6538,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 // Draw triangle labels "[id]" over the triangles (centered, narrow texture) — near bottom edge
 // This pass occurs AFTER triangle outline+fill so text is on top (not darkened by triangle alpha).
 {
-  const reuseTextRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
+  const reuseTextRuns = !!(this.useGlyphAtlas && this.useGlyphCache && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
   if (!reuseTextRuns) {
     if (!this._deferredGlyphRuns) this._deferredGlyphRuns = [];
     const padX = 2.0;
@@ -7075,7 +7085,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       // Defer all text sprites (IDs, silence text) to draw AFTER any rings for correct z-order across notes
       this._deferredTextSprites = []; // array of { tex, x, y, w, h, layerZ }
       // Defer glyph-run draws (IDs, digits, arrows). Prefer cached runs if scene text unchanged and view epoch stable.
-      const reuseRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
+      const reuseRuns = !!(this.useGlyphAtlas && this.useGlyphCache && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
       if (reuseRuns) {
         // Hand the cached list back BY REFERENCE rather than copying it. Every push site
         // is guarded by this same reuse condition, so a reuse frame cannot mutate it, and
@@ -7364,10 +7374,9 @@ try {
   }
 } catch {}
 
-      const canSkipPerNote = !!(this._dragOriginalPos && this._dragOffsetW === 0.0 && reuseRuns && this._tabRegions && this._arrowUpRegions && (!this._anyDivider || this._dividerRegions) && !this.enableSilenceEraseBands);
-      // Fast path: during pure-move drags, overlays are moved by shader u_dragOffset.
-      // Skip heavy per-note overlay recompute when text runs are cached and no width changes are previewed.
-      if (!canSkipPerNote) {
+      // The cached run list already contains all note labels. Appending again
+      // would retain a duplicate set on every playhead or hover redraw.
+      if (!reuseRuns) {
       // Viewport cull bounds. Every overlay this loop emits for a note — pull tab, octave
       // arrows, fraction divider, silence band, and all of its text runs — is scissored to
       // that note's own rect, so a note whose rect lies entirely off-canvas cannot produce

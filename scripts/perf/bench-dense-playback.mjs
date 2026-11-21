@@ -233,7 +233,17 @@ try {
     const pick = r.pickAt(r.matrix[0] * (r.posSize[0] + r.posSize[2] / 2) + r.matrix[6],
       r.matrix[4] * (r.posSize[1] + r.posSize[3] / 2) + r.matrix[7], 0);
     if (pick) { r.setHoverNoteId(pick.id); r._render(); }
-    return { overviewBodyPixels: changed, detailGlyphs: r._glyphRunsCache?.length, pick, glError: gl.getError() };
+    // A stationary view must replay exactly the same pixels without retaining
+    // another set of note labels on each hover or playhead redraw.
+    const labels = r._glyphRunsCache;
+    const detailGlyphs = labels?.length;
+    const fresh = sample();
+    const replay = sample();
+    const stable = r._glyphRunsCache === labels && labels?.length === detailGlyphs;
+    if (!stable || fresh.some((value, i) => value !== replay[i])) {
+      throw Error('Cached detail redraw changed the label count or pixels');
+    }
+    return { overviewBodyPixels: changed, detailGlyphs, pick, glError: gl.getError() };
   });
   console.log(JSON.stringify(visual));
   if (!visual.overviewBodyPixels || !visual.detailGlyphs || !visual.pick || visual.glError) {
