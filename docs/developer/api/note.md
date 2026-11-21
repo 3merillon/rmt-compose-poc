@@ -1,15 +1,15 @@
 ---
 title: Note Class
-description: API reference for the Note class in src/note.js — expression storage, variable get/set, dependency introspection, and the legacy variables proxy.
+description: API reference for the Note class in src/note.ts — expression storage, variable get/set, dependency introspection, and the legacy variables proxy.
 ---
 
 # Note Class
 
-A `Note` (`src/note.js`) is six compiled expressions plus three plain properties. It stores no
+A `Note` (`src/note.ts`) is six compiled expressions plus three plain properties. It stores no
 numbers: every musical value is an expression, and reading one goes through the module's evaluator.
 
 ```javascript
-import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js'
+import { Note, EXPRESSION_VARS, isMeasureNote } from './note.ts'
 ```
 
 `EXPRESSION_VARS` lists the six evaluated variables, in
@@ -42,7 +42,7 @@ is no evaluator to ask) and no dependency registration happens. Source text and 
 :::
 
 The constructor accepts a value per property in several shapes (`_initFromVariables`,
-`src/note.js`): a plain string (compiled), a `*String` key (preferred over the plain key
+`src/note.ts`): a plain string (compiled), a `*String` key (preferred over the plain key
 when both are present), a legacy function (its `return` expression is extracted), or an existing
 `BinaryExpression` (adopted as-is).
 
@@ -65,7 +65,7 @@ note.expressions  // { [name: string]: BinaryExpression }
 Always all six keys, always a `BinaryExpression` object — an *unset* property is an **empty**
 expression, not a missing one. Use `hasExpression(name)` rather than a truthiness check.
 
-Every unset property holds the same object, `EMPTY_EXPRESSION` (`src/binary-note.js`), which
+Every unset property holds the same object, `EMPTY_EXPRESSION` (`src/binary-note.ts`), which
 is frozen: setting a variable replaces it, and a write into it throws rather than reaching every
 note. Six expressions made for each note, each with its own buffers, cost about 1.8 KB per note in
 Node for the three a typical note leaves unset. Replace an expression; never write into one a note
@@ -111,7 +111,7 @@ note.parentId  // number | undefined
 **Undefined until something assigns it** — the constructor never initialises it. It is written in
 four places: `Module.generateMeasures()` (chains each measure to the previous one),
 `Module.reindexModule()` (remaps it through the new ids), the measure-creation path in
-`src/modals/note-creation.js`, and the module-import path in `src/player.js`.
+`src/modals/note-creation.ts`, and the module-import path in `src/player.ts`.
 
 Evaluation does not read it (the `findTempo()` and `findMeasureLength()` walks that used it are
 gone). The editor still does, to find a note's parent when the expression names none. It is **not**
@@ -186,7 +186,7 @@ note.setVariable('color', '#ff0000')
 text in the retired method-chain syntax). `_setExpression()` and the constructor catch that throw
 per-property, so a typo leaves the property **unset** (or keeps the previous expression) rather
 than silently zeroing it — but the caller of `setVariable()` sees no exception either. Validate
-first with `validateDSL()` from `src/dsl/index.js` if you need a structured answer.
+first with `validateDSL()` from `src/dsl/index.ts` if you need a structured answer.
 :::
 
 ### getExpressionSource()
@@ -294,7 +294,7 @@ The app saves through `Module.createModuleJSON()`, which uses `getExpressionSour
 note.variables  // Proxy
 ```
 
-A compatibility shim, still used across `player.js`, `module.js` and the renderer. It is memoized
+A compatibility shim, still used across `player.ts`, `module.ts` and the renderer. It is memoized
 per note (it used to allocate a fresh `Proxy` on every access, on hot paths).
 
 | Access | Result |
@@ -366,7 +366,7 @@ note.hasExpression('attack')              // false
 isMeasureNote(note)  // → boolean
 ```
 
-Exported from `src/note.js`. True for a note whose `measure` property is `true`, and never for the
+Exported from `src/note.ts`. True for a note whose `measure` property is `true`, and never for the
 BaseNote (id `0`). It accepts a `Note` or a plain note object from JSON (it reads
 `note.properties.measure` on the first and `note.measure` on the second).
 

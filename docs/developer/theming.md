@@ -1,6 +1,6 @@
 # Theming the interface and score
 
-`src/theme/presets.js` defines Classic Orange, Slate Cyan, Mono Light and High Contrast. `themeManager.resolve()` in `src/theme/theme-manager.js` combines the active preset with the user’s colour overrides and stored geometry. The controls, token names, ranges and preset values are listed in [Settings reference](/reference/settings-reference#theme-tokens).
+`src/theme/presets.ts` defines Classic Orange, Slate Cyan, Mono Light and High Contrast. `themeManager.resolve()` in `src/theme/theme-manager.ts` combines the active preset with the user’s colour overrides and stored geometry. The controls, token names, ranges and preset values are listed in [Settings reference](/reference/settings-reference#theme-tokens).
 
 ## DOM and canvas
 

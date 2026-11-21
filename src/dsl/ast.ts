@@ -1,0 +1,257 @@
+/**
+ * AST Node Types and Factory Functions
+ *
+ * Defines the Abstract Syntax Tree structure for the DSL.
+ */
+
+/**
+ * AST Node Types
+ */
+export const NodeType = {
+  // Literals
+  NumberLiteral: 'NumberLiteral',       // 440, -5, 3.14
+  FractionLiteral: 'FractionLiteral',   // (3/2), (1/12)
+  Approximate: 'Approximate',           // ~261.63, ~(3/2): a number that is not exact
+
+  // References
+  NoteReference: 'NoteReference',       // [246].f, base.t
+
+  // Operations
+  BinaryOp: 'BinaryOp',                 // +, -, *, /, ^
+  UnaryOp: 'UnaryOp',                   // - (negation)
+
+} as const;
+
+export type BinaryOperator = '+' | '-' | '*' | '/' | '^';
+type Property = import('../binary-note.ts').ExpressionName;
+export interface NumberLiteral { type: 'NumberLiteral'; value: number; numerator: bigint; denominator: bigint }
+export interface FractionLiteral { type: 'FractionLiteral'; numerator: bigint; denominator: bigint }
+export interface NoteReference { type: 'NoteReference'; noteId: number | 'base'; property: Property }
+export interface BinaryOp { type: 'BinaryOp'; operator: BinaryOperator; left: AstNode; right: AstNode }
+export interface UnaryOp { type: 'UnaryOp'; operator: '-'; operand: AstNode }
+export type Literal = NumberLiteral | FractionLiteral;
+export type SignedLiteral = Literal | { type: 'UnaryOp'; operator: '-'; operand: SignedLiteral };
+export interface Approximate { type: 'Approximate'; literal: SignedLiteral }
+export type AstNode = Literal | Approximate | NoteReference | BinaryOp | UnaryOp;
+
+/**
+ * Create a number literal node
+ * @param {number} value - The numeric value
+ * @param {number} numerator - Fraction numerator
+ * @param {number} denominator - Fraction denominator
+ * @returns {Object} AST node
+ */
+export function createNumberLiteral(value: number, numerator: bigint, denominator: bigint): NumberLiteral {
+  return {
+    type: NodeType.NumberLiteral,
+    value,
+    numerator,
+    denominator,
+  };
+}
+
+/**
+ * Create a fraction literal node
+ * @param {number} numerator - The numerator
+ * @param {number} denominator - The denominator
+ * @returns {Object} AST node
+ */
+/**
+ * An approximate number: a literal marked with `~` (a measurement, a rounded
+ * value). It evaluates to an approximate value, and so does everything computed
+ * from it (src/value/exact.js).
+ * @param {Object} literal - NumberLiteral or FractionLiteral, possibly negated (UnaryOp '-')
+ */
+export function createApproximate(literal: SignedLiteral): Approximate {
+  return {
+    type: NodeType.Approximate,
+    literal,
+  };
+}
+
+export function createFractionLiteral(numerator: bigint, denominator: bigint): FractionLiteral {
+  return {
+    type: NodeType.FractionLiteral,
+    numerator,
+    denominator,
+  };
+}
+
+/**
+ * Create a note reference node
+ * @param {number|'base'} noteId - Note ID or 'base' for baseNote
+ * @param {string} property - Canonical property name
+ * @returns {Object} AST node
+ */
+export function createNoteReference(noteId: number | 'base', property: Property): NoteReference {
+  return {
+    type: NodeType.NoteReference,
+    noteId,
+    property,
+  };
+}
+
+/**
+ * Create a binary operation node
+ * @param {string} operator - '+', '-', '*', '/', '^'
+ * @param {Object} left - Left operand AST node
+ * @param {Object} right - Right operand AST node
+ * @returns {Object} AST node
+ */
+export function createBinaryOp(operator: BinaryOperator, left: AstNode, right: AstNode): BinaryOp {
+  return {
+    type: NodeType.BinaryOp,
+    operator,
+    left,
+    right,
+  };
+}
+
+/**
+ * Create a unary operation node
+ * @param {string} operator - '-' (only negation for now)
+ * @param {Object} operand - Operand AST node
+ * @returns {Object} AST node
+ */
+export function createUnaryOp(operator: '-', operand: SignedLiteral): Extract<SignedLiteral, {type: 'UnaryOp'}>;
+export function createUnaryOp(operator: '-', operand: AstNode): UnaryOp;
+export function createUnaryOp(operator: '-', operand: AstNode): UnaryOp {
+  return {
+    type: NodeType.UnaryOp,
+    operator,
+    operand,
+  };
+}
+
+/**
+ * Check if a node is a specific type
+ * @param {Object} node - AST node
+ * @param {string} type - Node type to check
+ * @returns {boolean}
+ */
+export function isNodeType(node: AstNode, type: AstNode['type']): boolean {
+  return node && node.type === type;
+}
+
+/**
+ * Check if a node is a literal (number or fraction)
+ * @param {Object} node - AST node
+ * @returns {boolean}
+ */
+export function isLiteral(node: AstNode): node is Literal {
+  return isNodeType(node, NodeType.NumberLiteral) ||
+         isNodeType(node, NodeType.FractionLiteral);
+}
+
+/**
+ * Check if a node is a reference
+ * @param {Object} node - AST node
+ * @returns {boolean}
+ */
+export function isReference(node: AstNode): node is NoteReference {
+  return isNodeType(node, NodeType.NoteReference);
+}
+
+/**
+ * Check if a node is an operation
+ * @param {Object} node - AST node
+ * @returns {boolean}
+ */
+export function isOperation(node: AstNode): node is BinaryOp | UnaryOp {
+  return isNodeType(node, NodeType.BinaryOp) ||
+         isNodeType(node, NodeType.UnaryOp);
+}
+
+/**
+ * Check if node references baseNote
+ * @param {Object} node - AST node
+ * @returns {boolean}
+ */
+export function referencesBase(node: AstNode | null): boolean {
+  if (!node) return false;
+
+  switch (node.type) {
+    case NodeType.NoteReference:
+      return node.noteId === 'base' || node.noteId === 0;
+
+    case NodeType.BinaryOp:
+      return referencesBase(node.left) || referencesBase(node.right);
+
+    case NodeType.UnaryOp:
+      return referencesBase(node.operand);
+
+    default:
+      return false;
+  }
+}
+
+/**
+ * Collect all note IDs referenced in an AST
+ * @param {Object} node - AST node
+ * @param {Set} [deps] - Set to collect dependencies into
+ * @returns {Set<number>} Set of note IDs (excluding 'base'/0)
+ */
+export function collectDependencies(node: AstNode | null, deps = new Set<number>()) {
+  if (!node) return deps;
+
+  switch (node.type) {
+    case NodeType.NoteReference:
+      if (typeof node.noteId === 'number' && node.noteId !== 0) {
+        deps.add(node.noteId);
+      }
+      break;
+
+    case NodeType.BinaryOp:
+      collectDependencies(node.left, deps);
+      collectDependencies(node.right, deps);
+      break;
+
+    case NodeType.UnaryOp:
+      collectDependencies(node.operand, deps);
+      break;
+  }
+
+  return deps;
+}
+
+/**
+ * Pretty-print an AST node (for debugging)
+ * @param {Object} node - AST node
+ * @param {number} [indent] - Indentation level
+ * @returns {string}
+ */
+export function printAST(node: AstNode | null, indent = 0): string {
+  const pad = '  '.repeat(indent);
+
+  if (!node) return `${pad}(null)`;
+
+  switch (node.type) {
+    case NodeType.NumberLiteral:
+      return `${pad}Number(${node.numerator}/${node.denominator})`;
+
+    case NodeType.FractionLiteral:
+      return `${pad}Fraction(${node.numerator}/${node.denominator})`;
+
+    case NodeType.Approximate:
+      return `${pad}Approximate\n${printAST(node.literal, indent + 1)}`;
+
+    case NodeType.NoteReference:
+      return `${pad}Ref([${node.noteId}].${node.property})`;
+
+    case NodeType.BinaryOp:
+      return [
+        `${pad}BinaryOp(${node.operator})`,
+        printAST(node.left, indent + 1),
+        printAST(node.right, indent + 1),
+      ].join('\n');
+
+    case NodeType.UnaryOp:
+      return [
+        `${pad}UnaryOp(${node.operator})`,
+        printAST(node.operand, indent + 1),
+      ].join('\n');
+
+    default:
+      return `${pad}Unknown(${(node as { type: unknown }).type})`;
+  }
+}

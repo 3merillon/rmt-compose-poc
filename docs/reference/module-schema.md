@@ -92,7 +92,7 @@ The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `a
 
 ### Note kinds
 
-What a note *is* follows from which keys it has (`noteKind()` in `src/note.js`). The one flag, `measure`, separates a measure bar from a silence. Only a **note** sounds; the others are structure other notes relate to.
+What a note *is* follows from which keys it has (`noteKind()` in `src/note.ts`). The one flag, `measure`, separates a measure bar from a silence. Only a **note** sounds; the others are structure other notes relate to.
 
 | Kind | Rule | Drawn as |
 |---|---|---|
@@ -112,11 +112,11 @@ widget; it cannot be dragged, grouped or dropped onto, and MIDI export counts it
 
 ## Measure bars
 
-A **measure bar** is a silent note with a start and a duration, no frequency, and the flag `"measure": true`. The duration is the length of the bar. The flag decides how the editor draws and treats the note; evaluation reads a bar like any other note (`isMeasureNote()` in `src/note.js`).
+A **measure bar** is a silent note with a start and a duration, no frequency, and the flag `"measure": true`. The duration is the length of the bar. The flag decides how the editor draws and treats the note; evaluation reads a bar like any other note (`isMeasureNote()` in `src/note.ts`).
 
 ### The chain form
 
-**Add Measure** (`Module.generateMeasures`, `src/module.js`) writes the first bar from the BaseNote, and each next bar from the one before it:
+**Add Measure** (`Module.generateMeasures`, `src/module.ts`) writes the first bar from the BaseNote, and each next bar from the one before it:
 
 ```json
 { "id": 1, "startTime": "base.t", "duration": "base.d * 4", "measure": true },
@@ -204,7 +204,7 @@ The library validator whitelists `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba(
 | `piano` | Multisampled (VSCO2 Community Edition, CC0) |
 | `violin` | Multisampled (VSCO2 Community Edition, CC0) |
 
-**A note without an `instrument` takes the instrument of its player.** A player is a line of notes, each starting where the previous one ends. A note's instrument is its own, if it sets one (it then starts a new player); else the instrument of the note or silence its start is written from the end of (`[p].t + [p].d`, optionally plus a rest); else that of its counterpart in a line it copies (start `[k].t + X`, frequency `r * [k].f`); else, as the first note of a line, that of the note its start time is written from, else the BaseNote's, else the global **`audio.defaultInstrument`** setting (default `sine-wave`). The frequency does not decide the instrument. The rule is in [Instruments](/user-guide/playback/instruments#players); the code is `src/players.js`.
+**A note without an `instrument` takes the instrument of its player.** A player is a line of notes, each starting where the previous one ends. A note's instrument is its own, if it sets one (it then starts a new player); else the instrument of the note or silence its start is written from the end of (`[p].t + [p].d`, optionally plus a rest); else that of its counterpart in a line it copies (start `[k].t + X`, frequency `r * [k].f`); else, as the first note of a line, that of the note its start time is written from, else the BaseNote's, else the global **`audio.defaultInstrument`** setting (default `sine-wave`). The frequency does not decide the instrument. The rule is in [Instruments](/user-guide/playback/instruments#players); the code is `src/players.ts`.
 
 **Modules saved before this rule.** A file without `"instrumentRule": "start-time"` is migrated on load: every sounding note whose instrument the rule would change gets its old instrument written onto it, so the module keeps its sound. A save writes `"instrumentRule": "start-time"` at the top level, so the file is not migrated again. No note of any shipped library module changes instrument.
 
@@ -236,8 +236,8 @@ Hard limits, wherever a module is read:
 
 | Limit | Value |
 |---|---|
-| Max file size (Load Module) | **120 MB** (`MAX_MODULE_BYTES`, `src/limits.js`) |
-| Max notes | **500 000** (`MAX_MODULE_NOTES`, `src/limits.js`) |
+| Max file size (Load Module) | **120 MB** (`MAX_MODULE_BYTES`, `src/limits.ts`) |
+| Max notes | **500 000** (`MAX_MODULE_NOTES`, `src/limits.ts`) |
 | Max JSON nesting depth (Load Module) | **20** |
 | Valid note id | integer, **0 – 16 777 215** (`MAX_NOTE_ID`) |
 | Max expression length | **10 000 characters** |

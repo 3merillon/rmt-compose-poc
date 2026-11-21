@@ -6,18 +6,18 @@ description: How RMT Compose synthesises its stereo reverb impulse response at r
 # Reverb
 
 RMT Compose ships **no reverb assets**. The impulse response fed to the `ConvolverNode` is
-synthesised in the browser, at runtime, by `generateImpulseResponse()` in `src/player/reverb.js`
+synthesised in the browser, at runtime, by `generateImpulseResponse()` in `src/player/reverb.ts`
 (153 lines: one exported pure function, two clamp helpers, no state).
 
 That is a licensing decision as much as a size one: a recorded IR would drag someone else's licence
 into an MIT-licensed repo. Rendering our own keeps the relicense clean.
 
-Reverb is **on by default** (`audio.reverb.enabled: true`, `settings-schema.js`) at 25% wet.
+Reverb is **on by default** (`audio.reverb.enabled: true`, `settings-schema.ts`) at 25% wet.
 
 ## The function
 
 ```javascript
-import { generateImpulseResponse } from './player/reverb.js';
+import { generateImpulseResponse } from './player/reverb.ts';
 
 const ir = await generateImpulseResponse(audioContext, {
   roomSize: 0.5,   // [0, 1]     — clamped

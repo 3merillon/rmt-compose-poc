@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const isOpen = ref(false)
@@ -49,7 +49,21 @@ const languages = [
   { code: 'he', name: 'עברית' }
 ]
 
-let observer = null
+declare global {
+  interface Window {
+    googleTranslateElementInit?: () => void
+    google: {
+      translate: {
+        TranslateElement: new (
+          options: { pageLanguage: string; includedLanguages: string; autoDisplay: boolean },
+          elementId: string
+        ) => object
+      }
+    }
+  }
+}
+
+let observer: MutationObserver | null = null
 
 function loadGoogleTranslate() {
   if (document.getElementById('google-translate-script')) return
@@ -68,11 +82,11 @@ function loadGoogleTranslate() {
   document.head.appendChild(script)
 }
 
-function selectLanguage(langCode) {
+function selectLanguage(langCode: string) {
   isOpen.value = false
 
   // Method 1: Try to use Google's select element directly
-  const googleSelect = document.querySelector('.goog-te-combo')
+  const googleSelect = document.querySelector<HTMLSelectElement>('.goog-te-combo')
   if (googleSelect) {
     googleSelect.value = langCode
     googleSelect.dispatchEvent(new Event('change', { bubbles: true }))
@@ -98,7 +112,7 @@ function resetToEnglish() {
   clearTranslateCookies()
 
   // Try to use Google's select to trigger the restore
-  const googleSelect = document.querySelector('.goog-te-combo')
+  const googleSelect = document.querySelector<HTMLSelectElement>('.goog-te-combo')
   if (googleSelect) {
     // Set to the page's original language (English)
     // The first option with empty value means "Select Language" / restore original
@@ -162,7 +176,7 @@ function detectCurrentLanguage() {
   }
 
   // Try to get language from Google's select element
-  const googleSelect = document.querySelector('.goog-te-combo')
+  const googleSelect = document.querySelector<HTMLSelectElement>('.goog-te-combo')
   if (googleSelect && googleSelect.value) {
     const langCode = googleSelect.value.toUpperCase().split('-')[0]
     currentLang.value = langCode
@@ -194,8 +208,8 @@ function setupObserver() {
 }
 
 // Close dropdown when clicking outside
-function handleClickOutside(e) {
-  if (!e.target.closest('.translate-widget')) {
+function handleClickOutside(e: MouseEvent) {
+  if (!(e.target instanceof Element) || !e.target.closest('.translate-widget')) {
     isOpen.value = false
   }
 }
@@ -214,7 +228,7 @@ onMounted(() => {
   const pollInterval = setInterval(() => {
     detectCurrentLanguage()
     // Stop polling once we detect the Google select is available
-    if (document.querySelector('.goog-te-combo')) {
+    if (document.querySelector<HTMLSelectElement>('.goog-te-combo')) {
       clearInterval(pollInterval)
     }
   }, 1000)

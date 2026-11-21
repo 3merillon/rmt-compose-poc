@@ -5,21 +5,21 @@ description: AudioGraph owns every node downstream of a voice — per-instrument
 
 # Audio Graph
 
-`AudioGraph` (`src/player/audio-graph.js`) owns every node **downstream** of a per-note
+`AudioGraph` (`src/player/audio-graph.ts`) owns every node **downstream** of a per-note
 voice, and it is the only class that turns an `audio.*` setting into an audio node. Reverb, stereo
 spread, the limiter and master volume all reach the speakers through this class — live, without
 restarting playback.
 
-Two `audio.*` keys are read outside it as well, and neither builds a node: `player.js` mirrors
+Two `audio.*` keys are read outside it as well, and neither builds a node: `player.ts` mirrors
 `audio.masterVolume` onto the transport slider and feeds it back through `audioEngine.setVolume()`
-(`player.js`), and it hands `audio.defaultInstrument` to `module.js`
-(`player.js`).
+(`player.ts`), and it hands `audio.defaultInstrument` to `module.ts`
+(`player.ts`).
 
 One key is held here without building a node at all: `audio.tempered.enabled` becomes
 `graph.temperedEnabled`, a flag the engine reads as it schedules each voice — see
 [Tempered playback](/developer/audio/audio-engine#tempered-playback).
 
-It is constructed once, by `AudioEngine`'s constructor (`audio-engine.js`), and reachable as
+It is constructed once, by `AudioEngine`'s constructor (`audio-engine.ts`), and reachable as
 `audioEngine.graph`.
 
 ## The node chain
@@ -113,10 +113,10 @@ left-to-right**: three octaves above the BaseNote is hard right, three below is 
 BaseNote itself is dead centre. It returns `0` if either frequency is non-positive.
 
 **Width is not applied here.** The caller multiplies by `graph.stereoWidth`
-(`audio-engine.js`). The split is deliberate: `panPos` is baked once, at
+(`audio-engine.ts`). The split is deliberate: `panPos` is baked once, at
 `preparePlayback` time, while the enable flag and width are read when the voice is *scheduled*.
 
-Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js`). Out of the box, playback
+Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.ts`). Out of the box, playback
 is centred.
 
 ## Master volume

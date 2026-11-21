@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "paths": {
+      "/src/*": [
+        "./src/*"
+      ]
+    },
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": [
+    "vite.config.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.mjs",
+    "src/**/*.d.ts"
+  ]
+}

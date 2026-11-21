@@ -5,7 +5,7 @@ description: The Module class in RMT Compose — construction, notes, dependency
 
 # Module System
 
-`Module` (`src/module.js`) is the composition. It owns the notes, the dependency graph, the
+`Module` (`src/module.ts`) is the composition. It owns the notes, the dependency graph, the
 evaluators, the dirty set, and both ends of the JSON pipeline. Everything else in the app reaches a
 note through it.
 
@@ -31,7 +31,7 @@ module.notes.get(5)      // ❌ TypeError — notes is not a Map
 
 ### BaseNote defaults
 
-With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js`):
+With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.ts`):
 
 | Property | Stored expression | Evaluates to |
 |---|---|---|
@@ -168,7 +168,7 @@ module.markNotesDirtyBatch(noteIds) // many notes, one pass
 `markNoteDirty()` re-registers the note, calls `invalidate()` on the incremental evaluator (its
 bytecode may have changed), then marks every transitive dependent with **`markDirtyOnly()`** — they
 need re-evaluating but must not be re-registered. A note already reached by a walk of the same dirty
-cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js`), so callers
+cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.ts`), so callers
 that mark a note and then each dependent cost one walk. If the note *is* the BaseNote, every
 `baseNoteDependents` entry is marked too.
 
@@ -242,7 +242,7 @@ from JSON, every note's `parentId` is `undefined`. Evaluation does not read it.
 
 `findInstrument(note)` is different — it does not use `parentId`. It reads the note's own
 `properties.instrument`, and if absent, follows the note's **start time** along its line
-(`src/players.js`). The terminal fallback is the module-level default instrument, driven by the
+(`src/players.ts`). The terminal fallback is the module-level default instrument, driven by the
 `audio.defaultInstrument` setting through `setDefaultInstrument()` (default `sine-wave`).
 
 ## Measures
@@ -282,8 +282,8 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 
 `source` is either a **URL string** (fetched) or a **plain object**. The steps:
 
-1. **`migrateTimeModel(data)`** (`src/migrate/relational-time.js`), then **`migrateSyntax(data)`**
-   (`src/migrate/legacy-syntax.js`), before anything is built. A module in the current form comes
+1. **`migrateTimeModel(data)`** (`src/migrate/relational-time.ts`), then **`migrateSyntax(data)`**
+   (`src/migrate/legacy-syntax.ts`), before anything is built. A module in the current form comes
    back unchanged. A module of the old time model, or in the retired method-chain syntax, is
    converted (see [Loading old modules](#loading-old-modules)); one a converter cannot convert throws
    a `TimeMigrationError` or `SyntaxMigrationError`, so it never loads wrong.
@@ -293,7 +293,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
+Ids are guarded (`src/module.ts`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
 largest id a note can have) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 
@@ -323,7 +323,7 @@ The user-facing translation table is under
 [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
 
 Then the **method-chain syntax** (`module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))`)
-is converted to DSL by `migrateSyntax()` (`src/migrate/legacy-syntax.js`), exactly, and the module is
+is converted to DSL by `migrateSyntax()` (`src/migrate/legacy-syntax.ts`), exactly, and the module is
 saved in the DSL from then on. The time conversion runs first because it rewrites old time constructs
 inside method-chain text and keeps that text in the same syntax. The syntax converter refuses the call
 orders the old compiler did not read as written (a `.mul()` after an `.add()`, a `.pow()` after a
@@ -334,7 +334,7 @@ orders the old compiler did not read as written (a `.mul()` after an `.add()`, a
 
 ### Boot fallback
 
-At startup `src/player.js` loads the saved session (`src/store/autosave.js`) with
+At startup `src/player.ts` loads the saved session (`src/store/autosave.ts`) with
 `Module.loadFromJSON()`. If that throws and a saved session existed (for instance a module of the old
 model that the converter refuses), the session is kept beside it (key `unloadable`) before the
 autosave can replace it, an error is logged, and `modules/defaultModule.json` opens instead. If the
@@ -363,7 +363,7 @@ module.reindexModule()
 
 Reindexing assigns IDs from 1, first to measure bars and then to the other notes, in start-time order within each set. The DSL lexer identifies references in note fields, BaseNote fields and a note-based repeat. The remapper updates the ID token and preserves whitespace and comments. The module rebuilds the dependency graph and evaluates the result.
 
-**Copy to Modules** uses the same reference remapper with a map containing only the selected IDs. `src/utils/copy-selection.js` builds the standalone score. For a BaseNote field it checks the input properties before retaining the expression. A dependency on an omitted note can feed back into the new BaseNote when the copied note is re-anchored, so that BaseNote field takes its evaluated value. [Opening a copy on its own](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own)
+**Copy to Modules** uses the same reference remapper with a map containing only the selected IDs. `src/utils/copy-selection.ts` builds the standalone score. For a BaseNote field it checks the input properties before retaining the expression. A dependency on an omitted note can feed back into the new BaseNote when the copied note is re-anchored, so that BaseNote field takes its evaluated value. [Opening a copy on its own](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own)
 
 ::: warning Ids change on save
 Because `exportOrderedModule()` reindexes, the ids in a downloaded `module.json` will generally

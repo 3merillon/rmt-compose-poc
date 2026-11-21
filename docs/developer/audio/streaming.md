@@ -9,7 +9,7 @@ The scheduler creates voices up to two seconds before they sound. It shortens th
 window in dense passages to reduce the number of connected Web Audio nodes. A
 large opening chord gets extra preparation time before its common attack.
 
-The pump is a closure inside `AudioEngine.play()` in `src/player/audio-engine.js`. Each playback owns its state.
+The pump is a closure inside `AudioEngine.play()` in `src/player/audio-engine.ts`. Each playback owns its state.
 
 ## The state object
 
@@ -126,7 +126,7 @@ Measure markers carry only a `startTime`. The pump skips them explicitly
 
 ## Looping
 
-Looping lives **entirely inside the scheduler**. The transport does not drive it; `player.js` just
+Looping lives **entirely inside the scheduler**. The transport does not drive it; `player.ts` just
 hands `play()` a descriptor and then asks the engine whether the loop actually armed.
 
 ```javascript
@@ -148,12 +148,12 @@ When `fromTime === 0` the promise is shared rather than evaluated twice.
 ### Transposed passes
 
 A module may transpose each repeat: its BaseNote's `repeat`, the ratio from one repeat to the next (an expression, e.g.
-`9/8` or `[24].f / base.f`; see `src/player/display-transpose.js`). `player.js` evaluates it exactly (`moduleRepeatRatio`,
+`9/8` or `[24].f / base.f`; see `src/player/display-transpose.ts`). `player.ts` evaluates it exactly (`moduleRepeatRatio`,
 which refuses anything outside 1/16 to 16) and hands
 `play()` a `transpose` option, `{ ratio, fold, offset }`: the ratio, the fold preference (Settings → Audio → Loop →
 Keep within an octave) and the pass the playback starts in (kept across Pause and seeks, 0 after Stop). Without it
-nothing is transposed (`_transposeState`, `audio-engine.js`). The pump hands each voice the factor of
-its pass, `_passFactor(s, s.cycle)` (`audio-engine.js`): `passTransposition(ratio, offset + cycle, fold)`, exact, folded into one
+nothing is transposed (`_transposeState`, `audio-engine.ts`). The pump hands each voice the factor of
+its pass, `_passFactor(s, s.cycle)` (`audio-engine.ts`): `passTransposition(ratio, offset + cycle, fold)`, exact, folded into one
 octave (`[1, 2)` rising, `(1/2, 1]` falling) by exact comparison, then made a float once per pass. `_scheduleNote()`
 multiplies the written frequency by it and takes the tempered twin and the stereo place from the transposed pitch.
 `_prepareTransposed()` decodes every zone of the sampled instruments the notes use, so a later pass never falls back
@@ -207,18 +207,18 @@ hangs outright.
 
 Playback can run faster or slower than the piece is written, without touching the module: a
 performance setting outside the notation. The rate is **score seconds per clock second** (2 plays
-twice as fast); frequencies never pass through it. It lives in `audioEngine.rate`, and `player.js`
+twice as fast); frequencies never pass through it. It lives in `audioEngine.rate`, and `player.ts`
 resets it to 1 whenever a module is loaded.
 
-Each playback carries a `TimeMap` (`src/player/time-map.js`): a chain of segments, each holding one
+Each playback carries a `TimeMap` (`src/player/time-map.ts`): a chain of segments, each holding one
 rate from a clock instant on. `scoreAt(c)` and `clockAt(s)` are the only things the scheduler and the
 playhead ask of it, so a tempo curve (an accelerando drawn over time) can later replace a segment's
 linear law by its integral without touching either.
 
-`setRate(rate)` (`src/player/audio-engine.js`) does four things:
+`setRate(rate)` (`src/player/audio-engine.ts`) does four things:
 
 1. **Splits the map** `RATE_CHANGE_LEAD` (50 ms) ahead of the clock (`TimeMap.setRate`,
-   `time-map.js`). Everything before that instant keeps the times it had, so the playhead does not
+   `time-map.ts`). Everything before that instant keeps the times it had, so the playhead does not
    jump and nothing already heard moves.
 2. **Cancels the voices that start after it**, by their score position (`entry.scoreStart`), the
    same number the rewind compares, so a note is either kept or rescheduled, never both or neither.
@@ -235,9 +235,9 @@ disarm moves it too, and the playhead stops where the sound does.
 **The playhead** follows `scoreElapsed()`, the score time through the same map, plus the
 time the playback started from. It no longer derives its position from `ctx.currentTime` directly.
 
-**Commit tempo** (`commitLiveTempo()`, `src/player.js`) writes the rate into the piece. The live
+**Commit tempo** (`commitLiveTempo()`, `src/player.ts`) writes the rate into the piece. The live
 BPM (60 / `base.d` × rate) is first snapped to the whole number the toolbar shows, then `base.d`
-becomes exactly 60 / BPM (`snapTempo()`, `time-map.js`); a float is never written as if it were
+becomes exactly 60 / BPM (`snapTempo()`, `time-map.ts`); a float is never written as if it were
 exact. Every time in the module scales with `base.d`, the rate returns to 1, and the commit is one
 undo step. MIDI export reads the module, so it writes the committed tempo, never a live rate.
 
@@ -263,7 +263,7 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 | Pause | `audioEngine.pauseFade()` — The engine stops scheduling and fades the current playback over 200 ms. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
 | The module's end | `audioEngine.finish()` — scheduling stops; the voices still sounding ring out their releases and stop themselves. A new Play cuts what is left. |
-| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js`). |
+| Resume | `player.ts` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.ts`). |
 | Seek | A background click while playing fades the outgoing session and parks at the selected score time. Play prepares a fresh session there. |
 
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.

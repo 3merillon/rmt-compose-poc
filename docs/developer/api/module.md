@@ -1,15 +1,15 @@
 ---
 title: Module Class
-description: API reference for the Module class in src/module.js — notes, dependency queries, evaluation, musical lookups, and JSON round-trip.
+description: API reference for the Module class in src/module.ts — notes, dependency queries, evaluation, musical lookups, and JSON round-trip.
 ---
 
 # Module Class
 
-`Module` (`src/module.js`) owns a composition: the BaseNote, every other note, the dependency
+`Module` (`src/module.ts`) owns a composition: the BaseNote, every other note, the dependency
 graph, and the incremental evaluator that turns compiled expressions into numbers.
 
 ```javascript
-import { Module, invalidateModuleEndTimeCache, setDefaultInstrument, getDefaultInstrument } from './module.js'
+import { Module, invalidateModuleEndTimeCache, setDefaultInstrument, getDefaultInstrument } from './module.ts'
 ```
 
 The class holds no DOM and no audio state. It is importable from Node — the perf benches
@@ -29,14 +29,14 @@ Creates a module with a BaseNote (id `0`) and nothing else.
 
 ::: warning Numbers are silently ignored
 The constructor only honours values that are a `string`, a `function`, a `*String` key, or
-`color` / `instrument` (`src/module.js`). `new Module({ duration: 0.5 })` drops the `0.5`
+`color` / `instrument` (`src/module.ts`). `new Module({ duration: 0.5 })` drops the `0.5`
 and leaves the time unit at 1 s. Write `new Module({ duration: '1/2' })`.
 :::
 
 ### BaseNote defaults
 
 Any key you do not override falls back to these. They are **expression strings** in the DSL
-(`src/module.js`):
+(`src/module.ts`):
 
 | Property | Default expression | Value |
 |---|---|---|
@@ -58,7 +58,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.ts`).
 
 ### baseNote
 
@@ -136,7 +136,7 @@ note that reads the BaseNote (by writing `base`, or by inheriting an amplitude, 
 and on through whatever reads those.
 
 Callers often mark a note and then each of its dependents. A note already reached by a walk of the
-same dirty cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js`),
+same dirty cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.ts`),
 so the cycle costs one walk. The set is cleared whenever the dirty set is.
 
 ### markNotesDirtyBatch()
@@ -149,7 +149,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js`) uses it after grafting a library module onto a target note.
+(`src/player.ts`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -162,11 +162,11 @@ module.batchSetExpressions([
 
 Compiles all the expressions with per-note notifications suppressed, re-registers dependencies
 once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** action
-(`src/modals/index.js`) rewrites every note in the composition through this in one pass.
+(`src/modals/index.ts`) rewrites every note in the composition through this in one pass.
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as
-`{ noteId, varName, expr }` (`src/module.js`); passing the wrong keys throws
+`{ noteId, varName, expr }` (`src/module.ts`); passing the wrong keys throws
 `TypeError: Cannot read properties of undefined (reading 'endsWith')`.
 :::
 
@@ -215,7 +215,7 @@ TET notes.
 const cache = module.getEvaluationCache()
 ```
 
-**Evaluates first if anything is dirty**, then returns the cache (`src/module.js`). This
+**Evaluates first if anything is dirty**, then returns the cache (`src/module.ts`). This
 is the lazy entry point that `Note.getVariable()` goes through; it is not a peek.
 
 ### evaluateNoteVariable()
@@ -300,7 +300,7 @@ module.getParentChainByProperty(2, 'frequency')  // → [1, 0]
 ```
 
 The ancestor chain for one property, walking back to the BaseNote. **The starting note is not in
-the result** (`src/module.js`) — `chain[0]` is its parent. `property` is one of
+the result** (`src/module.ts`) — `chain[0]` is its parent. `property` is one of
 `'frequency' | 'startTime' | 'duration'`.
 
 ### getChildrenTreeByProperty()
@@ -367,7 +367,7 @@ const gain = module.findAmplitude(note)  // Fraction — exact, unclamped
 The amplitude a note sounds at: its own `amplitude` expression if it has one, otherwise the
 BaseNote's, otherwise `new Fraction(1)`. This is the same fallback the evaluator applies to
 `[id].a`. There is no `parentId` walk. Consumers clamp for their medium — the audio engine through
-`amplitudeToGain()` in `src/player/amplitude.js` (0–4).
+`amplitudeToGain()` in `src/player/amplitude.ts` (0–4).
 
 ### findInstrument()
 
@@ -376,7 +376,7 @@ const name = module.findInstrument(note)  // string
 ```
 
 Returns `note.properties.instrument` when it is set. Otherwise the instrument follows the note's
-**start time**, not its frequency (the rule is in `src/players.js`; `findInstrument()` delegates to
+**start time**, not its frequency (the rule is in `src/players.ts`; `findInstrument()` delegates to
 `instrumentOf()`):
 
 1. a note whose start is written from the end of a note or a silence *p* (`[p].t + [p].d`, with or
@@ -391,12 +391,12 @@ The optional second argument is a `Map` memo, shared by a caller that resolves m
 (the audio engine, the renderer and the MIDI export do), so each line is walked once rather than once
 per note on it.
 
-That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js`). This is the
+That default is a module-scoped value, not a constant: `player.ts` calls `setDefaultInstrument()`
+whenever the `audio.defaultInstrument` setting changes (`src/player.ts`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript
-import { setDefaultInstrument, getDefaultInstrument } from './module.js'
+import { setDefaultInstrument, getDefaultInstrument } from './module.ts'
 
 setDefaultInstrument('piano')
 getDefaultInstrument()  // → 'piano'
@@ -462,14 +462,14 @@ const text = module.createModuleJSONString()  // === JSON.stringify(module.creat
 ```
 
 Synchronous. The same text as `JSON.stringify(createModuleJSON())`, made without serializing every
-note again (`src/module.js`). Each note keeps its text (`note._savedJSON`) with what it was made
+note again (`src/module.ts`). Each note keeps its text (`note._savedJSON`) with what it was made
 from: its id, colour, instrument, measure flag and, per variable, whether the expression is empty
 and its source text. On the next call a note whose fields all read the same gives its kept text;
-any other is serialized again (`noteJSONText()`, `src/module.js`). Every note is still read, so
+any other is serialized again (`noteJSONText()`, `src/module.ts`). Every note is still read, so
 an edit by any route is seen, including one that writes `note.expressions` or `note.properties`
 directly. Nothing is kept for a colour or instrument that is an object, or for an expression with
 bytecode and no source text. History and autosave receive the same canonical text from `moduleSnapshot()`
-(`src/store/history.js`). Workspace moves, resizes and octave edits use the tracked changes.
+(`src/store/history.ts`). Workspace moves, resizes and octave edits use the tracked changes.
 The note and group widgets also supply the IDs of notes whose plain properties they edited.
 `scripts/test-edit-cost.mjs` holds it to `JSON.stringify(createModuleJSON())` on every library
 module and through edits by every route.
@@ -495,11 +495,11 @@ const module = await Module.loadFromJSON(source)
 
 Before it builds any note, it runs the data through two conversions, in this order:
 
-1. `migrateTimeModel()` (`src/migrate/relational-time.js`): a module written for the old time
+1. `migrateTimeModel()` (`src/migrate/relational-time.ts`): a module written for the old time
    model (tempo, beats per measure, `beat()`, `measure()`, `module.findTempo` chains) is rewritten
    in relational time. A module it cannot convert throws a `TimeMigrationError`. A converted load
    logs one `[RMT] Converted a module to relational time` line.
-2. `migrateSyntax()` (`src/migrate/legacy-syntax.js`): every expression in the retired method-chain
+2. `migrateSyntax()` (`src/migrate/legacy-syntax.ts`): every expression in the retired method-chain
    syntax becomes DSL. One it cannot read as written throws a `SyntaxMigrationError` naming the
    note and variable. A converted load logs `[RMT] N expression(s) converted from the method-chain
    syntax to the DSL`.
@@ -507,7 +507,7 @@ Before it builds any note, it runs the data through two conversions, in this ord
 Both are exact: every start, duration, frequency and interpretation value keeps the same fraction.
 See [Module System](/developer/architecture/module-system#loading-old-modules).
 
-Per-note id guards (`src/module.js`): ids that are not integers, are `< 0`, or are
+Per-note id guards (`src/module.ts`): ids that are not integers, are `< 0`, or are
 `> 16777215` (`MAX_NOTE_ID`) are skipped with a `[RMT Security]` warning; the
 literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
 anywhere in this path — expressions are compiled to bytecode.
@@ -540,11 +540,11 @@ affected blocks and the measure list. The exported function invalidates cached t
 an untracked change.
 
 ```javascript
-import { invalidateModuleEndTimeCache } from './module.js'
+import { invalidateModuleEndTimeCache } from './module.ts'
 ```
 
 `Note._notifyChange()` also emits `player:invalidateModuleEndTimeCache` on the event bus, which
-`player.js` listens for. `Module` itself emits nothing.
+`player.ts` listens for. `Module` itself emits nothing.
 
 ### getPoolStats()
 

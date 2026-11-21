@@ -10,7 +10,7 @@ which methods run, in what order, and what each one costs. If you are changing h
 selection, start here.
 
 ::: warning GPU picking does not ship
-`src/renderer/webgl2/picking.js` describes itself as a scaffold: *"This is a scaffold. No draw
+`src/renderer/webgl2/picking.ts` describes itself as a scaffold: *"This is a scaffold. No draw
 integration yet — `readAt()` will typically return null."* The file remains on disk but is
 **imported by nothing** — it is never constructed or initialized, it is not in the bundle, and the
 canvas-sized FBO it would allocate never exists. (`Workspace` keeps a `this.picking` slot; it

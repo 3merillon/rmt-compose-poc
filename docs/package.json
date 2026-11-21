@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "vitepress": "^1.6.4"
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3",
+    "vitepress": "^1.6.4",
+    "vue-tsc": "3.3.14"
   }
 }

@@ -12,6 +12,6 @@ Route an undoable edit through the existing history path. Supply the edited IDs 
 
 ## Settings and documentation
 
-Define setting defaults and validation together in `src/settings/settings-schema.js`. Consider an existing browser with a partial settings object and a fresh browser at factory defaults. Name the corresponding panel control and its effect in the [settings reference](/reference/settings-reference).
+Define setting defaults and validation together in `src/settings/settings-schema.ts`. Consider an existing browser with a partial settings object and a fresh browser at factory defaults. Name the corresponding panel control and its effect in the [settings reference](/reference/settings-reference).
 
 For measured claims, keep the benchmark and conditions together on the [performance page](/developer/performance). Composer pages should describe an action and what the reader can see or hear. Link to the implementation for readers who need the underlying mechanism.
