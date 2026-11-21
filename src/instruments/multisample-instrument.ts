@@ -98,7 +98,7 @@ export class MultisampleInstrument implements Instrument {
   declare baseDir: string;
   declare zones: SampleZone[];
   declare gain: number;
-  declare envelope: Envelope;
+  declare envelope: Record<string, unknown>;
   declare manifestLoaded: boolean;
   declare articulation: string;
   declare manifestPromise: Promise<void>;
@@ -134,11 +134,7 @@ export class MultisampleInstrument implements Instrument {
       this.displayName = typeof m.displayName === 'string' && m.displayName || this.name;
       this.license = m.license || null;
       if (m.gainDb != null && Number.isFinite(Number(m.gainDb))) this.gain = Math.pow(10, Number(m.gainDb) / 20);
-      if (record(m.envelope)) {
-        for (const key of ['attack', 'release'] as const) {
-          if (key in m.envelope) this.envelope[key] = m.envelope[key] == null ? undefined : Number(m.envelope[key]);
-        }
-      }
+      if (record(m.envelope)) this.envelope = { ...this.envelope, ...m.envelope };
       const zones: unknown[] = Array.isArray(m.zones) ? m.zones : [];
       this.zones = zones
         .filter((z): z is Record<string, unknown> & { url: string } => record(z) && Number.isFinite(Number(z.rootHz)) && Number(z.rootHz) > 0 && typeof z.url === 'string' && !!z.url)
@@ -289,7 +285,10 @@ export class MultisampleInstrument implements Instrument {
    */
   getEnvelopeSettings(duration: number, frequency?: number | null): Envelope {
     const e = this.envelope || {};
-    const sec = (v: number | undefined, d: number) => (v != null && isFinite(v) && v >= 0 ? +v : d);
+    const sec = (value: unknown, fallback: number) => {
+      const seconds = Number(value);
+      return value != null && Number.isFinite(seconds) && seconds >= 0 ? seconds : fallback;
+    };
     // drawT60: the recording's own decay, which the workspace draws; the audio does
     // not apply it (the recording already decays).
     const z = frequency != null && isFinite(frequency) && frequency > 0 ? this._zoneFor(frequency) : null;
