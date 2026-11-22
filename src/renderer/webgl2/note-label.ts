@@ -40,7 +40,7 @@ export function noteLabel(value: X.ExactValue | null | undefined, base: X.ExactV
     const t = r.terms[0];
     const parts = [];
     if (!t.c.equals(1)) parts.push(fracText(t.c));
-    for (const [b, e] of t.rad) parts.push(`${b}^(${e.s * e.n}/${e.d})`);
+    for (const radical of t.rad) parts.push(X.radicalText(radical));
     text = parts.join('·');
   } else {
     text = X.toText(r).replace(/ \* /g, '·');

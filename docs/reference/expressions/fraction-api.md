@@ -102,8 +102,7 @@ prefix is used only for an approximate value.
 
 A value is **approximate** when you write it with `~` (see
 [Approximate numbers](/reference/expressions/syntax#approximate-numbers)), or when an operation
-cannot be kept exact: a division by a sum of irrational terms, a non-integer power of a sum, more
-than 64 terms, or a division by zero. Anything computed from an approximate value is approximate,
+cannot be kept exact, for example a result with more than 64 distinct terms or a division by zero. A fractional power of an exact positive sum can serve as a scale step. Seven factors of `(1 + 2^(1/2))^(1/7)` recover that period exactly. Anything computed from an approximate value is approximate,
 and it never equals an exact value. A plain decimal such as `1.5` stays exact (3/2).
 
 Exact exponentiation is also capped for safety: an integer exponent above **65536**, or a result

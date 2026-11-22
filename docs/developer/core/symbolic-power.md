@@ -22,10 +22,10 @@ Equal temperament needs irrational ratios. A float loses precision with every op
 ## The irrational form
 
 ```
-value = Σ  c_k × Π  b_i ^ e_i        c_k rational ≠ 0, b_i integers > 1, 0 < e_i < 1
+value = Σ  c_k × Π  b_i ^ e_i        c_k rational ≠ 0, b_i positive integer or positive sum, e_i rational
 ```
 
-It is kept **canonical**, so equal values are equal structurally (`equals()`, `src/value/exact.ts`):
+The evaluator collects like factors and tests equality of the resulting expressions (`equals()` in `src/value/exact.ts`). Different algebraic spellings can still need identities outside these rules.
 
 - like bases merge: `2^(1/12) × 2^(1/12) = 2^(1/6)`;
 - the integer part of an exponent moves into the coefficient: `2^(13/12) = 2 * 2^(1/12)`;
@@ -43,12 +43,13 @@ It is kept **canonical**, so equal values are equal structurally (`equals()`, `s
 | a rational power of a single term | exact: `(c × 2^(1/12))^(1/2)` raises the coefficient too (`pow()`, `exact.ts:366`) |
 | a rational power of a rational | exact: integer powers and perfect roots stay rational, the rest is factored (`rationalPow()`, `src/value/exact.ts`) |
 | an integer power 0 … 8 of a sum | exact: repeated multiplication (`MAX_INT_POW`) |
-| `÷` by a sum, a non-integer power of a sum, more than 64 terms | **approximate** |
+| a rational power or reciprocal of a sum | exact when its sign is established and the result is real and within the expression limits |
+| more than 64 distinct terms, a compound base over 16,384 characters or 32 nested compound bases | **approximate** |
 | an irrational or approximate exponent | **approximate** |
 | an even root of a negative number | **approximate** (not a real number) |
 | an integer exponent above 65536, a result beyond ~1 Mbit per component | **approximate** (the DoS caps, `src/value/exact.ts`) |
 
-A fallback never fails and never passes as exact: its result is an `Approx`, flagged and shown with ≈. Single-term values are what music produces (every TET pitch, every chain of tempered intervals); sums appear only where irrational durations are added to times, and stay well below the cap.
+Seven successive steps of `(1 + 2^(1/2))^(1/7)` recover the exact period `1 + 2^(1/2)`. The evaluator groups powers of the same sum, including across event references. A complete period can be read as a sum again, and subsequent descending steps can undo it. A fallback carries the `Approx` flag.
 
 ## Approximate values
 
@@ -65,7 +66,7 @@ An approximate value comes from `~` in an expression (`base.f * ~1.4983`, see [A
 
 Drawing, sound and MIDI read the shadow through `toNumber()`. For an irrational value that is the same double as `toNumber(exact)` (`src/value/exact.ts`), which computes each term in floating point: the boundary is crossed once, at the moment a float is needed.
 
-**Ordering** (`compare()`, `src/value/exact.ts`) is exact: equal values compare equal structurally; otherwise the sign of the float difference decides, and when the two doubles are within 1e-12 relative, a 192-bit fixed-point evaluation does (`fixedPoint()`, `src/value/exact.ts`). The start-time sorts of `Module.reindexModule()` and the player use it.
+**Ordering.** The editor first checks structural equality and the numerical distance. For close exact values it forms their difference and bounds it between dyadic rationals at increasing precision. If the bounds still overlap zero at the precision limit, comparison reports a tie. Taking a root whose real domain depends on an unresolved sign produces a marked approximation.
 
 ## Code that writes expressions from values
 

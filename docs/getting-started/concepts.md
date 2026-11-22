@@ -280,7 +280,7 @@ Equal temperament produces irrational values. A 12-TET semitone is:
 2^(1/12)            # 1.0594630943...
 ```
 
-There is no fraction that equals it, so RMT Compose keeps it as the power it is. Twelve such semitones multiply to exactly 2, so the 12-TET octave is exact. A value becomes approximate only when you write it with `~`, or when an operation cannot be kept exact (a division by a sum of irrational terms, a division by zero). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
+There is no fraction that equals it, so RMT Compose keeps it as the power it is. Twelve such semitones multiply to exactly 2, so the 12-TET octave is exact. A value becomes approximate only when you write it with `~`, or when an operation cannot be kept exact (for example, division by zero). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
 ### How it is shown
 

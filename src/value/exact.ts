@@ -6,19 +6,18 @@
  *  - rational      a Fraction (fraction.js, BigInt-backed). The common case and the
  *                  fast path: a rational value is never wrapped.
  *  - irrational    an exact algebraic value, a sum of terms
- *                      Σ c_k × Π b_i ^ e_i      c_k rational, b_i integers > 1, 0 < e_i < 1
- *                  kept canonical, so equal values are equal structurally:
- *                  like bases merge, the integer part of an exponent moves into the
- *                  coefficient, bases are factored into primes (trial division up to
+ *                      Σ c_k × Π b_i ^ e_i      coefficients and exponents rational
+ *                  A base is a positive integer or an exact positive sum.
+ *                  Like bases merge, integer powers of integer bases move into the
+ *                  coefficient, and integer bases are factored (trial division up to
  *                  FACTOR_LIMIT; a cofactor beyond it stays as one opaque base),
  *                  terms with the same radical part add up.
  *  - approximate   a Fraction standing for a measured or rounded number. Anything
  *                  computed from it is approximate, and it never equals an exact value.
  *
  * Closed exactly: + − × of anything exact, ÷ by a single term, a rational power of a
- * single term, an integer power (|n| ≤ MAX_INT_POW) of a sum. Not closed, and then
- * approximate: ÷ by a sum of several terms, a non-integer power of a sum, an
- * irrational exponent, more than MAX_TERMS terms, the BigInt caps of exact powers,
+ * single term, and rational powers of sums with certified sign within the size limits.
+ * Approximate: an irrational exponent, more than MAX_TERMS terms, the BigInt caps of exact powers,
  * an even root of a negative number.
  *
  * Numbers leave this module only through toNumber() (drawing, sound, MIDI) and
@@ -32,7 +31,8 @@ export type Rational = Fraction & { readonly kind?: undefined };
 export type ExactValue = Rational | Irrational | Approx;
 type Algebraic = Rational | Irrational;
 type MaybeValue = ExactValue | null | undefined;
-type Radical = [bigint, Fraction];
+type RadicalBase = bigint | Irrational;
+type Radical = [RadicalBase, Fraction];
 interface Term {
   c: Fraction;
   rad: Radical[];
@@ -44,24 +44,46 @@ export const MAX_INT_POW = 8;
 const FACTOR_LIMIT = 65536n;
 const MAX_POW_EXPONENT = 65536n;
 const MAX_POW_RESULT_BITS = 1048576n;
+const MAX_PERIOD_DEPTH = 32;
+const MAX_PERIOD_TEXT = 16384;
 
 const ONE = new Fraction(1);
 const ZERO = new Fraction(0);
 
-/** A term: coefficient c (Fraction, ≠ 0) × Π rad[i][0] ^ rad[i][1]; rad sorted by base, exps in (0, 1). */
+/** Rational coefficient times sorted radical factors. Integer bases have exponents in (0, 1). */
 function makeTerm(c: Fraction, rad: Radical[]): Term {
   return { c, rad, key: radKey(rad) };
 }
 function radKey(rad: Radical[]): string {
   let k = '';
-  for (const [b, e] of rad) k += (k ? '*' : '') + b + '^' + (e.s * e.n) + '/' + e.d;
+  for (const [b, e] of rad) k += (k ? '*' : '') + baseText(b) + '^' + (e.s * e.n) + '/' + e.d;
   return k;
+}
+
+function baseText(b: RadicalBase): string {
+  if (typeof b === 'bigint') return String(b);
+  let text = sumLabels.get(b);
+  if (text === undefined) {
+    text = '(' + toText(b) + ')';
+    sumLabels.set(b, text);
+  }
+  return text;
+}
+
+const sumLabels = new WeakMap<Irrational, string>();
+const periodDepths = new WeakMap<Irrational, number>();
+
+export function radicalText([b, e]: Radical): string {
+  return `${baseText(b)}^(${e.s * e.n}/${e.d})`;
 }
 
 export class Irrational {
   /** @param {Array} terms canonical terms, at least one with a non-empty radical */
   declare readonly kind: 'irrational';
   declare terms: Term[];
+  // Multiplicative form before expanding whole periods. Preserving it lets
+  // later steps undo several complete periods without having to factor a sum.
+  declare product?: Term;
   constructor(terms: Term[]) {
     this.kind = 'irrational';
     this.terms = terms;
@@ -104,6 +126,7 @@ function cappedPow(base: bigint, exp: bigint) {
 function floorNthRoot(value: bigint, n: bigint) {
   if (value < 2n || n === 1n) return value;
   const bitLen = BigInt(value.toString(2).length);
+  if (n >= bitLen) return 1n;
   let lo = 0n;
   let hi = 1n << (bitLen / n + 1n);
   while (lo < hi) {
@@ -144,11 +167,22 @@ function factor(n: bigint, into: Map<bigint, bigint>, sign: bigint): void {
  * integer parts of exponents move into the coefficient. Returns null when a
  * capped power would be exceeded.
  */
-function normalizeTerm(c: Fraction, bases: Map<bigint, Fraction>): Term | null {
+function normalizeTerm(c: Fraction, factors: Iterable<Radical>): Term | null {
   let num = c.s * c.n, den = c.d;
   const rad: Radical[] = [];
-  for (const [b, e] of bases) {
+  // Independently evaluated sums from different notes have different object identities.
+  const bases = new Map<bigint | string, Radical>();
+  for (const [b, e] of factors) {
+    const key = typeof b === 'bigint' ? b : baseText(b);
+    const previous = bases.get(key);
+    bases.set(key, [b, previous ? previous[1].add(e) : e]);
+  }
+  for (const [b, e] of bases.values()) {
     if (e.n === 0n) continue;
+    if (typeof b !== 'bigint') {
+      rad.push([b, e]);
+      continue;
+    }
     // e = q + r, 0 ≤ r < 1
     const en = e.s * e.n;
     let q = en / e.d;
@@ -161,7 +195,13 @@ function normalizeTerm(c: Fraction, bases: Map<bigint, Fraction>): Term | null {
     }
     if (r.n !== 0n) rad.push([b, r]);
   }
-  rad.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  rad.sort(([a], [b]) => {
+    if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
+    if (typeof a === 'bigint') return -1;
+    if (typeof b === 'bigint') return 1;
+    const x = baseText(a), y = baseText(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
   return makeTerm(new Fraction(num, den), rad);
 }
 
@@ -187,11 +227,41 @@ function makeTermKeyed(c: Fraction, rad: Radical[], key: string): Term { return 
 
 const termsOf = (v: Algebraic): Term[] => (isIrrational(v) ? v.terms : (v.n === 0n ? [] : [makeTerm(v, [])]));
 
-function mulTerms(a: Term, b: Term) {
-  const bases = new Map<bigint, Fraction>();
-  for (const [base, e] of a.rad) bases.set(base, e);
-  for (const [base, e] of b.rad) bases.set(base, bases.get(base)?.add(e) ?? e);
-  return normalizeTerm(a.c.mul(b.c), bases);
+// Factor a rational scale out of a sum. This makes an anchored period (e.g.
+// 440 + 440√2) match the same period written as a ratio (1 + √2).
+function splitSum(v: Irrational): [Fraction, Irrational] {
+  const c = v.terms[0].c.abs();
+  return [c, c.equals(1) ? v : new Irrational(v.terms.map(t => makeTermKeyed(t.c.div(c), t.rad, t.key)))];
+}
+
+function multiplicands(v: Algebraic, other: Algebraic): Term[] {
+  if (isIrrational(v) && v.product) return [v.product];
+  if (isIrrational(v) && v.terms.length > 1 && isIrrational(other)) {
+    const factors = (other.product ? [other.product] : other.terms).flatMap(t => t.rad).filter(([b]) => typeof b !== 'bigint');
+    if (factors.length) {
+      const [c, period] = splitSum(v);
+      for (const [b] of factors) {
+        if (typeof b === 'bigint') continue;
+        if (equals(b, period)) return [makeTerm(c, [[b, ONE]])];
+        if (b.terms[0].c.s !== period.terms[0].c.s && equals(b, neg(period)))
+          return [makeTerm(c.neg(), [[b, ONE]])];
+      }
+    }
+  }
+  return termsOf(v);
+}
+
+// Return a whole period to the ordinary sum representation on landing. Keep
+// reciprocals and large integer powers factored instead of expanding them.
+function expandPeriods(t: Term): ExactValue {
+  const whole = t.rad.filter(([b, e]) => typeof b !== 'bigint' && e.d === 1n && e.s > 0n && e.n <= BigInt(MAX_INT_POW));
+  if (!whole.length) return fromTerms([t]);
+  let out: ExactValue = fromTerms([makeTerm(t.c, t.rad.filter(r => !whole.includes(r)))]);
+  for (const [base, e] of whole) {
+    if (typeof base !== 'bigint') for (let i = 0n; i < e.n; i++) out = multiply(out, base, false);
+  }
+  if (isIrrational(out) && out.terms.length > 1) out.product = t;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,10 +274,24 @@ export function toNumber(v: MaybeValue, fallback = 0): number {
   if (v.kind === undefined) return fracToNumber(v, fallback);
   if (v.kind === 'approx') return fracToNumber(v.frac, fallback);
   let sum = 0;
+  let magnitude = 0;
   for (const t of v.terms) {
     let x = fracToNumber(t.c, 0);
-    for (const [b, e] of t.rad) x *= Math.pow(Number(b), Number(e.s * e.n) / Number(e.d));
+    for (const [b, e] of t.rad) x *= Math.pow(typeof b === 'bigint' ? Number(b) : toNumber(b, NaN), fracToNumber(e));
     sum += x;
+    magnitude += Math.abs(x);
+  }
+  // A compound period can be a very small positive difference. Recover its
+  // scale before using it as the base of a floating-point playback value.
+  if (Math.abs(sum) < 1e-8 * magnitude) {
+    for (const bits of [64n, 192n, 512n]) {
+      const bounds = dyadicBounds(v, bits);
+      if (!bounds) break;
+      const [lo, hi] = bounds;
+      const middle = lo + hi;
+      if (((hi - lo) << 54n) <= (middle < 0n ? -middle : middle))
+        return fracToNumber(new Fraction(middle, 2n << bits), fallback);
+    }
   }
   return Number.isFinite(sum) ? sum : fallback;
 }
@@ -249,20 +333,55 @@ export function approxFromNumber(x: number) {
   return new Approx(fractionFromDouble(x));
 }
 
-/** value × 2^scale as a BigInt, floor, error a few units (for ordering only). */
-function fixedPoint(v: Algebraic, scale: number): bigint {
-  let sum = 0n;
-  const S = BigInt(scale);
+type Bounds = [bigint, bigint];
+
+// Outward bounds in units of 2^-bits. In particular cancellation in a sum
+// must not turn a negative radicand into a positive one by floating-point rounding.
+function dyadicBounds(v: Algebraic, bits: bigint, cache = new Map<Irrational, Bounds | null>()): Bounds | null {
+  const unit = 1n << bits;
+  let low = 0n, high = 0n;
   for (const t of termsOf(v)) {
-    let acc = 1n << S;
+    let lo = unit, hi = unit;
     for (const [b, e] of t.rad) {
-      const p = e.s * e.n, q = e.d; // 0 < p/q < 1
-      const root = floorNthRoot((b ** p) << (S * q), q); // floor(b^(p/q) × 2^S)
-      acc = (acc * root) >> S;
+      let bounds: Bounds | null;
+      if (typeof b === 'bigint') bounds = [b * unit, b * unit];
+      else {
+        if (!cache.has(b)) cache.set(b, dyadicBounds(b, bits, cache));
+        bounds = cache.get(b) ?? null;
+      }
+      if (!bounds || bounds[0] <= 0n) return null;
+      // floor(unit * (x / unit)^(p/q)) by raising to q before taking the integer root.
+      const shift = bits * (e.d - e.s * e.n);
+      if (bits * e.d > MAX_POW_RESULT_BITS || shift > MAX_POW_RESULT_BITS || -shift > MAX_POW_RESULT_BITS) return null;
+      const rootAt = (x: bigint) => {
+        const power = cappedPow(x, e.n);
+        if (power === null) return null;
+        let n = e.s > 0n ? power : 1n, d = e.s > 0n ? 1n : power;
+        if (shift >= 0n) n <<= shift; else d <<= -shift;
+        return floorNthRoot(n / d, e.d);
+      };
+      const left = rootAt(bounds[0]), right = bounds[0] === bounds[1] ? left : rootAt(bounds[1]);
+      if (left === null || right === null) return null;
+      const lower = e.s > 0n ? left : right, upper = (e.s > 0n ? right : left) + 1n;
+      lo = lo * lower / unit;
+      hi = (hi * upper + unit - 1n) / unit;
     }
-    sum += (t.c.s * t.c.n * acc) / t.c.d;
+    const lower = lo * t.c.n / t.c.d, upper = (hi * t.c.n + t.c.d - 1n) / t.c.d;
+    low += t.c.s > 0n ? lower : -upper;
+    high += t.c.s > 0n ? upper : -lower;
   }
-  return sum;
+  return [low, high];
+}
+
+function sumSign(v: Irrational): -1 | 0 | 1 {
+  if (v.terms.every(t => t.c.s > 0n)) return 1;
+  if (v.terms.every(t => t.c.s < 0n)) return -1;
+  for (const bits of [64n, 192n, 512n]) {
+    const bounds = dyadicBounds(v, bits);
+    if (bounds && bounds[0] > 0n) return 1;
+    if (bounds && bounds[1] < 0n) return -1;
+  }
+  return 0; // sign unresolved within the arithmetic budget
 }
 
 // ---------------------------------------------------------------------------
@@ -286,23 +405,32 @@ export function sub(a: ExactValue, b: ExactValue): ExactValue {
 }
 
 export function mul(a: ExactValue, b: ExactValue): ExactValue {
+  return multiply(a, b, true);
+}
+
+function multiply(a: ExactValue, b: ExactValue, collectPeriods: boolean): ExactValue {
   if (a.kind === undefined && b.kind === undefined) return a.mul(b);
   if (a.kind === 'approx' || b.kind === 'approx') return new Approx(shadow(a).mul(shadow(b)));
-  const ta = termsOf(a), tb = termsOf(b);
+  const ta = collectPeriods ? multiplicands(a, b) : termsOf(a);
+  const tb = collectPeriods ? multiplicands(b, a) : termsOf(b);
   if (ta.length * tb.length > MAX_TERMS * MAX_TERMS) return new Approx(shadow(a).mul(shadow(b)));
   const out = [];
   for (const x of ta) for (const y of tb) {
-    const t = mulTerms(x, y);
+    const t = normalizeTerm(x.c.mul(y.c), [...x.rad, ...y.rad]);
     if (t === null) return new Approx(shadow(a).mul(shadow(b)));
-    out.push(t);
+    if (t.rad.some(([base]) => typeof base !== 'bigint')) {
+      const expanded = expandPeriods(t);
+      if (ta.length === 1 && tb.length === 1) return expanded;
+      if (isApprox(expanded)) return new Approx(shadow(a).mul(shadow(b)));
+      out.push(...termsOf(expanded));
+    } else out.push(t);
   }
   return fromTerms(out) ?? new Approx(shadow(a).mul(shadow(b)));
 }
 
 /** 1 / (single term): coefficient inverted, exponents negated and renormalized. */
 function invertTerm(t: Term) {
-  const bases = new Map<bigint, Fraction>();
-  for (const [b, e] of t.rad) bases.set(b, e.neg());
+  const bases: Radical[] = t.rad.map(([b, e]) => [b, e.neg()]);
   return normalizeTerm(ONE.div(t.c), bases);
 }
 
@@ -311,7 +439,7 @@ export function div(a: ExactValue, b: ExactValue): ExactValue {
   if (a.kind === undefined && b.kind === undefined) return a.div(b);
   if (a.kind === 'approx' || b.kind === 'approx') return new Approx(shadow(a).div(shadow(b)));
   const tb = termsOf(b);
-  if (tb.length !== 1) return new Approx(shadow(a).div(shadow(b))); // ÷ by a sum: not closed
+  if (isIrrational(b) && tb.length > 1) return mul(a, pow(b, ONE.neg()));
   const inv = invertTerm(tb[0]);
   if (inv === null) return new Approx(shadow(a).div(shadow(b)));
   return mul(a, fromTerms([inv]));
@@ -320,7 +448,7 @@ export function div(a: ExactValue, b: ExactValue): ExactValue {
 export function isZero(v: ExactValue): boolean {
   if (v.kind === undefined) return v.n === 0n;
   if (v.kind === 'approx') return v.frac.n === 0n;
-  return false; // a canonical irrational value is never zero
+  return false; // like terms that cancel are already reduced to rational zero
 }
 
 /** A rational number to a rational power: Fraction, Irrational, or Approx. */
@@ -368,25 +496,39 @@ export function pow(a: ExactValue, e: ExactValue): ExactValue {
     return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
   }
   if (a.kind === undefined) return rationalPow(a, e);
-  const ta = a.terms;
+  const ta = a.product ? [a.product] : a.terms;
   if (ta.length === 1) {
     const t = ta[0];
-    let out = rationalPow(t.c, e);
+    const out = rationalPow(t.c, e);
     if (out.kind === 'approx') return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
-    const bases = new Map<bigint, Fraction>();
-    for (const [b, x] of t.rad) bases.set(b, x.mul(e));
+    const bases: Radical[] = t.rad.map(([b, x]) => [b, x.mul(e)]);
     const r = normalizeTerm(ONE, bases);
     if (r === null) return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
-    return mul(out, fromTerms([r]));
+    return mul(out, expandPeriods(r));
   }
-  // A sum: only small non-negative integer powers stay exact
+  // Expand small whole powers as before. Other real powers retain the sum
+  // as their base so that steps can add exponents across note references.
   const en = e.s * e.n;
   if (e.d === 1n && en >= 0n && en <= BigInt(MAX_INT_POW)) {
     let out: ExactValue = ONE;
     for (let i = 0n; i < en; i++) out = mul(out, a);
     return out;
   }
-  return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
+  const sign = sumSign(a);
+  if (sign === 0 || (sign < 0 && e.d % 2n === 0n))
+    return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
+  const positive = sign > 0 ? a : new Irrational(a.terms.map(t => makeTermKeyed(t.c.neg(), t.rad, t.key)));
+  const [scale, period] = splitSum(positive);
+  let depth = 1;
+  for (const t of period.terms) for (const [b] of t.rad) {
+    if (typeof b !== 'bigint') depth = Math.max(depth, 1 + (periodDepths.get(b) ?? 0));
+  }
+  if (depth > MAX_PERIOD_DEPTH || baseText(period).length > MAX_PERIOD_TEXT)
+    return approxFromNumber(Math.pow(toNumber(a, NaN), toNumber(e, NaN)));
+  periodDepths.set(period, depth);
+  const coefficient = rationalPow(scale, e);
+  const factor = fromTerms([makeTerm(sign < 0 && e.n % 2n ? ONE.neg() : ONE, [[period, e]])]);
+  return mul(coefficient, factor);
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +549,7 @@ export function equals(a: MaybeValue, b: MaybeValue): boolean {
   return true;
 }
 
-/** -1, 0, 1. Exact for rational and irrational values (refined at 192 bits when doubles are too close). */
+/** -1, 0, 1. Close exact values are compared by bounding their difference. */
 export function compare(a: ExactValue, b: ExactValue): number {
   if (a.kind === undefined && b.kind === undefined) return a.compare(b);
   if (equals(a, b)) return 0;
@@ -418,8 +560,10 @@ export function compare(a: ExactValue, b: ExactValue): number {
     const c = shadow(a).compare(shadow(b));
     return c < 0 ? -1 : c > 0 ? 1 : 0;
   }
-  const d = fixedPoint(a, 192) - fixedPoint(b, 192);
-  return d < 0n ? -1 : d > 0n ? 1 : 0;
+  const diff = sub(a, b);
+  if (isIrrational(diff)) return sumSign(diff);
+  if (isRational(diff)) return diff.compare(0);
+  return shadow(a).compare(shadow(b));
 }
 
 // ---------------------------------------------------------------------------
@@ -439,7 +583,7 @@ export function toText(v: MaybeValue): string {
     const neg = c.s < 0n;
     const mag = neg ? c.neg() : c;
     if (!mag.equals(1) || t.rad.length === 0) parts.push(fracText(mag));
-    for (const [b, e] of t.rad) parts.push(`${b}^(${e.s * e.n}/${e.d})`);
+    for (const radical of t.rad) parts.push(radicalText(radical));
     const body = parts.join(' * ');
     if (i === 0) return (neg ? '-' : '') + body;
     return (neg ? ' - ' : ' + ') + body;

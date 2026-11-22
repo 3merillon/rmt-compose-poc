@@ -111,7 +111,7 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 |---|---|---|
 | rational | a `Fraction`, the fast path; never wrapped | `4^(1/2)` → `2` |
 | irrational | an `Irrational` (`src/value/exact.ts`): a sum of terms `c × Π b^e`, canonical | `2^(1/12)`, `263 * 2^(7/12)` |
-| approximate | an `Approx` (`src/value/exact.ts`): a Fraction that stands for a number it is not exactly | a division by a sum, a value past the caps |
+| approximate | an `Approx` (`src/value/exact.ts`): a Fraction that stands for a number it is not exactly | a marked measurement, an operation past the caps |
 
 The stack holds pooled `Fraction`s for rational values and these immutable objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational and the exact module otherwise, so twelve steps of `2^(1/12)` multiply to exactly 2. For a rational base and exponent, integer powers and perfect roots return a fraction. A non-perfect root such as `2^(1/12)` has a symbolic representation. Exceeding the arithmetic limits can produce an approximation. See [Exact Values](/developer/core/symbolic-power#what-is-closed-and-what-falls-back).
 

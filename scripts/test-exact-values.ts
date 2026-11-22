@@ -59,8 +59,31 @@ console.log('\nExact values: the algebra');
   check(X.isRational(difference) && difference.equals(1), '(1 + 2^(1/2)) − 2^(1/2) = 1');
   const sq = X.mul(s2, s2);
   check(txt(sq) === '3 + 2 * 2^(1/2)', `(1 + 2^(1/2))² = ${txt(sq)}`);
-  check(X.isApprox(X.div(F(1), s2)), '1 / (1 + 2^(1/2)) is approximate (÷ by a sum)');
-  check(X.isApprox(X.pow(s2, F(1, 2))), '(1 + 2^(1/2))^(1/2) is approximate');
+  check(X.equals(X.mul(X.div(F(1), s2), s2), F(1)), 'an exact reciprocal cancels its compound period');
+  check(X.equals(X.div(X.neg(s2), s2), F(-1)), 'a negative multiple cancels against the same period');
+  const root = X.pow(s2, F(1, 7));
+  check(txt(root) === '(1 + 2^(1/2))^(1/7)' && X.equals(X.pow(root, F(7)), s2),
+    'seven equal divisions of a positive sum close exactly');
+  const down = X.div(F(1), root);
+  let traversal: ExactValue = F(440);
+  for (let i = 0; i < 14; ++i) traversal = X.mul(traversal, root);
+  check(X.equals(traversal, X.mul(F(440), sq)), 'two complete compound periods agree with the expanded square');
+  for (let i = 0; i < 14; ++i) traversal = X.mul(traversal, down);
+  check(X.equals(traversal, F(440)), 'descending the same two periods recovers the rational anchor');
+  const mixedSign = X.sub(r2, F(1));
+  check(X.equals(X.pow(X.pow(mixedSign, F(1, 7)), F(7)), mixedSign), 'a positive mixed-sign sum is a period');
+  const tiny = X.sub(r2, F(1414213562373095048801688724209n, 10n ** 30n));
+  const tinyRoot = X.pow(tiny, F(1, 7));
+  check(X.isIrrational(tinyRoot) && X.toNumber(tinyRoot) > 0 && X.equals(X.pow(tinyRoot, F(7)), tiny),
+    'a positive period smaller than double cancellation is audible as a nonzero seventh root');
+  check(X.isApprox(X.pow(X.neg(s2), F(1, 2))), 'an even root of a negative sum stays outside the real domain');
+  check(X.equals(X.pow(X.pow(X.neg(s2), F(1, 3)), F(3)), X.neg(s2)), 'an odd root of a negative sum preserves its sign');
+  check(X.compare(X.add(root, F(1, 10n ** 30n)), root) > 0 && X.compare(root, F(113)) < 0,
+    'compound powers participate in ordering');
+  check(X.isApprox(X.pow(X.add(new X.Approx(F(1)), r2), F(1, 7))), 'a measured period stays approximate');
+  let nested: ExactValue = r2;
+  for (let i = 0; i < 33; i++) nested = X.pow(X.add(F(1), nested), F(1, 7));
+  check(X.isApprox(nested), 'a compound period beyond the nesting budget is marked approximate');
   check(X.equals(X.div(r2, r2), F(1)), '2^(1/2) / 2^(1/2) = 1');
   check(txt(X.div(F(1), r2)) === '(1/2) * 2^(1/2)', `1 / 2^(1/2) = ${txt(X.div(F(1), r2))}`);
   let many: ExactValue = F(0);
@@ -137,6 +160,32 @@ console.log('\nExact values: the evaluator');
 }
 
 console.log('\nExact values: the TET modules stay exact');
+{
+  // The period is independently re-evaluated at each note. The last note is
+  // reached by dependency links, never by replacing the chain with a power.
+  const notes = Array.from({ length: 7 }, (_, i) => ({
+    id: i + 1, startTime: 'base.t', duration: 'base.d',
+    frequency: (i ? '[' + i + '].f' : 'base.f') + ' * (1 + 2^(1/2))^(1/7)',
+  }));
+  const score = await Module.loadFromJSON({ baseNote: { frequency: '440' }, notes });
+  const { frequencyExpr } = await import('../src/utils/value-expr.ts');
+  for (const anchor of [440, 200]) {
+    score.baseNote.setVariable('frequencyString', String(anchor));
+    score.evaluateModule();
+    const reopened = await Module.loadFromJSON(JSON.parse(JSON.stringify(score.createModuleJSON())));
+    reopened.evaluateModule();
+    for (const m of [score, reopened]) {
+      const seventh = required(m.getNoteById(7)).getExactVariable('frequency');
+      check(X.equals(seventh, X.add(F(anchor), X.mul(F(anchor), X.pow(F(2), F(1, 2))))),
+        'compound chain lands on the exact period at ' + anchor + ' Hz');
+      const first = required(m.getNoteById(1)).getExactVariable('frequency');
+      check(frequencyExpr(required(first), F(anchor)) === 'base.f * (1 + 2^(1/2))^(1/7)',
+        're-anchoring writes the symbolic step at ' + anchor + ' Hz');
+      check(Math.abs(X.toNumber(first) - anchor * (1 + Math.SQRT2) ** (1/7)) < 1e-12,
+        'the playback value is the intended compound step');
+    }
+  }
+}
 for (const f of ['TET-12', 'TET-19', 'TET-31']) {
   const mod = await Module.loadFromJSON(JSON.parse(readFileSync(join(root, 'public/modules/scale-systems', f + '.json'), 'utf8')));
   const ev = mod.evaluateModule();

@@ -32,7 +32,7 @@ a rational number marked as not exact. The two are never confused.
 
 ## What stays exact
 
-Powers are reduced to a canonical form, so equal values are always equal:
+The evaluator collects powers with the same base. For example,
 
 ```
 2^(1/12) * 2^(1/12)     # 2^(1/6): like bases merge
@@ -46,12 +46,14 @@ Sums and products of such values stay exact, and so does dividing by a single po
 power is left, the value becomes a fraction again. That is why twelve semitones are exactly 2, and
 why `4^(1/2)` is a plain rational.
 
+Try a period of `1 + 2^(1/2)`. Give each succeeding note the previous frequency times `(1 + 2^(1/2))^(1/7)`. Seven steps above 440 Hz reach exactly `440 + 440 * 2^(1/2)` Hz. Seven steps across the harmonic seventh `(7/4)` likewise reach exactly 770 Hz.
+
 ## What becomes approximate
 
 A few operations cannot be kept exact. Their result is **approximate**, and it is flagged:
 
-- dividing by a sum of irrational terms,
-- a non-integer power of a sum,
+- a root whose real domain cannot be established within the evaluation limits,
+- a compound period that exceeds the symbolic nesting or expression-size budget,
 - a value with more than 64 terms,
 - a division by zero,
 - an integer exponent above 65 536, or a result far beyond a million bits.
@@ -181,8 +183,7 @@ on one that is.
 **Is it irrational or approximate?** Read `Evaluated:`. An exact form with a value is irrational;
 `≈` followed by a decimal is approximate; a fraction is rational.
 
-**Is my chain exact?** It is, if it uses only powers, sums and products. Look for `~`, a division
-by a sum of powers, or a non-integer power of a sum: these make the value approximate.
+**Is my chain exact?** Inspect the evaluated value at its last note. A marked input, an undefined operation, or an expression beyond the evaluator’s limits can give an approximate result.
 
 **Did my edit save?** The `Save` button next to the `Raw:` field only appears once you start typing,
 and the value does not change until you press it. An invalid expression is rejected with its reason

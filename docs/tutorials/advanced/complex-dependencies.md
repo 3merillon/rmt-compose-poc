@@ -273,7 +273,7 @@ note depends on one. See [Understanding SymbolicPower](/tutorials/advanced/symbo
 | Save does nothing | Invalid expression — check the console |
 | Note jumps to 0 / 440 Hz | The referenced note id does not exist; the evaluator substitutes a default rather than failing, and names the reference in the console (`Unresolved reference!`) |
 | Wrong note moved | You referenced `[2]` when you meant `[3]` — ids are not stable across a **Save Module** (it reindexes) |
-| Value shows `≈` unexpectedly | Something upstream is approximate: a `~` number, or a division by a sum of irrational terms or by zero |
+| Value shows `≈` unexpectedly | Something upstream is approximate: a `~` number, division by zero, or an operation beyond the evaluator’s symbolic limits |
 
 ::: warning Note ids change when you save
 **Save Module** reindexes the whole module in one run from 1 — measures first, then notes, each
