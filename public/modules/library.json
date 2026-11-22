@@ -898,6 +898,24 @@
           "tags": [
             "canon"
           ]
+        },
+        {
+          "file": "custom/bwv846.json",
+          "name": "bwv846",
+          "family": "melody",
+          "tags": [
+            "bach",
+            "prelude"
+          ]
+        },
+        {
+          "file": "custom/silent night.json",
+          "name": "silent night",
+          "family": "melody",
+          "tags": [
+            "gruber",
+            "carol"
+          ]
         }
       ]
     }

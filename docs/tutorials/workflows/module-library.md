@@ -19,7 +19,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 | **Progressions** | 8 | ii–V–I, I–IV–V–I, I–vi–IV–V, V7–I, plus four cadences |
 | **Melodies** | 7 | Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 3 | `canon`, `canon base` and `canon melody` — and where your own modules land |
+| **Custom** | 5 | `canon`, `canon base`, `canon melody`, Bach’s Prelude in C (`bwv846`) and Silent Night (`silent night`) — and where your own modules land |
 
 ![The Intervals section begins with 1/1, 9/8, 32/27, 81/64 and 4/3 tiles](/img/module-library-icons.png)
 

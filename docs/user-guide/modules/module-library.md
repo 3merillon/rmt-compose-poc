@@ -207,11 +207,13 @@ Listen for the gap between successive notes narrowing as the pitches climb. And 
 
 **Mixed-Base** is an experiment: 12 notes whose steps mix octave-based, tritave-based and 5-based roots (`2^(1/12)`, `3^(1/13)`, `5^(1/7)`, and some inverses), and whose final note jumps straight back to `base.f`. It goes wandering and comes home.
 
-## Custom — 3 modules
+## Custom — 5 modules
 
 **Custom** includes the eight-bar canon per tonos that opens the app (153 sounding notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The full canon tile carries all three voices. Its measure markers belong to the startup score only.
 
 The answering bass enters one bar later. Of its 58 notes, 57 are exact fifths above the notes they answer. In bar 5, open the green A (library note 127, startup note 81). It takes its frequency from the following red E by a factor of 2/3. The held F takes its pitch from that A by a factor of 8/5. **Copy to Modules** also puts selections in Custom. Uploaded files go into whichever section’s **+** tile you choose.
+
+Two complete pieces follow, each translated from a plain twelve-step MIDI file for the comparison on cybercyril.com. `bwv846` is Bach’s Prelude in C major, BWV 846 (549 notes): every bar is one chord, tuned from its root, and every root is tuned from the tonic; its dominant sevenths are 16/9. `silent night` is a four-part setting of Gruber’s carol in D major (88 notes), with each dominant seventh the harmonic 7/4 of its root. Both are sine-wave tiles without measure bars, so either can be dropped on any note.
 
 ## Where to go next
 
