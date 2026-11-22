@@ -34,7 +34,7 @@ note and the whole scale re-roots onto that note.
 The magnifier at the left of the module bar's toolbar opens a search field.
 It matches the module name, its **ratio**, its **cents**, its
 **family** (`3-limit`, `7-limit`, `comma`, …) and its **tags** — so typing `7/4`, `septimal` or
-`comma` narrows 81 modules to the handful you want. Matches surface even inside collapsed
+`comma` narrows 83 modules to the handful you want. Matches surface even inside collapsed
 sections. Closing the field always clears the query.
 :::
 

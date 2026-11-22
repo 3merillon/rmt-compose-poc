@@ -73,7 +73,7 @@ A module stores no tempo, so the export reads one off the time unit. The time un
 | Written | From |
 |---|---|
 | Tempo | `60 / base.d` BPM. A BaseNote duration of `3/5` s is 100 BPM. |
-| Time signature | The length of the **first measure bar** (the one that starts earliest), in time units. A bar of `4` is 4/4, `7/2` is 7/8. |
+| Time signature | The **first measure bar** supplies the meter. An explicit `"6/8"` on a three-unit bar preserves its two dotted-quarter beats. Without a matching spelling, four units give 4/4 and seven half units give 7/8. |
 
 When the module has no measure bar, or the first bar's length cannot be written as a time signature, none is stored. A bar of `5/3` time units is such a length. See [Measure bars](/reference/module-schema#measure-bars).
 
@@ -125,7 +125,7 @@ A plain export answers with a cyan toast. When the file could not carry somethin
 | Amplitude 0 | The note is not exported. It is silent in playback too. |
 | A note shorter than one tick | It is given a length of one tick. |
 | A note that starts before time zero | It starts at zero, as in playback. One that also ends before zero is not exported. |
-| A first measure bar with no time signature | `base.d * 4` is written as 4/4 and `base.d * (7/2)` as 7/8; `base.d * (5/3)` has no such form, and no time signature is stored. |
+| A first measure bar with no representable meter | The exporter tries a matching explicit spelling, then derives a meter from the bar length. Five-thirds of a quarter note has no representable denominator, so the file omits its time signature. |
 | A tempo below 3.58 BPM | MIDI cannot store it. The nearest storable tempo is used for the whole file. |
 
 If nothing could be written, no file is downloaded and a red toast says so.

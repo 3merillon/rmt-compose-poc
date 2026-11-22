@@ -3,7 +3,7 @@ import type { Module } from './module.ts';
 import type { ExpressionName, InputFields, ScoreFields, ScoreNote } from './model-types.ts';
 import type { ExactValue } from './value/exact.ts';
 
-interface NoteProperties { color: unknown; instrument: string | null; measure: boolean; repeat?: string | null }
+interface NoteProperties { color: unknown; instrument: string | null; measure: boolean; repeat?: string | null; timeSignature?: string | null }
 type NoteDescription = Partial<ScoreFields> & {
   id?: number | string;
   properties?: Pick<NoteProperties, 'measure'>;
@@ -13,7 +13,7 @@ type VariablesProxy = Partial<Record<ExpressionName, () => Fraction | null>> &
   Partial<Record<`${ExpressionName}String`, string | null>> & Partial<NoteProperties>;
 type VariablesTarget = { [NOTE_OF]: Note; [FNS_OF]?: Map<string, () => Fraction | null> };
 export interface SavedNoteText {
-  id: number; text: string; color: unknown; instrument: string | null; measure: boolean;
+  id: number; text: string; color: unknown; instrument: string | null; measure: boolean; timeSignature?: string | null;
   s0: string | null; s1: string | null; s2: string | null; s3: string | null;
   s4: string | null; s5: string | null;
 }
@@ -218,7 +218,7 @@ export class Note {
       // Handle non-expression properties
       if (key === 'color') {
         this.properties.color = value;
-      } else if (key === 'instrument' || key === 'repeat') {
+      } else if (key === 'instrument' || key === 'repeat' || key === 'timeSignature') {
         if (value === null || typeof value === 'string') this.properties[key] = value;
       } else if (key === 'measure') {
         this.properties.measure = value === true;
@@ -232,7 +232,7 @@ export class Note {
    */
   getVariable(name: ExpressionName): Fraction | null;
   getVariable(name: 'instrument'): string | null;
-  getVariable(name: 'repeat'): string | null | undefined;
+  getVariable(name: 'repeat' | 'timeSignature'): string | null | undefined;
   getVariable(name: 'measure'): boolean;
   getVariable(name: `${string}String`): string | null;
   getVariable(name: string): unknown;
@@ -240,7 +240,7 @@ export class Note {
     // Handle non-expression properties
     if (name === 'color') return this.properties.color;
     if (name === 'instrument') return this.properties.instrument;
-    if (name === 'repeat') return this.properties.repeat;
+    if (name === 'repeat' || name === 'timeSignature') return this.properties[name];
     if (name === 'measure') return this.properties.measure;
 
     // Handle *String requests - return source text
@@ -301,9 +301,9 @@ export class Note {
     }
     // The BaseNote's repeat: the frequency it takes on the next repeat of a loop,
     // as an expression of the module, kept as text (src/player/display-transpose.js)
-    if (name === 'repeat') {
-      if (typeof value === 'string') this.properties.repeat = value || null;
-      else if (!value) this.properties.repeat = null;
+    if (name === 'repeat' || name === 'timeSignature') {
+      if (typeof value === 'string') this.properties[name] = value || null;
+      else if (!value) this.properties[name] = null;
       this._notifyChange();
       return;
     }
@@ -464,7 +464,10 @@ export class Note {
     if (this.properties.color) result.color = this.properties.color;
     if (this.properties.instrument) result.instrument = this.properties.instrument;
     if (this.properties.repeat) result.repeat = this.properties.repeat;
-    if (this.properties.measure) result.measure = true;
+    if (this.properties.measure) {
+      result.measure = true;
+      if (this.properties.timeSignature) result.timeSignature = this.properties.timeSignature;
+    }
 
     return result;
   }
@@ -486,7 +489,10 @@ export class Note {
     if (this.properties.color) obj.color = this.properties.color;
     if (this.properties.instrument) obj.instrument = this.properties.instrument;
     if (this.properties.repeat) obj.repeat = this.properties.repeat;
-    if (this.properties.measure) obj.measure = true;
+    if (this.properties.measure) {
+      obj.measure = true;
+      if (this.properties.timeSignature) obj.timeSignature = this.properties.timeSignature;
+    }
 
     return obj;
   }
@@ -593,6 +599,7 @@ const VARIABLES_HANDLER = {
     if (prop === 'color') return note.properties.color;
     if (prop === 'instrument') return note.properties.instrument;
     if (prop === 'measure') return note.properties.measure || undefined;
+    if (prop === 'timeSignature') return note.properties.timeSignature || undefined;
     return undefined;
   },
   set(target, prop, value: unknown) {
@@ -605,6 +612,7 @@ const VARIABLES_HANDLER = {
       return note.properties[prop] !== null;
     }
     if (prop === 'measure') return note.properties.measure === true;
+    if (prop === 'timeSignature') return !!note.properties.timeSignature;
     if (typeof prop === 'string' && prop.endsWith('String')) {
       const baseName = prop.slice(0, -6);
       return !!note.hasExpression(baseName);
@@ -627,6 +635,7 @@ const VARIABLES_HANDLER = {
     if (note.properties.color) keys.push('color');
     if (note.properties.instrument) keys.push('instrument');
     if (note.properties.measure) keys.push('measure');
+    if (note.properties.timeSignature) keys.push('timeSignature');
     return keys;
   },
   getOwnPropertyDescriptor(target, prop) {

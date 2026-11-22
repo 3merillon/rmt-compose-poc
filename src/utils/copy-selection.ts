@@ -126,7 +126,10 @@ export function buildModuleFromSelection(module: Module, ids: Iterable<number | 
 
   const rows = notes.map(note => {
     const row: CopiedFields & Pick<ScoreNote, 'id'> = { id: idMap.get(note.id)! };
-    if (isMeasureNote(note)) row.measure = true;
+    if (isMeasureNote(note)) {
+      row.measure = true;
+      if (note.properties.timeSignature) row.timeSignature = note.properties.timeSignature;
+    }
     if (note.properties.color) row.color = note.properties.color;
     if (note.properties.instrument) row.instrument = note.properties.instrument;
 

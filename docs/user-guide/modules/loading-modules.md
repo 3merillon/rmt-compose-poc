@@ -12,7 +12,7 @@ Choose **+ → Load Module ▾ → Load Module from file…** and select your sc
 
 ## Drop a library module onto a note
 
-Pull down the module bar, find a tile by name and drag it onto the score. This adds a copy and gives its notes new IDs. Internal references point to the new notes. To play an isolated example, start with a clean score and drop the tile on the BaseNote circle. To play a phrase in a new key, drop it onto a pitched note.
+Pull down the module bar, find a tile by name and drag it onto the score. This adds a copy and gives its notes new IDs. Internal references point to the new notes. Each measure bar in the module is copied with its written start and length. To remove one, select its triangle and choose **Keep Dependencies**. To play an isolated example, start with a clean score and drop the tile on the BaseNote circle. To play a phrase in a new key, drop it onto a pitched note.
 
 ### Where you can drop
 

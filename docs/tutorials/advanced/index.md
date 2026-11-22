@@ -37,7 +37,7 @@ You should be comfortable with:
 
 ## Try a shipped example
 
-For tempered pitch, drag **Scale Systems → 19-TET** onto the BaseNote and inspect two successive notes. For dependencies across voices, [trace the opening canon](/tutorials/workflows/canon-and-cadences). The [catalogue](/user-guide/modules/module-library) lists the 81 shipped modules.
+For tempered pitch, drag **Scale Systems → 19-TET** onto the BaseNote and inspect two successive notes. For dependencies across voices, [trace the opening canon](/tutorials/workflows/canon-and-cadences). The [catalogue](/user-guide/modules/module-library) lists the 83 shipped modules.
 
 ## Recommended order
 

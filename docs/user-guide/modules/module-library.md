@@ -1,11 +1,11 @@
 ---
 title: The Module Library
-description: The 81 shipped modules — intervals, chords, progressions, melodies, scale systems — including their ratios, progression timings, scale periods and canon parts.
+description: The 83 shipped modules — intervals, chords, progressions, melodies, scale systems — including their ratios, progression timings, scale periods and canon parts.
 ---
 
 # The Module Library
 
-Choose from **81 shipped modules**. An interval adds one pitch, a progression adds several chords, and a complete canon adds three voices. For a first comparison, open the module bar, choose **Start**, and drag **Intervals → Perfect 5th** onto a sounding note. The new pitch begins with its target and follows it at 3/2. Choose **End** to hear the interval after the target instead.
+Choose from **83 shipped modules**. An interval adds one pitch, a progression adds several chords, and a complete canon adds three voices. For a first comparison, open the module bar, choose **Start**, and drag **Intervals → Perfect 5th** onto a sounding note. The new pitch begins with its target and follows it at 3/2. Choose **End** to hear the interval after the target instead.
 
 ![The Intervals section begins with 1/1, 9/8, 32/27, 81/64 and 4/3 tiles](/img/module-library-icons.png)
 
@@ -20,9 +20,9 @@ Choose from **81 shipped modules**. An interval adds one pitch, a progression ad
 | **Progressions** | 8 | Four progressions and four cadences, each a chain of chord roots |
 | **Melodies** | 7 | Public-domain tunes |
 | **Scale Systems** | 6 | 12-, 19-, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 3 | Where copied selections land, and the obvious home for your uploads |
+| **Custom** | 5 | The canon and its two parts, Bach’s Prelude in C, and Silent Night. Copied selections also land here. |
 
-Drag a tile from the [module bar](/user-guide/interface/module-bar) onto a note. Every built-in tile adds only sounding notes. Modules you upload or copy keep any rests, bars or pitch references you included.
+Drag a tile from the [module bar](/user-guide/interface/module-bar) onto a note. If the module contains measure bars, the drop brings them in with the notes. Select a bar’s triangle and choose **Keep Dependencies** to remove that bar while preserving the notes and their timing.
 
 ## How the catalog is built
 
@@ -209,11 +209,11 @@ Listen for the gap between successive notes narrowing as the pitches climb. And 
 
 ## Custom — 5 modules
 
-**Custom** includes the eight-bar canon per tonos that opens the app (153 sounding notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The full canon tile carries all three voices. Its measure markers belong to the startup score only.
+**Custom** includes the eight-bar canon per tonos that opens the app (153 sounding notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The full canon tile carries all three voices. Its eight measure bars follow it into the workspace.
 
 The answering bass enters one bar later. Of its 58 notes, 57 are exact fifths above the notes they answer. In bar 5, open the green A (library note 127, startup note 81). It takes its frequency from the following red E by a factor of 2/3. The held F takes its pitch from that A by a factor of 8/5. **Copy to Modules** also puts selections in Custom. Uploaded files go into whichever section’s **+** tile you choose.
 
-Two complete pieces follow, each translated from a plain twelve-step MIDI file for the comparison on cybercyril.com. `bwv846` is Bach’s Prelude in C major, BWV 846 (549 notes): every bar is one chord, tuned from its root, and every root is tuned from the tonic; its dominant sevenths are 16/9. `silent night` is a four-part setting of Gruber’s carol in D major (88 notes), with each dominant seventh the harmonic 7/4 of its root. Both are sine-wave tiles without measure bars, so either can be dropped on any note.
+The two complete pieces use sine tones and include their written measures. `bwv846` contains all 35 bars and 549 notes of Bach’s Prelude in C, with 16/9 dominant sevenths. In bars 22–23 the melodic steps guided the choice of ratios. The module writes those pitches relative to the tonic. `silent night` contains a 12-bar, four-part setting of Gruber’s carol in D major, with dominant sevenths tuned to 7/4. Both use the receiving score’s beat when you drop them.
 
 ## Where to go next
 

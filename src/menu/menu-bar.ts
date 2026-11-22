@@ -48,19 +48,20 @@ interface SectionState {
     modules: ReturnType<typeof normalizeModule>[];
 }
 
-// Canonical score JSON from release 2.0.0 (03b1d49), before these nine
-// library tiles lost their silent entries. Older UI exports can embed a
-// shipped tile or a user's edits under the very same file path and name.
+// Recognize factory scores embedded in older UI exports. A user's edits can
+// have the same path and name, so replace only a byte-equivalent factory score.
 const releasedTileFingerprints = new Map([
-    ['progressions/V7-I.json', '1119:a1b5da86faba65f2e1752ae49bc5133f'],
-    ['progressions/ii-V-I.json', '1556:4a8527430960c0a2729415a8ed4022d0'],
-    ['progressions/I-IV-V-I.json', '1842:48d6edfa2d40f10a40d645fe7a3eaaaf'],
-    ['progressions/I-vi-IV-V.json', '1735:2390e22fe105138b7032622d9f6711a6'],
-    ['progressions/authentic-cadence.json', '1011:f0f607b07519a9b620a53419c8434d91'],
-    ['progressions/plagal-cadence.json', '1011:725b58ab665949cd4c4ed33c7b10b42f'],
-    ['progressions/deceptive-cadence.json', '913:c04382828b0e268b6f7990016471b902'],
-    ['progressions/half-cadence.json', '895:ba4655b50845aeb3cdfe07a31b8ef8ff'],
-    ['custom/canon.json', '19583:3e970100eb714ab482b5d2a2844ff860'],
+    ['progressions/V7-I.json', ['1119:a1b5da86faba65f2e1752ae49bc5133f']],
+    ['progressions/ii-V-I.json', ['1556:4a8527430960c0a2729415a8ed4022d0']],
+    ['progressions/I-IV-V-I.json', ['1842:48d6edfa2d40f10a40d645fe7a3eaaaf']],
+    ['progressions/I-vi-IV-V.json', ['1735:2390e22fe105138b7032622d9f6711a6']],
+    ['progressions/authentic-cadence.json', ['1011:f0f607b07519a9b620a53419c8434d91']],
+    ['progressions/plagal-cadence.json', ['1011:725b58ab665949cd4c4ed33c7b10b42f']],
+    ['progressions/deceptive-cadence.json', ['913:c04382828b0e268b6f7990016471b902']],
+    ['progressions/half-cadence.json', ['895:ba4655b50845aeb3cdfe07a31b8ef8ff']],
+    ['custom/canon.json', ['19583:3e970100eb714ab482b5d2a2844ff860', '19017:eb7b7fa0a4578329694b22e67bec09c3']],
+    ['custom/bwv846.json', ['88515:53e2c0a1c01e342bba937582c8dbd357']],
+    ['custom/silent night.json', ['13559:e9a66464158480d11862024d031fc6e1']],
 ]);
 
 function scoreText(score: ModuleData) {
@@ -811,7 +812,7 @@ const menuAPI = (function() {
         const current = await request;
         const embedded = scoreText(score);
         const prior = releasedTileFingerprints.get(item.file);
-        if ((current && scoreText(current) === embedded) || (prior && matchesReleasedTile(embedded, prior))) {
+        if ((current && scoreText(current) === embedded) || prior?.some(fingerprint => matchesReleasedTile(embedded, fingerprint))) {
             m.file = item.file;
             m.meta = item;
             // Retry through the normal file loader if the old factory score was

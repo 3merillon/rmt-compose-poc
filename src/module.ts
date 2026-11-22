@@ -66,7 +66,10 @@ function noteJSON(note: Note): ScoreNote {
   }
   if (note.properties.color) noteObj.color = note.properties.color;
   if (note.properties.instrument) noteObj.instrument = note.properties.instrument;
-  if (note.properties.measure) noteObj.measure = true;
+  if (note.properties.measure) {
+    noteObj.measure = true;
+    if (note.properties.timeSignature) noteObj.timeSignature = note.properties.timeSignature;
+  }
   return noteObj;
 }
 
@@ -100,7 +103,7 @@ function noteJSONText(note: Note) {
   const ex = note.expressions;
   const kept = note._savedJSON;
   if (kept && kept.id === note.id && kept.color === props.color &&
-      kept.instrument === props.instrument && kept.measure === props.measure &&
+      kept.instrument === props.instrument && kept.measure === props.measure && kept.timeSignature === props.timeSignature &&
       keptSource(ex.startTime) === kept.s0 && keptSource(ex.duration) === kept.s1 &&
       keptSource(ex.frequency) === kept.s2 && keptSource(ex.amplitude) === kept.s3 &&
       keptSource(ex.attack) === kept.s4 && keptSource(ex.release) === kept.s5) {
@@ -112,6 +115,7 @@ function noteJSONText(note: Note) {
     color: props.color,
     instrument: props.instrument,
     measure: props.measure,
+    timeSignature: props.timeSignature,
     s0: keptSource(ex.startTime), s1: keptSource(ex.duration), s2: keptSource(ex.frequency),
     s3: keptSource(ex.amplitude), s4: keptSource(ex.attack), s5: keptSource(ex.release)
   };
@@ -929,7 +933,8 @@ export class Module {
       const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
       const vars = (!prevNote || prevNote.id === 0 || !isMeasureNote(prevNote))
         ? { startTime: 'base.t', duration: 'base.d * 4', measure: true }
-        : { startTime: `[${prevNote.id}].t + [${prevNote.id}].d`, duration: `[${prevNote.id}].d`, measure: true };
+        : { startTime: `[${prevNote.id}].t + [${prevNote.id}].d`, duration: `[${prevNote.id}].d`,
+            measure: true, timeSignature: prevNote.properties.timeSignature };
 
       const newNote = this.addNote(vars);
       newNote.parentId = prevNote ? prevNote.id : 0;
@@ -1309,7 +1314,10 @@ export class Module {
 
       if (note.properties.color) variables.color = note.properties.color;
       if (note.properties.instrument) variables.instrument = note.properties.instrument;
-      if (note.properties.measure) variables.measure = true;
+      if (note.properties.measure) {
+        variables.measure = true;
+        if (note.properties.timeSignature) variables.timeSignature = note.properties.timeSignature;
+      }
 
       const newNote = new Note(updatedId, variables);
       newNote.module = this;

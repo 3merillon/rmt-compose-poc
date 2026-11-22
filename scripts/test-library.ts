@@ -102,16 +102,22 @@ async function sounds(file: string, checkTile?: { key: string; section: string }
   const t = (n: Note, k: ExpressionName) => X.toText(n.getExactVariable(k));
   const material = Object.values(mod.notes).filter(n => n.id !== 0);
   if (checkTile) {
-    assert.ok(material.length > 0, `${checkTile.key}: empty top-bar tile`);
+    const sounding = material.filter(n => !n.properties.measure);
+    assert.ok(sounding.length > 0, `${checkTile.key}: no sounding notes`);
     for (const n of material) {
       const context: string = `${checkTile.key}: tile note ${n.id}`;
+      assert.ok(X.toNumber(n.getExactVariable('duration')) > 0, context);
+      if (n.properties.measure) {
+        assert.ok(n.hasExpression('startTime'), context);
+        assert.equal(n.hasExpression('frequency'), false, context);
+        continue;
+      }
       assert.equal(noteKind(n), 'note', context);
       assert.ok(X.toNumber(n.getExactVariable('frequency')) > 0, context);
-      assert.ok(X.toNumber(n.getExactVariable('duration')) > 0, context);
       const amplitude = mod.findAmplitude(n);
       assert.ok(amplitude.s > 0n && amplitude.n > 0n, context);
     }
-    if (checkTile.section === 'progressions') await assertEditableProgression(mod, material, checkTile.key);
+    if (checkTile.section === 'progressions') await assertEditableProgression(mod, sounding, checkTile.key);
   }
   for (const n of material) {
     if (n.properties?.measure) { bars.push(`${t(n, 'startTime')} | ${t(n, 'duration')}`); continue; }
@@ -149,7 +155,7 @@ for (const f of files) {
 for (const key of shipped.keys()) assert.ok(oracle[key], `${key}: missing shipped tile in the oracle`);
 if (failures === 0) {
   console.log(`  ✓ ${same} modules, ${notesChecked} sounding notes and their bars exactly as recorded`);
-  console.log(`  ✓ Every entry in the ${shipped.size} shipped tiles sounds. Progressions retain exact voicings and independent attacks.`);
+  console.log(`  ✓ All ${shipped.size} shipped tiles contain sounding notes. Progressions retain exact voicings and independent attacks.`);
 }
 for (const k of Object.keys(oracle)) if (!files.some((f) => relative(modulesDir, f).replace(/\\/g, '/') === k)) { failures++; console.error(`  ✗ ${k}: in the oracle but no longer in the library`); }
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }

@@ -8,4392 +8,4602 @@
     {
       "id": 1,
       "startTime": "base.t",
-      "duration": "base.d * 2",
-      "frequency": "base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "duration": "base.d * 4",
+      "measure": true
     },
     {
       "id": 2,
-      "startTime": "base.t + base.d * (1/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(5/4) * [1].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[1].t + [1].d",
+      "duration": "[1].d",
+      "measure": true
     },
     {
       "id": 3,
-      "startTime": "base.t + base.d * (1/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [1].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[2].t + [2].d",
+      "duration": "[2].d",
+      "measure": true
     },
     {
       "id": 4,
-      "startTime": "base.t + base.d * (3/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [1].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[3].t + [3].d",
+      "duration": "[3].d",
+      "measure": true
     },
     {
       "id": 5,
-      "startTime": "base.t + base.d",
-      "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [1].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[4].t + [4].d",
+      "duration": "[4].d",
+      "measure": true
     },
     {
       "id": 6,
-      "startTime": "base.t + base.d * (5/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[3].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[5].t + [5].d",
+      "duration": "[5].d",
+      "measure": true
     },
     {
       "id": 7,
-      "startTime": "base.t + base.d * (3/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[4].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[6].t + [6].d",
+      "duration": "[6].d",
+      "measure": true
     },
     {
       "id": 8,
-      "startTime": "base.t + base.d * (7/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[5].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[7].t + [7].d",
+      "duration": "[7].d",
+      "measure": true
     },
     {
       "id": 9,
-      "startTime": "[1].t + [1].d",
-      "duration": "base.d * 2",
-      "frequency": "[1].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[8].t + [8].d",
+      "duration": "[8].d",
+      "measure": true
     },
     {
       "id": 10,
-      "startTime": "base.t + base.d * (9/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[2].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[9].t + [9].d",
+      "duration": "[9].d",
+      "measure": true
     },
     {
       "id": 11,
-      "startTime": "base.t + base.d * (5/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[6].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[10].t + [10].d",
+      "duration": "[10].d",
+      "measure": true
     },
     {
       "id": 12,
-      "startTime": "base.t + base.d * (11/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[7].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[11].t + [11].d",
+      "duration": "[11].d",
+      "measure": true
     },
     {
       "id": 13,
-      "startTime": "base.t + base.d * 3",
-      "duration": "base.d * (1/4)",
-      "frequency": "[8].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[12].t + [12].d",
+      "duration": "[12].d",
+      "measure": true
     },
     {
       "id": 14,
-      "startTime": "base.t + base.d * (13/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[11].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[13].t + [13].d",
+      "duration": "[13].d",
+      "measure": true
     },
     {
       "id": 15,
-      "startTime": "base.t + base.d * (7/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[12].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[14].t + [14].d",
+      "duration": "[14].d",
+      "measure": true
     },
     {
       "id": 16,
-      "startTime": "base.t + base.d * (15/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[13].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[15].t + [15].d",
+      "duration": "[15].d",
+      "measure": true
     },
     {
       "id": 17,
-      "startTime": "[9].t + [9].d",
-      "duration": "base.d * 2",
-      "frequency": "base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[16].t + [16].d",
+      "duration": "[16].d",
+      "measure": true
     },
     {
       "id": 18,
-      "startTime": "base.t + base.d * (17/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(10/9) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[17].t + [17].d",
+      "duration": "[17].d",
+      "measure": true
     },
     {
       "id": 19,
-      "startTime": "base.t + base.d * (9/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [18].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[18].t + [18].d",
+      "duration": "[18].d",
+      "measure": true
     },
     {
       "id": 20,
-      "startTime": "base.t + base.d * (19/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [18].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[19].t + [19].d",
+      "duration": "[19].d",
+      "measure": true
     },
     {
       "id": 21,
-      "startTime": "base.t + base.d * 5",
-      "duration": "base.d * (1/4)",
-      "frequency": "(12/5) * [18].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[20].t + [20].d",
+      "duration": "[20].d",
+      "measure": true
     },
     {
       "id": 22,
-      "startTime": "base.t + base.d * (21/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[19].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[21].t + [21].d",
+      "duration": "[21].d",
+      "measure": true
     },
     {
       "id": 23,
-      "startTime": "base.t + base.d * (11/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[20].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[22].t + [22].d",
+      "duration": "[22].d",
+      "measure": true
     },
     {
       "id": 24,
-      "startTime": "base.t + base.d * (23/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[21].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[23].t + [23].d",
+      "duration": "[23].d",
+      "measure": true
     },
     {
       "id": 25,
-      "startTime": "[17].t + [17].d",
-      "duration": "base.d * 2",
-      "frequency": "[17].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[24].t + [24].d",
+      "duration": "[24].d",
+      "measure": true
     },
     {
       "id": 26,
-      "startTime": "base.t + base.d * (25/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[18].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[25].t + [25].d",
+      "duration": "[25].d",
+      "measure": true
     },
     {
       "id": 27,
-      "startTime": "base.t + base.d * (13/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[22].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[26].t + [26].d",
+      "duration": "[26].d",
+      "measure": true
     },
     {
       "id": 28,
-      "startTime": "base.t + base.d * (27/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[23].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[27].t + [27].d",
+      "duration": "[27].d",
+      "measure": true
     },
     {
       "id": 29,
-      "startTime": "base.t + base.d * 7",
-      "duration": "base.d * (1/4)",
-      "frequency": "[24].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[28].t + [28].d",
+      "duration": "[28].d",
+      "measure": true
     },
     {
       "id": 30,
-      "startTime": "base.t + base.d * (29/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[27].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[29].t + [29].d",
+      "duration": "[29].d",
+      "measure": true
     },
     {
       "id": 31,
-      "startTime": "base.t + base.d * (15/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[28].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[30].t + [30].d",
+      "duration": "[30].d",
+      "measure": true
     },
     {
       "id": 32,
-      "startTime": "base.t + base.d * (31/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[29].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[31].t + [31].d",
+      "duration": "[31].d",
+      "measure": true
     },
     {
       "id": 33,
-      "startTime": "[25].t + [25].d",
-      "duration": "base.d * 2",
-      "frequency": "(15/16) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[32].t + [32].d",
+      "duration": "[32].d",
+      "measure": true
     },
     {
       "id": 34,
-      "startTime": "base.t + base.d * (33/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(9/8) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[33].t + [33].d",
+      "duration": "[33].d",
+      "measure": true
     },
     {
       "id": 35,
-      "startTime": "base.t + base.d * (17/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * base.f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
+      "startTime": "[34].t + [34].d",
+      "duration": "[34].d",
+      "measure": true
     },
     {
       "id": 36,
-      "startTime": "base.t + base.d * (35/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [35].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
+      "startTime": "[1].t",
+      "duration": "base.d * 2",
+      "frequency": "base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 37,
-      "startTime": "base.t + base.d * 9",
-      "duration": "base.d * (1/4)",
-      "frequency": "(16/9) * [35].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
+      "startTime": "[1].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(5/4) * [36].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 38,
-      "startTime": "base.t + base.d * (37/4)",
+      "startTime": "[1].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[35].f",
+      "frequency": "(3/2) * [36].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 39,
-      "startTime": "base.t + base.d * (19/2)",
+      "startTime": "[1].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[36].f",
+      "frequency": "2 * [36].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 40,
-      "startTime": "base.t + base.d * (39/4)",
+      "startTime": "[1].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[37].f",
+      "frequency": "(5/2) * [36].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 41,
-      "startTime": "[33].t + [33].d",
-      "duration": "base.d * 2",
-      "frequency": "[33].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 42,
-      "startTime": "base.t + base.d * (41/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[34].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 43,
-      "startTime": "base.t + base.d * (21/2)",
+      "startTime": "[1].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[38].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 44,
-      "startTime": "base.t + base.d * (43/4)",
+      "id": 42,
+      "startTime": "[1].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[39].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 45,
-      "startTime": "base.t + base.d * 11",
+      "id": 43,
+      "startTime": "[1].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[40].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 44,
+      "startTime": "[36].t + [36].d",
+      "duration": "base.d * 2",
+      "frequency": "[36].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 45,
+      "startTime": "[1].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[37].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 46,
-      "startTime": "base.t + base.d * (45/4)",
+      "startTime": "[1].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[43].f",
+      "frequency": "[41].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 47,
-      "startTime": "base.t + base.d * (23/2)",
+      "startTime": "[1].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[44].f",
+      "frequency": "[42].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 48,
-      "startTime": "base.t + base.d * (47/4)",
+      "startTime": "[1].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[45].f",
+      "frequency": "[43].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 49,
-      "startTime": "[41].t + [41].d",
+      "startTime": "[1].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[46].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 50,
+      "startTime": "[1].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[47].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 51,
+      "startTime": "[1].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[48].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 52,
+      "startTime": "[2].t",
       "duration": "base.d * 2",
       "frequency": "base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 50,
-      "startTime": "base.t + base.d * (49/4)",
+      "id": 53,
+      "startTime": "[2].t + base.d * (1/4)",
       "duration": "base.d * (7/4)",
-      "frequency": "(5/4) * [49].f",
+      "frequency": "(10/9) * base.f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 51,
-      "startTime": "base.t + base.d * (25/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [49].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 52,
-      "startTime": "base.t + base.d * (51/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [49].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 53,
-      "startTime": "base.t + base.d * 13",
-      "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [49].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
       "id": 54,
-      "startTime": "base.t + base.d * (53/4)",
+      "startTime": "[2].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[51].f",
+      "frequency": "(3/2) * [53].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 55,
-      "startTime": "base.t + base.d * (27/2)",
+      "startTime": "[2].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[52].f",
+      "frequency": "2 * [53].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 56,
-      "startTime": "base.t + base.d * (55/4)",
+      "startTime": "[2].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[53].f",
+      "frequency": "(12/5) * [53].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 57,
-      "startTime": "[49].t + [49].d",
-      "duration": "base.d * 2",
-      "frequency": "[49].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 58,
-      "startTime": "base.t + base.d * (57/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[50].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 59,
-      "startTime": "base.t + base.d * (29/2)",
+      "startTime": "[2].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[54].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 60,
-      "startTime": "base.t + base.d * (59/4)",
+      "id": 58,
+      "startTime": "[2].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[55].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 61,
-      "startTime": "base.t + base.d * 15",
+      "id": 59,
+      "startTime": "[2].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[56].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 60,
+      "startTime": "[52].t + [52].d",
+      "duration": "base.d * 2",
+      "frequency": "[52].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 61,
+      "startTime": "[2].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[53].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 62,
-      "startTime": "base.t + base.d * (61/4)",
+      "startTime": "[2].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[59].f",
+      "frequency": "[57].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 63,
-      "startTime": "base.t + base.d * (31/2)",
+      "startTime": "[2].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[60].f",
+      "frequency": "[58].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 64,
-      "startTime": "base.t + base.d * (63/4)",
+      "startTime": "[2].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[61].f",
+      "frequency": "[59].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 65,
-      "startTime": "[57].t + [57].d",
-      "duration": "base.d * 2",
-      "frequency": "base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 66,
-      "startTime": "base.t + base.d * (65/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(5/4) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 67,
-      "startTime": "base.t + base.d * (33/2)",
+      "startTime": "[2].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/3) * base.f",
+      "frequency": "[62].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 68,
-      "startTime": "base.t + base.d * (67/4)",
+      "id": 66,
+      "startTime": "[2].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [67].f",
+      "frequency": "[63].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 69,
-      "startTime": "base.t + base.d * 17",
+      "id": 67,
+      "startTime": "[2].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [67].f",
+      "frequency": "[64].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 68,
+      "startTime": "[3].t",
+      "duration": "base.d * 2",
+      "frequency": "(15/16) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 69,
+      "startTime": "[3].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(9/8) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 70,
-      "startTime": "base.t + base.d * (69/4)",
+      "startTime": "[3].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[67].f",
+      "frequency": "(3/2) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 71,
-      "startTime": "base.t + base.d * (35/2)",
+      "startTime": "[3].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[68].f",
+      "frequency": "(3/2) * [70].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 72,
-      "startTime": "base.t + base.d * (71/4)",
+      "startTime": "[3].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[69].f",
+      "frequency": "(16/9) * [70].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 73,
-      "startTime": "[65].t + [65].d",
-      "duration": "base.d * 2",
-      "frequency": "[65].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 74,
-      "startTime": "base.t + base.d * (73/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[66].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 75,
-      "startTime": "base.t + base.d * (37/2)",
+      "startTime": "[3].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[70].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 76,
-      "startTime": "base.t + base.d * (75/4)",
+      "id": 74,
+      "startTime": "[3].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[71].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 77,
-      "startTime": "base.t + base.d * 19",
+      "id": 75,
+      "startTime": "[3].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[72].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 76,
+      "startTime": "[68].t + [68].d",
+      "duration": "base.d * 2",
+      "frequency": "[68].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 77,
+      "startTime": "[3].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[69].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 78,
-      "startTime": "base.t + base.d * (77/4)",
+      "startTime": "[3].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[75].f",
+      "frequency": "[73].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 79,
-      "startTime": "base.t + base.d * (39/2)",
+      "startTime": "[3].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[76].f",
+      "frequency": "[74].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 80,
-      "startTime": "base.t + base.d * (79/4)",
+      "startTime": "[3].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[77].f",
+      "frequency": "[75].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 81,
-      "startTime": "[73].t + [73].d",
+      "startTime": "[3].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[78].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 82,
+      "startTime": "[3].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[79].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 83,
+      "startTime": "[3].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[80].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 84,
+      "startTime": "[4].t",
       "duration": "base.d * 2",
       "frequency": "base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 82,
-      "startTime": "base.t + base.d * (81/4)",
+      "id": 85,
+      "startTime": "[4].t + base.d * (1/4)",
       "duration": "base.d * (7/4)",
-      "frequency": "(9/8) * base.f",
+      "frequency": "(5/4) * [84].f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 83,
-      "startTime": "base.t + base.d * (41/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [82].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 84,
-      "startTime": "base.t + base.d * (83/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [82].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 85,
-      "startTime": "base.t + base.d * 21",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [82].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
       "id": 86,
-      "startTime": "base.t + base.d * (85/4)",
+      "startTime": "[4].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[83].f",
+      "frequency": "(3/2) * [84].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 87,
-      "startTime": "base.t + base.d * (43/2)",
+      "startTime": "[4].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[84].f",
+      "frequency": "2 * [84].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 88,
-      "startTime": "base.t + base.d * (87/4)",
+      "startTime": "[4].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[85].f",
+      "frequency": "(5/2) * [84].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 89,
-      "startTime": "[81].t + [81].d",
-      "duration": "base.d * 2",
-      "frequency": "[81].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 90,
-      "startTime": "base.t + base.d * (89/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[82].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 91,
-      "startTime": "base.t + base.d * (45/2)",
+      "startTime": "[4].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[86].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 92,
-      "startTime": "base.t + base.d * (91/4)",
+      "id": 90,
+      "startTime": "[4].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[87].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 93,
-      "startTime": "base.t + base.d * 23",
+      "id": 91,
+      "startTime": "[4].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[88].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 92,
+      "startTime": "[84].t + [84].d",
+      "duration": "base.d * 2",
+      "frequency": "[84].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 93,
+      "startTime": "[4].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[85].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 94,
-      "startTime": "base.t + base.d * (93/4)",
+      "startTime": "[4].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[91].f",
+      "frequency": "[89].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 95,
-      "startTime": "base.t + base.d * (47/2)",
+      "startTime": "[4].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[92].f",
+      "frequency": "[90].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 96,
-      "startTime": "base.t + base.d * (95/4)",
+      "startTime": "[4].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[93].f",
+      "frequency": "[91].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 97,
-      "startTime": "[89].t + [89].d",
-      "duration": "base.d * 2",
-      "frequency": "(15/16) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 98,
-      "startTime": "base.t + base.d * (97/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(9/8) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 99,
-      "startTime": "base.t + base.d * (49/2)",
+      "startTime": "[4].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * base.f",
+      "frequency": "[94].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 100,
-      "startTime": "base.t + base.d * (99/4)",
+      "id": 98,
+      "startTime": "[4].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [99].f",
+      "frequency": "[95].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 101,
-      "startTime": "base.t + base.d * 25",
+      "id": 99,
+      "startTime": "[4].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [99].f",
+      "frequency": "[96].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 100,
+      "startTime": "[5].t",
+      "duration": "base.d * 2",
+      "frequency": "base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 101,
+      "startTime": "[5].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(5/4) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 102,
-      "startTime": "base.t + base.d * (101/4)",
+      "startTime": "[5].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[99].f",
+      "frequency": "(5/3) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 103,
-      "startTime": "base.t + base.d * (51/2)",
+      "startTime": "[5].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[100].f",
+      "frequency": "(3/2) * [102].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 104,
-      "startTime": "base.t + base.d * (103/4)",
+      "startTime": "[5].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[101].f",
+      "frequency": "2 * [102].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 105,
-      "startTime": "[97].t + [97].d",
-      "duration": "base.d * 2",
-      "frequency": "[97].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 106,
-      "startTime": "base.t + base.d * (105/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[98].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 107,
-      "startTime": "base.t + base.d * (53/2)",
+      "startTime": "[5].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[102].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 108,
-      "startTime": "base.t + base.d * (107/4)",
+      "id": 106,
+      "startTime": "[5].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[103].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 109,
-      "startTime": "base.t + base.d * 27",
+      "id": 107,
+      "startTime": "[5].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[104].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 108,
+      "startTime": "[100].t + [100].d",
+      "duration": "base.d * 2",
+      "frequency": "[100].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 109,
+      "startTime": "[5].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[101].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 110,
-      "startTime": "base.t + base.d * (109/4)",
+      "startTime": "[5].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[107].f",
+      "frequency": "[105].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 111,
-      "startTime": "base.t + base.d * (55/2)",
+      "startTime": "[5].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[108].f",
+      "frequency": "[106].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 112,
-      "startTime": "base.t + base.d * (111/4)",
+      "startTime": "[5].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[109].f",
+      "frequency": "[107].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 113,
-      "startTime": "[105].t + [105].d",
-      "duration": "base.d * 2",
-      "frequency": "(15/16) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 114,
-      "startTime": "base.t + base.d * (113/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 115,
-      "startTime": "base.t + base.d * (57/2)",
+      "startTime": "[5].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [114].f",
+      "frequency": "[110].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 116,
-      "startTime": "base.t + base.d * (115/4)",
+      "id": 114,
+      "startTime": "[5].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [114].f",
+      "frequency": "[111].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 117,
-      "startTime": "base.t + base.d * 29",
+      "id": 115,
+      "startTime": "[5].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [114].f",
+      "frequency": "[112].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 116,
+      "startTime": "[6].t",
+      "duration": "base.d * 2",
+      "frequency": "base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 117,
+      "startTime": "[6].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(9/8) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 118,
-      "startTime": "base.t + base.d * (117/4)",
+      "startTime": "[6].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[115].f",
+      "frequency": "(5/4) * [117].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 119,
-      "startTime": "base.t + base.d * (59/2)",
+      "startTime": "[6].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[116].f",
+      "frequency": "(3/2) * [117].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 120,
-      "startTime": "base.t + base.d * (119/4)",
+      "startTime": "[6].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[117].f",
+      "frequency": "2 * [117].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 121,
-      "startTime": "[113].t + [113].d",
-      "duration": "base.d * 2",
-      "frequency": "[113].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 122,
-      "startTime": "base.t + base.d * (121/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[114].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 123,
-      "startTime": "base.t + base.d * (61/2)",
+      "startTime": "[6].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[118].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 124,
-      "startTime": "base.t + base.d * (123/4)",
+      "id": 122,
+      "startTime": "[6].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[119].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 125,
-      "startTime": "base.t + base.d * 31",
+      "id": 123,
+      "startTime": "[6].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[120].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 124,
+      "startTime": "[116].t + [116].d",
+      "duration": "base.d * 2",
+      "frequency": "[116].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 125,
+      "startTime": "[6].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[117].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 126,
-      "startTime": "base.t + base.d * (125/4)",
+      "startTime": "[6].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[123].f",
+      "frequency": "[121].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 127,
-      "startTime": "base.t + base.d * (63/2)",
+      "startTime": "[6].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[124].f",
+      "frequency": "[122].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 128,
-      "startTime": "base.t + base.d * (127/4)",
+      "startTime": "[6].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[125].f",
+      "frequency": "[123].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 129,
-      "startTime": "[121].t + [121].d",
-      "duration": "base.d * 2",
-      "frequency": "(5/6) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 130,
-      "startTime": "base.t + base.d * (129/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(6/5) * [129].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 131,
-      "startTime": "base.t + base.d * (65/2)",
+      "startTime": "[6].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [129].f",
+      "frequency": "[126].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 132,
-      "startTime": "base.t + base.d * (131/4)",
+      "id": 130,
+      "startTime": "[6].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/5) * [129].f",
+      "frequency": "[127].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 133,
-      "startTime": "base.t + base.d * 33",
+      "id": 131,
+      "startTime": "[6].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(12/5) * [129].f",
+      "frequency": "[128].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 132,
+      "startTime": "[7].t",
+      "duration": "base.d * 2",
+      "frequency": "(15/16) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 133,
+      "startTime": "[7].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(9/8) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 134,
-      "startTime": "base.t + base.d * (133/4)",
+      "startTime": "[7].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[131].f",
+      "frequency": "(3/2) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 135,
-      "startTime": "base.t + base.d * (67/2)",
+      "startTime": "[7].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[132].f",
+      "frequency": "(3/2) * [134].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 136,
-      "startTime": "base.t + base.d * (135/4)",
+      "startTime": "[7].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[133].f",
+      "frequency": "2 * [134].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 137,
-      "startTime": "[129].t + [129].d",
-      "duration": "base.d * 2",
-      "frequency": "[129].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 138,
-      "startTime": "base.t + base.d * (137/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[130].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 139,
-      "startTime": "base.t + base.d * (69/2)",
+      "startTime": "[7].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[134].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 140,
-      "startTime": "base.t + base.d * (139/4)",
+      "id": 138,
+      "startTime": "[7].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[135].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 141,
-      "startTime": "base.t + base.d * 35",
+      "id": 139,
+      "startTime": "[7].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[136].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 140,
+      "startTime": "[132].t + [132].d",
+      "duration": "base.d * 2",
+      "frequency": "[132].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 141,
+      "startTime": "[7].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[133].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 142,
-      "startTime": "base.t + base.d * (141/4)",
+      "startTime": "[7].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[139].f",
+      "frequency": "[137].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 143,
-      "startTime": "base.t + base.d * (71/2)",
+      "startTime": "[7].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[140].f",
+      "frequency": "[138].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 144,
-      "startTime": "base.t + base.d * (143/4)",
+      "startTime": "[7].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[141].f",
+      "frequency": "[139].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 145,
-      "startTime": "[137].t + [137].d",
-      "duration": "base.d * 2",
-      "frequency": "(9/16) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 146,
-      "startTime": "base.t + base.d * (145/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [145].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 147,
-      "startTime": "base.t + base.d * (73/2)",
+      "startTime": "[7].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [145].f",
+      "frequency": "[142].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 148,
-      "startTime": "base.t + base.d * (147/4)",
+      "id": 146,
+      "startTime": "[7].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [145].f",
+      "frequency": "[143].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 149,
-      "startTime": "base.t + base.d * 37",
+      "id": 147,
+      "startTime": "[7].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [145].f",
+      "frequency": "[144].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 148,
+      "startTime": "[8].t",
+      "duration": "base.d * 2",
+      "frequency": "(15/16) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 149,
+      "startTime": "[8].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 150,
-      "startTime": "base.t + base.d * (149/4)",
+      "startTime": "[8].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[147].f",
+      "frequency": "(5/4) * [149].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 151,
-      "startTime": "base.t + base.d * (75/2)",
+      "startTime": "[8].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[148].f",
+      "frequency": "(3/2) * [149].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 152,
-      "startTime": "base.t + base.d * (151/4)",
+      "startTime": "[8].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[149].f",
+      "frequency": "2 * [149].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 153,
-      "startTime": "[145].t + [145].d",
-      "duration": "base.d * 2",
-      "frequency": "[145].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 154,
-      "startTime": "base.t + base.d * (153/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[146].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 155,
-      "startTime": "base.t + base.d * (77/2)",
+      "startTime": "[8].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[150].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 156,
-      "startTime": "base.t + base.d * (155/4)",
+      "id": 154,
+      "startTime": "[8].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[151].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 157,
-      "startTime": "base.t + base.d * 39",
+      "id": 155,
+      "startTime": "[8].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[152].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 156,
+      "startTime": "[148].t + [148].d",
+      "duration": "base.d * 2",
+      "frequency": "[148].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 157,
+      "startTime": "[8].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[149].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 158,
-      "startTime": "base.t + base.d * (157/4)",
+      "startTime": "[8].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[155].f",
+      "frequency": "[153].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 159,
-      "startTime": "base.t + base.d * (79/2)",
+      "startTime": "[8].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[156].f",
+      "frequency": "[154].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 160,
-      "startTime": "base.t + base.d * (159/4)",
+      "startTime": "[8].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[157].f",
+      "frequency": "[155].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 161,
-      "startTime": "[153].t + [153].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/4) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 162,
-      "startTime": "base.t + base.d * (161/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(5/4) * [161].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 163,
-      "startTime": "base.t + base.d * (81/2)",
+      "startTime": "[8].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [161].f",
+      "frequency": "[158].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 164,
-      "startTime": "base.t + base.d * (163/4)",
+      "id": 162,
+      "startTime": "[8].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [161].f",
+      "frequency": "[159].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 165,
-      "startTime": "base.t + base.d * 41",
+      "id": 163,
+      "startTime": "[8].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [161].f",
+      "frequency": "[160].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 164,
+      "startTime": "[9].t",
+      "duration": "base.d * 2",
+      "frequency": "(5/6) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 165,
+      "startTime": "[9].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(6/5) * [164].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 166,
-      "startTime": "base.t + base.d * (165/4)",
+      "startTime": "[9].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[163].f",
+      "frequency": "(3/2) * [164].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 167,
-      "startTime": "base.t + base.d * (83/2)",
+      "startTime": "[9].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[164].f",
+      "frequency": "(9/5) * [164].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 168,
-      "startTime": "base.t + base.d * (167/4)",
+      "startTime": "[9].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[165].f",
+      "frequency": "(12/5) * [164].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 169,
-      "startTime": "[161].t + [161].d",
-      "duration": "base.d * 2",
-      "frequency": "[161].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 170,
-      "startTime": "base.t + base.d * (169/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[162].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 171,
-      "startTime": "base.t + base.d * (85/2)",
+      "startTime": "[9].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[166].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 172,
-      "startTime": "base.t + base.d * (171/4)",
+      "id": 170,
+      "startTime": "[9].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[167].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 173,
-      "startTime": "base.t + base.d * 43",
+      "id": 171,
+      "startTime": "[9].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[168].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 172,
+      "startTime": "[164].t + [164].d",
+      "duration": "base.d * 2",
+      "frequency": "[164].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 173,
+      "startTime": "[9].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[165].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 174,
-      "startTime": "base.t + base.d * (173/4)",
+      "startTime": "[9].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[171].f",
+      "frequency": "[169].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 175,
-      "startTime": "base.t + base.d * (87/2)",
+      "startTime": "[9].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[172].f",
+      "frequency": "[170].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 176,
-      "startTime": "base.t + base.d * (175/4)",
+      "startTime": "[9].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[173].f",
+      "frequency": "[171].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 177,
-      "startTime": "[169].t + [169].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/4) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 178,
-      "startTime": "base.t + base.d * (177/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(8/9) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 179,
-      "startTime": "base.t + base.d * (89/2)",
+      "startTime": "[9].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * base.f",
+      "frequency": "[174].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 180,
-      "startTime": "base.t + base.d * (179/4)",
+      "id": 178,
+      "startTime": "[9].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * base.f",
+      "frequency": "[175].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 181,
-      "startTime": "base.t + base.d * 45",
+      "id": 179,
+      "startTime": "[9].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(25/12) * base.f",
+      "frequency": "[176].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 180,
+      "startTime": "[10].t",
+      "duration": "base.d * 2",
+      "frequency": "(9/16) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 181,
+      "startTime": "[10].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [180].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 182,
-      "startTime": "base.t + base.d * (181/4)",
+      "startTime": "[10].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[179].f",
+      "frequency": "2 * [180].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 183,
-      "startTime": "base.t + base.d * (91/2)",
+      "startTime": "[10].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[180].f",
+      "frequency": "(5/2) * [180].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 184,
-      "startTime": "base.t + base.d * (183/4)",
+      "startTime": "[10].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[181].f",
+      "frequency": "(32/9) * [180].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 185,
-      "startTime": "[177].t + [177].d",
-      "duration": "base.d * 2",
-      "frequency": "[177].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 186,
-      "startTime": "base.t + base.d * (185/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[178].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 187,
-      "startTime": "base.t + base.d * (93/2)",
+      "startTime": "[10].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[182].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 188,
-      "startTime": "base.t + base.d * (187/4)",
+      "id": 186,
+      "startTime": "[10].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[183].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 189,
-      "startTime": "base.t + base.d * 47",
+      "id": 187,
+      "startTime": "[10].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[184].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 188,
+      "startTime": "[180].t + [180].d",
+      "duration": "base.d * 2",
+      "frequency": "[180].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 189,
+      "startTime": "[10].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[181].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 190,
-      "startTime": "base.t + base.d * (189/4)",
+      "startTime": "[10].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[187].f",
+      "frequency": "[185].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 191,
-      "startTime": "base.t + base.d * (95/2)",
+      "startTime": "[10].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[188].f",
+      "frequency": "[186].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 192,
-      "startTime": "base.t + base.d * (191/4)",
+      "startTime": "[10].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[189].f",
+      "frequency": "[187].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 193,
-      "startTime": "[185].t + [185].d",
-      "duration": "base.d * 2",
-      "frequency": "(2/3) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 194,
-      "startTime": "base.t + base.d * (193/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(5/6) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 195,
-      "startTime": "base.t + base.d * (97/2)",
+      "startTime": "[10].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(10/9) * base.f",
+      "frequency": "[190].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 196,
-      "startTime": "base.t + base.d * (195/4)",
+      "id": 194,
+      "startTime": "[10].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [195].f",
+      "frequency": "[191].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 197,
-      "startTime": "base.t + base.d * 49",
+      "id": 195,
+      "startTime": "[10].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [195].f",
+      "frequency": "[192].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 196,
+      "startTime": "[11].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/4) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 197,
+      "startTime": "[11].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(5/4) * [196].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 198,
-      "startTime": "base.t + base.d * (197/4)",
+      "startTime": "[11].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[195].f",
+      "frequency": "(3/2) * [196].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 199,
-      "startTime": "base.t + base.d * (99/2)",
+      "startTime": "[11].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[196].f",
+      "frequency": "2 * [196].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 200,
-      "startTime": "base.t + base.d * (199/4)",
+      "startTime": "[11].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[197].f",
+      "frequency": "(5/2) * [196].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 201,
-      "startTime": "[193].t + [193].d",
-      "duration": "base.d * 2",
-      "frequency": "[193].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 202,
-      "startTime": "base.t + base.d * (201/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[194].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 203,
-      "startTime": "base.t + base.d * (101/2)",
+      "startTime": "[11].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[198].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 204,
-      "startTime": "base.t + base.d * (203/4)",
+      "id": 202,
+      "startTime": "[11].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[199].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 205,
-      "startTime": "base.t + base.d * 51",
+      "id": 203,
+      "startTime": "[11].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[200].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 204,
+      "startTime": "[196].t + [196].d",
+      "duration": "base.d * 2",
+      "frequency": "[196].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 205,
+      "startTime": "[11].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[197].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 206,
-      "startTime": "base.t + base.d * (205/4)",
+      "startTime": "[11].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[203].f",
+      "frequency": "[201].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 207,
-      "startTime": "base.t + base.d * (103/2)",
+      "startTime": "[11].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[204].f",
+      "frequency": "[202].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 208,
-      "startTime": "base.t + base.d * (207/4)",
+      "startTime": "[11].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[205].f",
+      "frequency": "[203].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 209,
-      "startTime": "[201].t + [201].d",
-      "duration": "base.d * 2",
-      "frequency": "(2/3) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 210,
-      "startTime": "base.t + base.d * (209/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(4/5) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 211,
-      "startTime": "base.t + base.d * (105/2)",
+      "startTime": "[11].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(10/9) * base.f",
+      "frequency": "[206].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 212,
-      "startTime": "base.t + base.d * (211/4)",
+      "id": 210,
+      "startTime": "[11].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(4/3) * base.f",
+      "frequency": "[207].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 213,
-      "startTime": "base.t + base.d * 53",
+      "id": 211,
+      "startTime": "[11].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(15/8) * base.f",
+      "frequency": "[208].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 212,
+      "startTime": "[12].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/4) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 213,
+      "startTime": "[12].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(8/9) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 214,
-      "startTime": "base.t + base.d * (213/4)",
+      "startTime": "[12].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[211].f",
+      "frequency": "(5/4) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 215,
-      "startTime": "base.t + base.d * (107/2)",
+      "startTime": "[12].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[212].f",
+      "frequency": "(3/2) * base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 216,
-      "startTime": "base.t + base.d * (215/4)",
+      "startTime": "[12].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[213].f",
+      "frequency": "(25/12) * base.f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 217,
-      "startTime": "[209].t + [209].d",
-      "duration": "base.d * 2",
-      "frequency": "[209].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 218,
-      "startTime": "base.t + base.d * (217/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[210].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 219,
-      "startTime": "base.t + base.d * (109/2)",
+      "startTime": "[12].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[214].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 220,
-      "startTime": "base.t + base.d * (219/4)",
+      "id": 218,
+      "startTime": "[12].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[215].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 221,
-      "startTime": "base.t + base.d * 55",
+      "id": 219,
+      "startTime": "[12].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[216].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 220,
+      "startTime": "[212].t + [212].d",
+      "duration": "base.d * 2",
+      "frequency": "[212].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 221,
+      "startTime": "[12].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[213].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 222,
-      "startTime": "base.t + base.d * (221/4)",
+      "startTime": "[12].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[219].f",
+      "frequency": "[217].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 223,
-      "startTime": "base.t + base.d * (111/2)",
+      "startTime": "[12].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[220].f",
+      "frequency": "[218].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 224,
-      "startTime": "base.t + base.d * (223/4)",
+      "startTime": "[12].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[221].f",
+      "frequency": "[219].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 225,
-      "startTime": "[217].t + [217].d",
-      "duration": "base.d * 2",
-      "frequency": "(5/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 226,
-      "startTime": "base.t + base.d * (225/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(3/4) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 227,
-      "startTime": "base.t + base.d * (113/2)",
+      "startTime": "[12].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "base.f",
+      "frequency": "[222].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 228,
-      "startTime": "base.t + base.d * (227/4)",
+      "id": 226,
+      "startTime": "[12].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [227].f",
+      "frequency": "[223].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 229,
-      "startTime": "base.t + base.d * 57",
+      "id": 227,
+      "startTime": "[12].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [227].f",
+      "frequency": "[224].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 228,
+      "startTime": "[13].t",
+      "duration": "base.d * 2",
+      "frequency": "(2/3) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 229,
+      "startTime": "[13].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(5/6) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 230,
-      "startTime": "base.t + base.d * (229/4)",
+      "startTime": "[13].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[227].f",
+      "frequency": "(10/9) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 231,
-      "startTime": "base.t + base.d * (115/2)",
+      "startTime": "[13].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[228].f",
+      "frequency": "(3/2) * [230].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 232,
-      "startTime": "base.t + base.d * (231/4)",
+      "startTime": "[13].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[229].f",
+      "frequency": "2 * [230].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 233,
-      "startTime": "[225].t + [225].d",
-      "duration": "base.d * 2",
-      "frequency": "[225].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 234,
-      "startTime": "base.t + base.d * (233/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[226].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 235,
-      "startTime": "base.t + base.d * (117/2)",
+      "startTime": "[13].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[230].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 236,
-      "startTime": "base.t + base.d * (235/4)",
+      "id": 234,
+      "startTime": "[13].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[231].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 237,
-      "startTime": "base.t + base.d * 59",
+      "id": 235,
+      "startTime": "[13].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[232].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 236,
+      "startTime": "[228].t + [228].d",
+      "duration": "base.d * 2",
+      "frequency": "[228].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 237,
+      "startTime": "[13].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[229].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 238,
-      "startTime": "base.t + base.d * (237/4)",
+      "startTime": "[13].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[235].f",
+      "frequency": "[233].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 239,
-      "startTime": "base.t + base.d * (119/2)",
+      "startTime": "[13].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[236].f",
+      "frequency": "[234].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 240,
-      "startTime": "base.t + base.d * (239/4)",
+      "startTime": "[13].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[237].f",
+      "frequency": "[235].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 241,
-      "startTime": "[233].t + [233].d",
-      "duration": "base.d * 2",
-      "frequency": "(5/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 242,
-      "startTime": "base.t + base.d * (241/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(2/3) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 243,
-      "startTime": "base.t + base.d * (121/2)",
+      "startTime": "[13].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [242].f",
+      "frequency": "[238].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 244,
-      "startTime": "base.t + base.d * (243/4)",
+      "id": 242,
+      "startTime": "[13].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [242].f",
+      "frequency": "[239].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 245,
-      "startTime": "base.t + base.d * 61",
+      "id": 243,
+      "startTime": "[13].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [242].f",
+      "frequency": "[240].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 244,
+      "startTime": "[14].t",
+      "duration": "base.d * 2",
+      "frequency": "(2/3) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 245,
+      "startTime": "[14].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(4/5) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 246,
-      "startTime": "base.t + base.d * (245/4)",
+      "startTime": "[14].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[243].f",
+      "frequency": "(10/9) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 247,
-      "startTime": "base.t + base.d * (123/2)",
+      "startTime": "[14].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[244].f",
+      "frequency": "(4/3) * base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 248,
-      "startTime": "base.t + base.d * (247/4)",
+      "startTime": "[14].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[245].f",
+      "frequency": "(15/8) * base.f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 249,
-      "startTime": "[241].t + [241].d",
-      "duration": "base.d * 2",
-      "frequency": "[241].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 250,
-      "startTime": "base.t + base.d * (249/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[242].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 251,
-      "startTime": "base.t + base.d * (125/2)",
+      "startTime": "[14].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[246].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 252,
-      "startTime": "base.t + base.d * (251/4)",
+      "id": 250,
+      "startTime": "[14].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[247].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 253,
-      "startTime": "base.t + base.d * 63",
+      "id": 251,
+      "startTime": "[14].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[248].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 252,
+      "startTime": "[244].t + [244].d",
+      "duration": "base.d * 2",
+      "frequency": "[244].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 253,
+      "startTime": "[14].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[245].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 254,
-      "startTime": "base.t + base.d * (253/4)",
+      "startTime": "[14].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[251].f",
+      "frequency": "[249].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 255,
-      "startTime": "base.t + base.d * (127/2)",
+      "startTime": "[14].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[252].f",
+      "frequency": "[250].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 256,
-      "startTime": "base.t + base.d * (255/4)",
+      "startTime": "[14].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[253].f",
+      "frequency": "[251].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 257,
-      "startTime": "[249].t + [249].d",
-      "duration": "base.d * 2",
-      "frequency": "(5/9) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 258,
-      "startTime": "base.t + base.d * (257/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(6/5) * [257].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 259,
-      "startTime": "base.t + base.d * (129/2)",
+      "startTime": "[14].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [257].f",
+      "frequency": "[254].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 260,
-      "startTime": "base.t + base.d * (259/4)",
+      "id": 258,
+      "startTime": "[14].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/5) * [257].f",
+      "frequency": "[255].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 261,
-      "startTime": "base.t + base.d * 65",
+      "id": 259,
+      "startTime": "[14].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(12/5) * [257].f",
+      "frequency": "[256].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 260,
+      "startTime": "[15].t",
+      "duration": "base.d * 2",
+      "frequency": "(5/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 261,
+      "startTime": "[15].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/4) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 262,
-      "startTime": "base.t + base.d * (261/4)",
+      "startTime": "[15].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[259].f",
+      "frequency": "base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 263,
-      "startTime": "base.t + base.d * (131/2)",
+      "startTime": "[15].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[260].f",
+      "frequency": "(3/2) * [262].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 264,
-      "startTime": "base.t + base.d * (263/4)",
+      "startTime": "[15].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[261].f",
+      "frequency": "2 * [262].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 265,
-      "startTime": "[257].t + [257].d",
-      "duration": "base.d * 2",
-      "frequency": "[257].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 266,
-      "startTime": "base.t + base.d * (265/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[258].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 267,
-      "startTime": "base.t + base.d * (133/2)",
+      "startTime": "[15].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[262].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 268,
-      "startTime": "base.t + base.d * (267/4)",
+      "id": 266,
+      "startTime": "[15].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[263].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 269,
-      "startTime": "base.t + base.d * 67",
+      "id": 267,
+      "startTime": "[15].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[264].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 268,
+      "startTime": "[260].t + [260].d",
+      "duration": "base.d * 2",
+      "frequency": "[260].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 269,
+      "startTime": "[15].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[261].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 270,
-      "startTime": "base.t + base.d * (269/4)",
+      "startTime": "[15].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[267].f",
+      "frequency": "[265].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 271,
-      "startTime": "base.t + base.d * (135/2)",
+      "startTime": "[15].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[268].f",
+      "frequency": "[266].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 272,
-      "startTime": "base.t + base.d * (271/4)",
+      "startTime": "[15].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[269].f",
+      "frequency": "[267].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 273,
-      "startTime": "[265].t + [265].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 274,
-      "startTime": "base.t + base.d * (273/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [273].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 275,
-      "startTime": "base.t + base.d * (137/2)",
+      "startTime": "[15].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [273].f",
+      "frequency": "[270].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 276,
-      "startTime": "base.t + base.d * (275/4)",
+      "id": 274,
+      "startTime": "[15].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [273].f",
+      "frequency": "[271].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 277,
-      "startTime": "base.t + base.d * 69",
+      "id": 275,
+      "startTime": "[15].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [273].f",
+      "frequency": "[272].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 276,
+      "startTime": "[16].t",
+      "duration": "base.d * 2",
+      "frequency": "(5/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 277,
+      "startTime": "[16].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(2/3) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 278,
-      "startTime": "base.t + base.d * (277/4)",
+      "startTime": "[16].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[275].f",
+      "frequency": "(5/4) * [277].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 279,
-      "startTime": "base.t + base.d * (139/2)",
+      "startTime": "[16].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[276].f",
+      "frequency": "(3/2) * [277].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 280,
-      "startTime": "base.t + base.d * (279/4)",
+      "startTime": "[16].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[277].f",
+      "frequency": "2 * [277].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 281,
-      "startTime": "[273].t + [273].d",
-      "duration": "base.d * 2",
-      "frequency": "[273].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 282,
-      "startTime": "base.t + base.d * (281/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[274].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 283,
-      "startTime": "base.t + base.d * (141/2)",
+      "startTime": "[16].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[278].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 284,
-      "startTime": "base.t + base.d * (283/4)",
+      "id": 282,
+      "startTime": "[16].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[279].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 285,
-      "startTime": "base.t + base.d * 71",
+      "id": 283,
+      "startTime": "[16].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[280].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 284,
+      "startTime": "[276].t + [276].d",
+      "duration": "base.d * 2",
+      "frequency": "[276].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 285,
+      "startTime": "[16].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[277].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 286,
-      "startTime": "base.t + base.d * (285/4)",
+      "startTime": "[16].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[283].f",
+      "frequency": "[281].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 287,
-      "startTime": "base.t + base.d * (143/2)",
+      "startTime": "[16].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[284].f",
+      "frequency": "[282].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 288,
-      "startTime": "base.t + base.d * (287/4)",
+      "startTime": "[16].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[285].f",
+      "frequency": "[283].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 289,
-      "startTime": "[281].t + [281].d",
-      "duration": "base.d * 2",
-      "frequency": "(1/2) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 290,
-      "startTime": "base.t + base.d * (289/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(5/4) * [289].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 291,
-      "startTime": "base.t + base.d * (145/2)",
+      "startTime": "[16].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [289].f",
+      "frequency": "[286].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 292,
-      "startTime": "base.t + base.d * (291/4)",
+      "id": 290,
+      "startTime": "[16].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [289].f",
+      "frequency": "[287].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 293,
-      "startTime": "base.t + base.d * 73",
+      "id": 291,
+      "startTime": "[16].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [289].f",
+      "frequency": "[288].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 292,
+      "startTime": "[17].t",
+      "duration": "base.d * 2",
+      "frequency": "(5/9) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 293,
+      "startTime": "[17].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(6/5) * [292].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 294,
-      "startTime": "base.t + base.d * (293/4)",
+      "startTime": "[17].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[291].f",
+      "frequency": "(3/2) * [292].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 295,
-      "startTime": "base.t + base.d * (147/2)",
+      "startTime": "[17].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[292].f",
+      "frequency": "(9/5) * [292].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 296,
-      "startTime": "base.t + base.d * (295/4)",
+      "startTime": "[17].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[293].f",
+      "frequency": "(12/5) * [292].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 297,
-      "startTime": "[289].t + [289].d",
-      "duration": "base.d * 2",
-      "frequency": "[289].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 298,
-      "startTime": "base.t + base.d * (297/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[290].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 299,
-      "startTime": "base.t + base.d * (149/2)",
+      "startTime": "[17].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[294].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 300,
-      "startTime": "base.t + base.d * (299/4)",
+      "id": 298,
+      "startTime": "[17].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[295].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 301,
-      "startTime": "base.t + base.d * 75",
+      "id": 299,
+      "startTime": "[17].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[296].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 300,
+      "startTime": "[292].t + [292].d",
+      "duration": "base.d * 2",
+      "frequency": "[292].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 301,
+      "startTime": "[17].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[293].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 302,
-      "startTime": "base.t + base.d * (301/4)",
+      "startTime": "[17].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[299].f",
+      "frequency": "[297].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 303,
-      "startTime": "base.t + base.d * (151/2)",
+      "startTime": "[17].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[300].f",
+      "frequency": "[298].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 304,
-      "startTime": "base.t + base.d * (303/4)",
+      "startTime": "[17].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[301].f",
+      "frequency": "[299].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 305,
-      "startTime": "[297].t + [297].d",
-      "duration": "base.d * 2",
-      "frequency": "(1/2) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 306,
-      "startTime": "base.t + base.d * (305/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [305].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 307,
-      "startTime": "base.t + base.d * (153/2)",
+      "startTime": "[17].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(16/9) * [305].f",
+      "frequency": "[302].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 308,
-      "startTime": "base.t + base.d * (307/4)",
+      "id": 306,
+      "startTime": "[17].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [305].f",
+      "frequency": "[303].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 309,
-      "startTime": "base.t + base.d * 77",
+      "id": 307,
+      "startTime": "[17].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [305].f",
+      "frequency": "[304].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 308,
+      "startTime": "[18].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 309,
+      "startTime": "[18].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [308].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 310,
-      "startTime": "base.t + base.d * (309/4)",
+      "startTime": "[18].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[307].f",
+      "frequency": "2 * [308].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 311,
-      "startTime": "base.t + base.d * (155/2)",
+      "startTime": "[18].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[308].f",
+      "frequency": "(5/2) * [308].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 312,
-      "startTime": "base.t + base.d * (311/4)",
+      "startTime": "[18].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[309].f",
+      "frequency": "(32/9) * [308].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 313,
-      "startTime": "[305].t + [305].d",
-      "duration": "base.d * 2",
-      "frequency": "[305].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 314,
-      "startTime": "base.t + base.d * (313/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[306].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 315,
-      "startTime": "base.t + base.d * (157/2)",
+      "startTime": "[18].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[310].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 316,
-      "startTime": "base.t + base.d * (315/4)",
+      "id": 314,
+      "startTime": "[18].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[311].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 317,
-      "startTime": "base.t + base.d * 79",
+      "id": 315,
+      "startTime": "[18].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[312].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 316,
+      "startTime": "[308].t + [308].d",
+      "duration": "base.d * 2",
+      "frequency": "[308].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 317,
+      "startTime": "[18].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[309].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 318,
-      "startTime": "base.t + base.d * (317/4)",
+      "startTime": "[18].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[315].f",
+      "frequency": "[313].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 319,
-      "startTime": "base.t + base.d * (159/2)",
+      "startTime": "[18].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[316].f",
+      "frequency": "[314].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 320,
-      "startTime": "base.t + base.d * (319/4)",
+      "startTime": "[18].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[317].f",
+      "frequency": "[315].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 321,
-      "startTime": "[313].t + [313].d",
-      "duration": "base.d * 2",
-      "frequency": "(1/3) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 322,
-      "startTime": "base.t + base.d * (321/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "2 * [321].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 323,
-      "startTime": "base.t + base.d * (161/2)",
+      "startTime": "[18].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [321].f",
+      "frequency": "[318].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 324,
-      "startTime": "base.t + base.d * (323/4)",
+      "id": 322,
+      "startTime": "[18].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "3 * [321].f",
+      "frequency": "[319].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 325,
-      "startTime": "base.t + base.d * 81",
+      "id": 323,
+      "startTime": "[18].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(15/4) * [321].f",
+      "frequency": "[320].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 324,
+      "startTime": "[19].t",
+      "duration": "base.d * 2",
+      "frequency": "(1/2) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 325,
+      "startTime": "[19].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(5/4) * [324].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 326,
-      "startTime": "base.t + base.d * (325/4)",
+      "startTime": "[19].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[323].f",
+      "frequency": "(3/2) * [324].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 327,
-      "startTime": "base.t + base.d * (163/2)",
+      "startTime": "[19].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[324].f",
+      "frequency": "2 * [324].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 328,
-      "startTime": "base.t + base.d * (327/4)",
+      "startTime": "[19].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[325].f",
+      "frequency": "(5/2) * [324].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 329,
-      "startTime": "[321].t + [321].d",
-      "duration": "base.d * 2",
-      "frequency": "[321].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 330,
-      "startTime": "base.t + base.d * (329/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[322].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 331,
-      "startTime": "base.t + base.d * (165/2)",
+      "startTime": "[19].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[326].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 332,
-      "startTime": "base.t + base.d * (331/4)",
+      "id": 330,
+      "startTime": "[19].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[327].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 333,
-      "startTime": "base.t + base.d * 83",
+      "id": 331,
+      "startTime": "[19].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[328].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 332,
+      "startTime": "[324].t + [324].d",
+      "duration": "base.d * 2",
+      "frequency": "[324].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 333,
+      "startTime": "[19].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[325].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 334,
-      "startTime": "base.t + base.d * (333/4)",
+      "startTime": "[19].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[331].f",
+      "frequency": "[329].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 335,
-      "startTime": "base.t + base.d * (167/2)",
+      "startTime": "[19].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[332].f",
+      "frequency": "[330].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 336,
-      "startTime": "base.t + base.d * (335/4)",
+      "startTime": "[19].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[333].f",
+      "frequency": "[331].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 337,
-      "startTime": "[329].t + [329].d",
-      "duration": "base.d * 2",
-      "frequency": "(25/72) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 338,
-      "startTime": "base.t + base.d * (337/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(1/2) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 339,
-      "startTime": "base.t + base.d * (169/2)",
+      "startTime": "[19].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/6) * base.f",
+      "frequency": "[334].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 340,
-      "startTime": "base.t + base.d * (339/4)",
+      "id": 338,
+      "startTime": "[19].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "base.f",
+      "frequency": "[335].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 341,
-      "startTime": "base.t + base.d * 85",
+      "id": 339,
+      "startTime": "[19].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(6/5) * base.f",
+      "frequency": "[336].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 340,
+      "startTime": "[20].t",
+      "duration": "base.d * 2",
+      "frequency": "(1/2) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 341,
+      "startTime": "[20].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [340].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 342,
-      "startTime": "base.t + base.d * (341/4)",
+      "startTime": "[20].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[339].f",
+      "frequency": "(16/9) * [340].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 343,
-      "startTime": "base.t + base.d * (171/2)",
+      "startTime": "[20].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[340].f",
+      "frequency": "2 * [340].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 344,
-      "startTime": "base.t + base.d * (343/4)",
+      "startTime": "[20].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[341].f",
+      "frequency": "(5/2) * [340].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 345,
-      "startTime": "[337].t + [337].d",
-      "duration": "base.d * 2",
-      "frequency": "[337].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 346,
-      "startTime": "base.t + base.d * (345/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[338].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 347,
-      "startTime": "base.t + base.d * (173/2)",
+      "startTime": "[20].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[342].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 348,
-      "startTime": "base.t + base.d * (347/4)",
+      "id": 346,
+      "startTime": "[20].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[343].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 349,
-      "startTime": "base.t + base.d * 87",
+      "id": 347,
+      "startTime": "[20].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[344].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 348,
+      "startTime": "[340].t + [340].d",
+      "duration": "base.d * 2",
+      "frequency": "[340].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 349,
+      "startTime": "[20].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[341].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 350,
-      "startTime": "base.t + base.d * (349/4)",
+      "startTime": "[20].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[347].f",
+      "frequency": "[345].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 351,
-      "startTime": "base.t + base.d * (175/2)",
+      "startTime": "[20].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[348].f",
+      "frequency": "[346].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 352,
-      "startTime": "base.t + base.d * (351/4)",
+      "startTime": "[20].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[349].f",
+      "frequency": "[347].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 353,
-      "startTime": "[345].t + [345].d",
-      "duration": "base.d * 2",
-      "frequency": "(2/5) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 354,
-      "startTime": "base.t + base.d * (353/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(2/3) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 355,
-      "startTime": "base.t + base.d * (177/2)",
+      "startTime": "[20].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(15/16) * base.f",
+      "frequency": "[350].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 356,
-      "startTime": "base.t + base.d * (355/4)",
+      "id": 354,
+      "startTime": "[20].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "base.f",
+      "frequency": "[351].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 357,
-      "startTime": "base.t + base.d * 89",
+      "id": 355,
+      "startTime": "[20].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/8) * base.f",
+      "frequency": "[352].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 356,
+      "startTime": "[21].t",
+      "duration": "base.d * 2",
+      "frequency": "(1/3) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 357,
+      "startTime": "[21].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "2 * [356].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 358,
-      "startTime": "base.t + base.d * (357/4)",
+      "startTime": "[21].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[355].f",
+      "frequency": "(5/2) * [356].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 359,
-      "startTime": "base.t + base.d * (179/2)",
+      "startTime": "[21].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[356].f",
+      "frequency": "3 * [356].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 360,
-      "startTime": "base.t + base.d * (359/4)",
+      "startTime": "[21].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[357].f",
+      "frequency": "(15/4) * [356].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 361,
-      "startTime": "[353].t + [353].d",
-      "duration": "base.d * 2",
-      "frequency": "[353].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 362,
-      "startTime": "base.t + base.d * (361/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[354].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 363,
-      "startTime": "base.t + base.d * (181/2)",
+      "startTime": "[21].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[358].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 364,
-      "startTime": "base.t + base.d * (363/4)",
+      "id": 362,
+      "startTime": "[21].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[359].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 365,
-      "startTime": "base.t + base.d * 91",
+      "id": 363,
+      "startTime": "[21].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[360].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 364,
+      "startTime": "[356].t + [356].d",
+      "duration": "base.d * 2",
+      "frequency": "[356].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 365,
+      "startTime": "[21].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[357].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 366,
-      "startTime": "base.t + base.d * (365/4)",
+      "startTime": "[21].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[363].f",
+      "frequency": "[361].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 367,
-      "startTime": "base.t + base.d * (183/2)",
+      "startTime": "[21].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[364].f",
+      "frequency": "[362].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 368,
-      "startTime": "base.t + base.d * (367/4)",
+      "startTime": "[21].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[365].f",
+      "frequency": "[363].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 369,
-      "startTime": "[361].t + [361].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 370,
-      "startTime": "base.t + base.d * (369/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(16/9) * [369].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 371,
-      "startTime": "base.t + base.d * (185/2)",
+      "startTime": "[21].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [369].f",
+      "frequency": "[366].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 372,
-      "startTime": "base.t + base.d * (371/4)",
+      "id": 370,
+      "startTime": "[21].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [369].f",
+      "frequency": "[367].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 373,
-      "startTime": "base.t + base.d * 93",
+      "id": 371,
+      "startTime": "[21].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "3 * [369].f",
+      "frequency": "[368].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 372,
+      "startTime": "[22].t",
+      "duration": "base.d * 2",
+      "frequency": "(25/72) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 373,
+      "startTime": "[22].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(1/2) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 374,
-      "startTime": "base.t + base.d * (373/4)",
+      "startTime": "[22].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[371].f",
+      "frequency": "(5/6) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 375,
-      "startTime": "base.t + base.d * (187/2)",
+      "startTime": "[22].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[372].f",
+      "frequency": "base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 376,
-      "startTime": "base.t + base.d * (375/4)",
+      "startTime": "[22].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[373].f",
+      "frequency": "(6/5) * base.f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 377,
-      "startTime": "[369].t + [369].d",
-      "duration": "base.d * 2",
-      "frequency": "[369].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 378,
-      "startTime": "base.t + base.d * (377/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[370].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 379,
-      "startTime": "base.t + base.d * (189/2)",
+      "startTime": "[22].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[374].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 380,
-      "startTime": "base.t + base.d * (379/4)",
+      "id": 378,
+      "startTime": "[22].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[375].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 381,
-      "startTime": "base.t + base.d * 95",
+      "id": 379,
+      "startTime": "[22].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[376].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 380,
+      "startTime": "[372].t + [372].d",
+      "duration": "base.d * 2",
+      "frequency": "[372].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 381,
+      "startTime": "[22].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[373].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 382,
-      "startTime": "base.t + base.d * (381/4)",
+      "startTime": "[22].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[379].f",
+      "frequency": "[377].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 383,
-      "startTime": "base.t + base.d * (191/2)",
+      "startTime": "[22].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[380].f",
+      "frequency": "[378].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 384,
-      "startTime": "base.t + base.d * (383/4)",
+      "startTime": "[22].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[381].f",
+      "frequency": "[379].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 385,
-      "startTime": "[377].t + [377].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 386,
-      "startTime": "base.t + base.d * (385/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(5/8) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 387,
-      "startTime": "base.t + base.d * (193/2)",
+      "startTime": "[22].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/4) * base.f",
+      "frequency": "[382].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 386,
+      "startTime": "[22].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[383].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 387,
+      "startTime": "[22].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[384].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 388,
-      "startTime": "base.t + base.d * (387/4)",
+      "startTime": "[23].t",
+      "duration": "base.d * 2",
+      "frequency": "(2/5) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 389,
+      "startTime": "[23].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(2/3) * base.f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 390,
+      "startTime": "[23].t + base.d * (1/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "(15/16) * base.f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 391,
+      "startTime": "[23].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
       "frequency": "base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 389,
-      "startTime": "base.t + base.d * 97",
-      "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [388].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 390,
-      "startTime": "base.t + base.d * (389/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[387].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 391,
-      "startTime": "base.t + base.d * (195/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[388].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
       "id": 392,
-      "startTime": "base.t + base.d * (391/4)",
+      "startTime": "[23].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[389].f",
+      "frequency": "(9/8) * base.f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 393,
-      "startTime": "[385].t + [385].d",
-      "duration": "base.d * 2",
-      "frequency": "[385].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 394,
-      "startTime": "base.t + base.d * (393/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[386].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 395,
-      "startTime": "base.t + base.d * (197/2)",
+      "startTime": "[23].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[390].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 396,
-      "startTime": "base.t + base.d * (395/4)",
+      "id": 394,
+      "startTime": "[23].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[391].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 397,
-      "startTime": "base.t + base.d * 99",
+      "id": 395,
+      "startTime": "[23].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[392].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 396,
+      "startTime": "[388].t + [388].d",
+      "duration": "base.d * 2",
+      "frequency": "[388].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 397,
+      "startTime": "[23].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[389].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 398,
-      "startTime": "base.t + base.d * (397/4)",
+      "startTime": "[23].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[395].f",
+      "frequency": "[393].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 399,
-      "startTime": "base.t + base.d * (199/2)",
+      "startTime": "[23].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[396].f",
+      "frequency": "[394].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 400,
-      "startTime": "base.t + base.d * (399/4)",
+      "startTime": "[23].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[397].f",
+      "frequency": "[395].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 401,
-      "startTime": "[393].t + [393].d",
+      "startTime": "[23].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[398].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 402,
+      "startTime": "[23].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[399].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 403,
+      "startTime": "[23].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[400].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 404,
+      "startTime": "[24].t",
       "duration": "base.d * 2",
       "frequency": "(3/8) * base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 402,
-      "startTime": "base.t + base.d * (401/4)",
+      "id": 405,
+      "startTime": "[24].t + base.d * (1/4)",
       "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [401].f",
+      "frequency": "(16/9) * [404].f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 403,
-      "startTime": "base.t + base.d * (201/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [401].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 404,
-      "startTime": "base.t + base.d * (403/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(8/3) * [401].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 405,
-      "startTime": "base.t + base.d * 101",
-      "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [401].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
       "id": 406,
-      "startTime": "base.t + base.d * (405/4)",
+      "startTime": "[24].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[403].f",
+      "frequency": "2 * [404].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 407,
-      "startTime": "base.t + base.d * (203/2)",
+      "startTime": "[24].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[404].f",
+      "frequency": "(5/2) * [404].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 408,
-      "startTime": "base.t + base.d * (407/4)",
+      "startTime": "[24].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[405].f",
+      "frequency": "3 * [404].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 409,
-      "startTime": "[401].t + [401].d",
-      "duration": "base.d * 2",
-      "frequency": "[401].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 410,
-      "startTime": "base.t + base.d * (409/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[402].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 411,
-      "startTime": "base.t + base.d * (205/2)",
+      "startTime": "[24].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[406].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 412,
-      "startTime": "base.t + base.d * (411/4)",
+      "id": 410,
+      "startTime": "[24].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[407].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 413,
-      "startTime": "base.t + base.d * 103",
+      "id": 411,
+      "startTime": "[24].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[408].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 412,
+      "startTime": "[404].t + [404].d",
+      "duration": "base.d * 2",
+      "frequency": "[404].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 413,
+      "startTime": "[24].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[405].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 414,
-      "startTime": "base.t + base.d * (413/4)",
+      "startTime": "[24].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[411].f",
+      "frequency": "[409].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 415,
-      "startTime": "base.t + base.d * (207/2)",
+      "startTime": "[24].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[412].f",
+      "frequency": "[410].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 416,
-      "startTime": "base.t + base.d * (415/4)",
+      "startTime": "[24].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[413].f",
+      "frequency": "[411].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 417,
-      "startTime": "[409].t + [409].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
+      "startTime": "[24].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[414].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 418,
-      "startTime": "base.t + base.d * (417/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [417].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
+      "startTime": "[24].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[415].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 419,
-      "startTime": "base.t + base.d * (209/2)",
+      "startTime": "[24].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [417].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
+      "frequency": "[416].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 420,
-      "startTime": "base.t + base.d * (419/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [417].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
+      "startTime": "[25].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 421,
-      "startTime": "base.t + base.d * 105",
-      "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [417].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 422,
-      "startTime": "base.t + base.d * (421/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[419].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 423,
-      "startTime": "base.t + base.d * (211/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[420].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 424,
-      "startTime": "base.t + base.d * (423/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[421].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 425,
-      "startTime": "[417].t + [417].d",
-      "duration": "base.d * 2",
-      "frequency": "[417].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 426,
-      "startTime": "base.t + base.d * (425/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[418].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 427,
-      "startTime": "base.t + base.d * (213/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[422].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 428,
-      "startTime": "base.t + base.d * (427/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[423].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 429,
-      "startTime": "base.t + base.d * 107",
-      "duration": "base.d * (1/4)",
-      "frequency": "[424].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 430,
-      "startTime": "base.t + base.d * (429/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[427].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 431,
-      "startTime": "base.t + base.d * (215/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[428].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 432,
-      "startTime": "base.t + base.d * (431/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[429].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 433,
-      "startTime": "[425].t + [425].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 434,
-      "startTime": "base.t + base.d * (433/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "(3/5) * base.f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 435,
-      "startTime": "base.t + base.d * (217/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(27/32) * base.f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 436,
-      "startTime": "base.t + base.d * (435/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "base.f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 437,
-      "startTime": "base.t + base.d * 109",
-      "duration": "base.d * (1/4)",
-      "frequency": "(45/32) * base.f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 438,
-      "startTime": "base.t + base.d * (437/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[435].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 439,
-      "startTime": "base.t + base.d * (219/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[436].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 440,
-      "startTime": "base.t + base.d * (439/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[437].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 441,
-      "startTime": "[433].t + [433].d",
-      "duration": "base.d * 2",
-      "frequency": "[433].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 442,
-      "startTime": "base.t + base.d * (441/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[434].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 443,
-      "startTime": "base.t + base.d * (221/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[438].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 444,
-      "startTime": "base.t + base.d * (443/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[439].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 445,
-      "startTime": "base.t + base.d * 111",
-      "duration": "base.d * (1/4)",
-      "frequency": "[440].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 446,
-      "startTime": "base.t + base.d * (445/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[443].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 447,
-      "startTime": "base.t + base.d * (223/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[444].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 448,
-      "startTime": "base.t + base.d * (447/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "[445].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 449,
-      "startTime": "[441].t + [441].d",
-      "duration": "base.d * 2",
-      "frequency": "(3/8) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 450,
-      "startTime": "base.t + base.d * (449/4)",
+      "startTime": "[25].t + base.d * (1/4)",
       "duration": "base.d * (7/4)",
       "frequency": "(5/8) * base.f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 451,
-      "startTime": "base.t + base.d * (225/2)",
+      "id": 422,
+      "startTime": "[25].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
       "frequency": "(3/4) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 452,
-      "startTime": "base.t + base.d * (451/4)",
+      "id": 423,
+      "startTime": "[25].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
       "frequency": "base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 453,
-      "startTime": "base.t + base.d * 113",
+      "id": 424,
+      "startTime": "[25].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [452].f",
+      "frequency": "(5/4) * [423].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 454,
-      "startTime": "base.t + base.d * (453/4)",
+      "id": 425,
+      "startTime": "[25].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[451].f",
+      "frequency": "[422].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 426,
+      "startTime": "[25].t + base.d * (3/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[423].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 427,
+      "startTime": "[25].t + base.d * (7/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[424].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 428,
+      "startTime": "[420].t + [420].d",
+      "duration": "base.d * 2",
+      "frequency": "[420].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 429,
+      "startTime": "[25].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[421].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 430,
+      "startTime": "[25].t + base.d * (5/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[425].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 431,
+      "startTime": "[25].t + base.d * (11/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[426].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 432,
+      "startTime": "[25].t + base.d * 3",
+      "duration": "base.d * (1/4)",
+      "frequency": "[427].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 433,
+      "startTime": "[25].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[430].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 434,
+      "startTime": "[25].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[431].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 435,
+      "startTime": "[25].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[432].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 436,
+      "startTime": "[26].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 437,
+      "startTime": "[26].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [436].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 438,
+      "startTime": "[26].t + base.d * (1/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "2 * [436].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 439,
+      "startTime": "[26].t + base.d * (3/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "(8/3) * [436].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 440,
+      "startTime": "[26].t + base.d",
+      "duration": "base.d * (1/4)",
+      "frequency": "(32/9) * [436].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 441,
+      "startTime": "[26].t + base.d * (5/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[438].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 442,
+      "startTime": "[26].t + base.d * (3/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[439].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 443,
+      "startTime": "[26].t + base.d * (7/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[440].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 444,
+      "startTime": "[436].t + [436].d",
+      "duration": "base.d * 2",
+      "frequency": "[436].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 445,
+      "startTime": "[26].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[437].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 446,
+      "startTime": "[26].t + base.d * (5/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[441].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 447,
+      "startTime": "[26].t + base.d * (11/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[442].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 448,
+      "startTime": "[26].t + base.d * 3",
+      "duration": "base.d * (1/4)",
+      "frequency": "[443].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 449,
+      "startTime": "[26].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[446].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 450,
+      "startTime": "[26].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[447].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 451,
+      "startTime": "[26].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[448].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 452,
+      "startTime": "[27].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 453,
+      "startTime": "[27].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [452].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 454,
+      "startTime": "[27].t + base.d * (1/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "2 * [452].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 455,
-      "startTime": "base.t + base.d * (227/2)",
+      "startTime": "[27].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[452].f",
+      "frequency": "(5/2) * [452].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 456,
-      "startTime": "base.t + base.d * (455/4)",
+      "startTime": "[27].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[453].f",
+      "frequency": "(32/9) * [452].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 457,
-      "startTime": "[449].t + [449].d",
-      "duration": "base.d * 2",
-      "frequency": "[449].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 458,
-      "startTime": "base.t + base.d * (457/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[450].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 459,
-      "startTime": "base.t + base.d * (229/2)",
+      "startTime": "[27].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[454].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 460,
-      "startTime": "base.t + base.d * (459/4)",
+      "id": 458,
+      "startTime": "[27].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[455].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 461,
-      "startTime": "base.t + base.d * 115",
+      "id": 459,
+      "startTime": "[27].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[456].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 460,
+      "startTime": "[452].t + [452].d",
+      "duration": "base.d * 2",
+      "frequency": "[452].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 461,
+      "startTime": "[27].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[453].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 462,
-      "startTime": "base.t + base.d * (461/4)",
+      "startTime": "[27].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[459].f",
+      "frequency": "[457].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 463,
-      "startTime": "base.t + base.d * (231/2)",
+      "startTime": "[27].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[460].f",
+      "frequency": "[458].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 464,
-      "startTime": "base.t + base.d * (463/4)",
+      "startTime": "[27].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[461].f",
+      "frequency": "[459].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 465,
-      "startTime": "[457].t + [457].d",
+      "startTime": "[27].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[462].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 466,
+      "startTime": "[27].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[463].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 467,
+      "startTime": "[27].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[464].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 468,
+      "startTime": "[28].t",
       "duration": "base.d * 2",
       "frequency": "(3/8) * base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 466,
-      "startTime": "base.t + base.d * (465/4)",
+      "id": 469,
+      "startTime": "[28].t + base.d * (1/4)",
       "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [465].f",
+      "frequency": "(3/5) * base.f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 467,
-      "startTime": "base.t + base.d * (233/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [465].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 468,
-      "startTime": "base.t + base.d * (467/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(8/3) * [465].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 469,
-      "startTime": "base.t + base.d * 117",
-      "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [465].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
       "id": 470,
-      "startTime": "base.t + base.d * (469/4)",
+      "startTime": "[28].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[467].f",
+      "frequency": "(27/32) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 471,
-      "startTime": "base.t + base.d * (235/2)",
+      "startTime": "[28].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[468].f",
+      "frequency": "base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 472,
-      "startTime": "base.t + base.d * (471/4)",
+      "startTime": "[28].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[469].f",
+      "frequency": "(45/32) * base.f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 473,
-      "startTime": "[465].t + [465].d",
-      "duration": "base.d * 2",
-      "frequency": "[465].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 474,
-      "startTime": "base.t + base.d * (473/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[466].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 475,
-      "startTime": "base.t + base.d * (237/2)",
+      "startTime": "[28].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[470].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 476,
-      "startTime": "base.t + base.d * (475/4)",
+      "id": 474,
+      "startTime": "[28].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[471].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 477,
-      "startTime": "base.t + base.d * 119",
+      "id": 475,
+      "startTime": "[28].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[472].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 476,
+      "startTime": "[468].t + [468].d",
+      "duration": "base.d * 2",
+      "frequency": "[468].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 477,
+      "startTime": "[28].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[469].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 478,
-      "startTime": "base.t + base.d * (477/4)",
+      "startTime": "[28].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[475].f",
+      "frequency": "[473].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 479,
-      "startTime": "base.t + base.d * (239/2)",
+      "startTime": "[28].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[476].f",
+      "frequency": "[474].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 480,
-      "startTime": "base.t + base.d * (479/4)",
+      "startTime": "[28].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[477].f",
+      "frequency": "[475].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 481,
-      "startTime": "[473].t + [473].d",
+      "startTime": "[28].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[478].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 482,
+      "startTime": "[28].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[479].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 483,
+      "startTime": "[28].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[480].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 484,
+      "startTime": "[29].t",
       "duration": "base.d * 2",
       "frequency": "(3/8) * base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 482,
-      "startTime": "base.t + base.d * (481/4)",
+      "id": 485,
+      "startTime": "[29].t + base.d * (1/4)",
       "duration": "base.d * (7/4)",
-      "frequency": "(3/2) * [481].f",
+      "frequency": "(5/8) * base.f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 483,
-      "startTime": "base.t + base.d * (241/2)",
-      "duration": "base.d * (1/4)",
-      "frequency": "2 * [481].f",
-      "color": "hsla(135, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 484,
-      "startTime": "base.t + base.d * (483/4)",
-      "duration": "base.d * (1/4)",
-      "frequency": "(5/2) * [481].f",
-      "color": "hsla(280, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 485,
-      "startTime": "base.t + base.d * 121",
-      "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [481].f",
-      "color": "hsla(350, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
       "id": 486,
-      "startTime": "base.t + base.d * (485/4)",
+      "startTime": "[29].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[483].f",
+      "frequency": "(3/4) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 487,
-      "startTime": "base.t + base.d * (243/2)",
+      "startTime": "[29].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[484].f",
+      "frequency": "base.f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 488,
-      "startTime": "base.t + base.d * (487/4)",
+      "startTime": "[29].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[485].f",
+      "frequency": "(3/2) * [487].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 489,
-      "startTime": "[481].t + [481].d",
-      "duration": "base.d * 2",
-      "frequency": "[481].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 490,
-      "startTime": "base.t + base.d * (489/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[482].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 491,
-      "startTime": "base.t + base.d * (245/2)",
+      "startTime": "[29].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[486].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 492,
-      "startTime": "base.t + base.d * (491/4)",
+      "id": 490,
+      "startTime": "[29].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[487].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 493,
-      "startTime": "base.t + base.d * 123",
+      "id": 491,
+      "startTime": "[29].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[488].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 492,
+      "startTime": "[484].t + [484].d",
+      "duration": "base.d * 2",
+      "frequency": "[484].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 493,
+      "startTime": "[29].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[485].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 494,
-      "startTime": "base.t + base.d * (493/4)",
+      "startTime": "[29].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[491].f",
+      "frequency": "[489].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 495,
-      "startTime": "base.t + base.d * (247/2)",
+      "startTime": "[29].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[492].f",
+      "frequency": "[490].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 496,
-      "startTime": "base.t + base.d * (495/4)",
+      "startTime": "[29].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[493].f",
+      "frequency": "[491].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 497,
-      "startTime": "[489].t + [489].d",
-      "duration": "base.d * 2",
-      "frequency": "(1/4) * base.f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 498,
-      "startTime": "base.t + base.d * (497/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "2 * [497].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 499,
-      "startTime": "base.t + base.d * (249/2)",
+      "startTime": "[29].t + base.d * (13/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "3 * [497].f",
+      "frequency": "[494].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 500,
-      "startTime": "base.t + base.d * (499/4)",
+      "id": 498,
+      "startTime": "[29].t + base.d * (7/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "(32/9) * [497].f",
+      "frequency": "[495].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 501,
-      "startTime": "base.t + base.d * 125",
+      "id": 499,
+      "startTime": "[29].t + base.d * (15/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "5 * [497].f",
+      "frequency": "[496].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 500,
+      "startTime": "[30].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 501,
+      "startTime": "[30].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [500].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 502,
-      "startTime": "base.t + base.d * (501/4)",
+      "startTime": "[30].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[499].f",
+      "frequency": "2 * [500].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 503,
-      "startTime": "base.t + base.d * (251/2)",
+      "startTime": "[30].t + base.d * (3/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[500].f",
+      "frequency": "(8/3) * [500].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 504,
-      "startTime": "base.t + base.d * (503/4)",
+      "startTime": "[30].t + base.d",
       "duration": "base.d * (1/4)",
-      "frequency": "[501].f",
+      "frequency": "(32/9) * [500].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 505,
-      "startTime": "[497].t + [497].d",
-      "duration": "base.d * 2",
-      "frequency": "[497].f",
-      "color": "hsla(210, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 506,
-      "startTime": "base.t + base.d * (505/4)",
-      "duration": "base.d * (7/4)",
-      "frequency": "[498].f",
-      "color": "hsla(28, 70%, 60%, 0.75)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 507,
-      "startTime": "base.t + base.d * (253/2)",
+      "startTime": "[30].t + base.d * (5/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[502].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 508,
-      "startTime": "base.t + base.d * (507/4)",
+      "id": 506,
+      "startTime": "[30].t + base.d * (3/2)",
       "duration": "base.d * (1/4)",
       "frequency": "[503].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 509,
-      "startTime": "base.t + base.d * 127",
+      "id": 507,
+      "startTime": "[30].t + base.d * (7/4)",
       "duration": "base.d * (1/4)",
       "frequency": "[504].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
+      "id": 508,
+      "startTime": "[500].t + [500].d",
+      "duration": "base.d * 2",
+      "frequency": "[500].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 509,
+      "startTime": "[30].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[501].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
       "id": 510,
-      "startTime": "base.t + base.d * (509/4)",
+      "startTime": "[30].t + base.d * (5/2)",
       "duration": "base.d * (1/4)",
-      "frequency": "[507].f",
+      "frequency": "[505].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 511,
-      "startTime": "base.t + base.d * (255/2)",
+      "startTime": "[30].t + base.d * (11/4)",
       "duration": "base.d * (1/4)",
-      "frequency": "[508].f",
+      "frequency": "[506].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 512,
-      "startTime": "base.t + base.d * (511/4)",
+      "startTime": "[30].t + base.d * 3",
       "duration": "base.d * (1/4)",
-      "frequency": "[509].f",
+      "frequency": "[507].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
       "id": 513,
-      "startTime": "[505].t + [505].d",
+      "startTime": "[30].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[510].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 514,
+      "startTime": "[30].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[511].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 515,
+      "startTime": "[30].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[512].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 516,
+      "startTime": "[31].t",
+      "duration": "base.d * 2",
+      "frequency": "(3/8) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 517,
+      "startTime": "[31].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "(3/2) * [516].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 518,
+      "startTime": "[31].t + base.d * (1/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "2 * [516].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 519,
+      "startTime": "[31].t + base.d * (3/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "(5/2) * [516].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 520,
+      "startTime": "[31].t + base.d",
+      "duration": "base.d * (1/4)",
+      "frequency": "(32/9) * [516].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 521,
+      "startTime": "[31].t + base.d * (5/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[518].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 522,
+      "startTime": "[31].t + base.d * (3/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[519].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 523,
+      "startTime": "[31].t + base.d * (7/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[520].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 524,
+      "startTime": "[516].t + [516].d",
+      "duration": "base.d * 2",
+      "frequency": "[516].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 525,
+      "startTime": "[31].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[517].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 526,
+      "startTime": "[31].t + base.d * (5/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[521].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 527,
+      "startTime": "[31].t + base.d * (11/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[522].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 528,
+      "startTime": "[31].t + base.d * 3",
+      "duration": "base.d * (1/4)",
+      "frequency": "[523].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 529,
+      "startTime": "[31].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[526].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 530,
+      "startTime": "[31].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[527].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 531,
+      "startTime": "[31].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[528].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 532,
+      "startTime": "[32].t",
+      "duration": "base.d * 2",
+      "frequency": "(1/4) * base.f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 533,
+      "startTime": "[32].t + base.d * (1/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "2 * [532].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 534,
+      "startTime": "[32].t + base.d * (1/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "3 * [532].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 535,
+      "startTime": "[32].t + base.d * (3/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "(32/9) * [532].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 536,
+      "startTime": "[32].t + base.d",
+      "duration": "base.d * (1/4)",
+      "frequency": "5 * [532].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 537,
+      "startTime": "[32].t + base.d * (5/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[534].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 538,
+      "startTime": "[32].t + base.d * (3/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[535].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 539,
+      "startTime": "[32].t + base.d * (7/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[536].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 540,
+      "startTime": "[532].t + [532].d",
+      "duration": "base.d * 2",
+      "frequency": "[532].f",
+      "color": "hsla(210, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 541,
+      "startTime": "[32].t + base.d * (9/4)",
+      "duration": "base.d * (7/4)",
+      "frequency": "[533].f",
+      "color": "hsla(28, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 542,
+      "startTime": "[32].t + base.d * (5/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[537].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 543,
+      "startTime": "[32].t + base.d * (11/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[538].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 544,
+      "startTime": "[32].t + base.d * 3",
+      "duration": "base.d * (1/4)",
+      "frequency": "[539].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 545,
+      "startTime": "[32].t + base.d * (13/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[542].f",
+      "color": "hsla(135, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 546,
+      "startTime": "[32].t + base.d * (7/2)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[543].f",
+      "color": "hsla(280, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 547,
+      "startTime": "[32].t + base.d * (15/4)",
+      "duration": "base.d * (1/4)",
+      "frequency": "[544].f",
+      "color": "hsla(350, 70%, 60%, 0.75)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 548,
+      "startTime": "[33].t",
       "duration": "base.d * 4",
       "frequency": "(1/4) * base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 514,
-      "startTime": "base.t + base.d * (513/4)",
+      "id": 549,
+      "startTime": "[33].t + base.d * (1/4)",
       "duration": "base.d * (15/4)",
       "frequency": "(1/2) * base.f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 515,
-      "startTime": "base.t + base.d * (257/2)",
+      "id": 550,
+      "startTime": "[33].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
       "frequency": "(2/3) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 516,
-      "startTime": "[515].t + [515].d",
+      "id": 551,
+      "startTime": "[550].t + [550].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [515].f",
+      "frequency": "(5/4) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 517,
-      "startTime": "[516].t + [516].d",
+      "id": 552,
+      "startTime": "[551].t + [551].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [515].f",
+      "frequency": "(3/2) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 518,
-      "startTime": "[517].t + [517].d",
+      "id": 553,
+      "startTime": "[552].t + [552].d",
       "duration": "base.d * (1/4)",
-      "frequency": "2 * [515].f",
+      "frequency": "2 * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 519,
-      "startTime": "[518].t + [518].d",
+      "id": 554,
+      "startTime": "[553].t + [553].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [515].f",
+      "frequency": "(3/2) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 520,
-      "startTime": "[519].t + [519].d",
+      "id": 555,
+      "startTime": "[554].t + [554].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [515].f",
+      "frequency": "(5/4) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 521,
-      "startTime": "[520].t + [520].d",
+      "id": 556,
+      "startTime": "[555].t + [555].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [515].f",
+      "frequency": "(3/2) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 522,
-      "startTime": "[521].t + [521].d",
+      "id": 557,
+      "startTime": "[556].t + [556].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [515].f",
+      "frequency": "(5/4) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 523,
-      "startTime": "[522].t + [522].d",
+      "id": 558,
+      "startTime": "[557].t + [557].d",
       "duration": "base.d * (1/4)",
-      "frequency": "[515].f",
+      "frequency": "[550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 524,
-      "startTime": "[523].t + [523].d",
+      "id": 559,
+      "startTime": "[558].t + [558].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [515].f",
+      "frequency": "(5/4) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 525,
-      "startTime": "[524].t + [524].d",
+      "id": 560,
+      "startTime": "[559].t + [559].d",
       "duration": "base.d * (1/4)",
-      "frequency": "[515].f",
+      "frequency": "[550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 526,
-      "startTime": "[525].t + [525].d",
+      "id": 561,
+      "startTime": "[560].t + [560].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/6) * [515].f",
+      "frequency": "(5/6) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 527,
-      "startTime": "[526].t + [526].d",
+      "id": 562,
+      "startTime": "[561].t + [561].d",
       "duration": "base.d * (1/4)",
-      "frequency": "[515].f",
+      "frequency": "[550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 528,
-      "startTime": "[527].t + [527].d",
+      "id": 563,
+      "startTime": "[562].t + [562].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/6) * [515].f",
+      "frequency": "(5/6) * [550].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 529,
-      "startTime": "[513].t + [513].d",
+      "id": 564,
+      "startTime": "[34].t",
       "duration": "base.d * 4",
       "frequency": "(1/4) * base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 530,
-      "startTime": "base.t + base.d * (529/4)",
+      "id": 565,
+      "startTime": "[34].t + base.d * (1/4)",
       "duration": "base.d * (15/4)",
       "frequency": "(15/32) * base.f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 531,
-      "startTime": "base.t + base.d * (265/2)",
+      "id": 566,
+      "startTime": "[34].t + base.d * (1/2)",
       "duration": "base.d * (1/4)",
       "frequency": "(3/2) * base.f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 532,
-      "startTime": "[531].t + [531].d",
+      "id": 567,
+      "startTime": "[566].t + [566].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [531].f",
+      "frequency": "(5/4) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 533,
-      "startTime": "[532].t + [532].d",
+      "id": 568,
+      "startTime": "[567].t + [567].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [531].f",
+      "frequency": "(3/2) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 534,
-      "startTime": "[533].t + [533].d",
+      "id": 569,
+      "startTime": "[568].t + [568].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(16/9) * [531].f",
+      "frequency": "(16/9) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 535,
-      "startTime": "[534].t + [534].d",
+      "id": 570,
+      "startTime": "[569].t + [569].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [531].f",
+      "frequency": "(3/2) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 536,
-      "startTime": "[535].t + [535].d",
+      "id": 571,
+      "startTime": "[570].t + [570].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [531].f",
+      "frequency": "(5/4) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 537,
-      "startTime": "[536].t + [536].d",
+      "id": 572,
+      "startTime": "[571].t + [571].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/2) * [531].f",
+      "frequency": "(3/2) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 538,
-      "startTime": "[537].t + [537].d",
+      "id": 573,
+      "startTime": "[572].t + [572].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [531].f",
+      "frequency": "(5/4) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 539,
-      "startTime": "[538].t + [538].d",
+      "id": 574,
+      "startTime": "[573].t + [573].d",
       "duration": "base.d * (1/4)",
-      "frequency": "[531].f",
+      "frequency": "[566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 540,
-      "startTime": "[539].t + [539].d",
+      "id": 575,
+      "startTime": "[574].t + [574].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/4) * [531].f",
+      "frequency": "(5/4) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 541,
-      "startTime": "[540].t + [540].d",
+      "id": 576,
+      "startTime": "[575].t + [575].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/4) * [531].f",
+      "frequency": "(3/4) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 542,
-      "startTime": "[541].t + [541].d",
+      "id": 577,
+      "startTime": "[576].t + [576].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(8/9) * [531].f",
+      "frequency": "(8/9) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 543,
-      "startTime": "[542].t + [542].d",
+      "id": 578,
+      "startTime": "[577].t + [577].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/6) * [531].f",
+      "frequency": "(5/6) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 544,
-      "startTime": "[543].t + [543].d",
+      "id": 579,
+      "startTime": "[578].t + [578].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(3/4) * [531].f",
+      "frequency": "(3/4) * [566].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 545,
-      "startTime": "[529].t + [529].d",
+      "id": 580,
+      "startTime": "[35].t",
       "duration": "base.d * 4",
       "frequency": "(1/4) * base.f",
       "color": "hsla(210, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 546,
-      "startTime": "[530].t + [530].d",
+      "id": 581,
+      "startTime": "[35].t",
       "duration": "base.d * 4",
-      "frequency": "2 * [545].f",
+      "frequency": "2 * [580].f",
       "color": "hsla(28, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 547,
-      "startTime": "[544].t + [544].d",
+      "id": 582,
+      "startTime": "[35].t",
       "duration": "base.d * 4",
-      "frequency": "5 * [545].f",
+      "frequency": "5 * [580].f",
       "color": "hsla(135, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 548,
-      "startTime": "base.t + base.d * 136",
+      "id": 583,
+      "startTime": "[35].t",
       "duration": "base.d * 4",
-      "frequency": "6 * [545].f",
+      "frequency": "6 * [580].f",
       "color": "hsla(280, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     },
     {
-      "id": 549,
-      "startTime": "base.t + base.d * 136",
+      "id": 584,
+      "startTime": "[35].t",
       "duration": "base.d * 4",
-      "frequency": "8 * [545].f",
+      "frequency": "8 * [580].f",
       "color": "hsla(350, 70%, 60%, 0.75)",
       "instrument": "sine-wave"
     }

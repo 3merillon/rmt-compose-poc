@@ -11,6 +11,7 @@ export type ScoreFields = Partial<Record<ExpressionName, string>> & {
   instrument?: string;
   repeat?: string;
   measure?: boolean;
+  timeSignature?: string; // Written meter on a measure bar, e.g. 6/8 for three quarter-note units.
 };
 export type ScoreNote = ScoreFields & { id: NoteId };
 export interface Score {

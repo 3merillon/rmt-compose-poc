@@ -87,8 +87,9 @@ These three keys were removed. A module that still has them is converted exactly
 | `color` | CSS color string | no | e.g. `"rgba(242,167,27,0.7)"`. |
 | `instrument` | instrument name | no | When absent, the note takes the instrument of its player (see [Instruments](#instruments)). |
 | `measure` | `true` | no | Marks a silent note as a [measure bar](#measure-bars). Any other value is read as absent. Written only when `true`. |
+| `timeSignature` | string | no | Written meter on a measure bar, such as `"6/8"`. MIDI export uses this grouping when it matches the bar duration. |
 
-The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release`. The first three are the language; the last three are interpretation. The **non-expression keys** are `id`, `color`, `instrument` and `measure`. Anything else in a note object is ignored.
+The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release`. The first three are the language; the last three are interpretation. The **non-expression keys** are `id`, `color`, `instrument`, `measure` and `timeSignature`. Anything else in a note object is ignored.
 
 ### Note kinds
 
@@ -128,7 +129,7 @@ The first bar is four time units long. Each next bar starts where the previous o
 
 ### A meter change
 
-A different bar length is a different meter. Give one bar its own duration, and the bars after it follow, because each reads the one before:
+Give one bar its own duration to change its length. The following bars in the chain take their duration from it.
 
 ```json
 { "id": 1, "startTime": "base.t", "duration": "base.d * 4", "measure": true },
@@ -136,7 +137,7 @@ A different bar length is a different meter. Give one bar its own duration, and 
 { "id": 3, "startTime": "[2].t + [2].d", "duration": "[2].d", "measure": true }
 ```
 
-Bar 1 is four time units, bars 2 and 3 are three. There is no time-signature object: a meter is a bar length. In the bar's widget the duration row reads **duration (bar length)** and shows the length in time units, for example `= 3 time units`.
+Bar 1 lasts four time units. Bars 2 and 3 last three. The same three units can be grouped as 3/4 or 6/8. A measure with `"timeSignature": "6/8"` records the second grouping. In the bar's widget the duration row reads **duration (bar length)** and shows the length in time units, for example `= 3 time units`.
 
 ### Bar, silence or marker
 
@@ -150,8 +151,8 @@ Bar 1 is four time units, bars 2 and 3 are three. There is no time-signature obj
 
 - Dragging a bar's triangle changes the **previous** bar's length; the dragged bar keeps its own.
 - The module ends at the larger of the last bar's start plus its duration, and the last note's end.
-- Dropping a library module on a bar maps `t` and `d` to the bar, and leaves frequency, amplitude, attack and release with the BaseNote.
-- MIDI export writes the first bar's length in time units as the time signature (4 as 4/4, 7/2 as 7/8), and none when there is no bar or the length cannot be a signature. See [Exporting MIDI](/user-guide/modules/exporting-midi).
+- When you drop a module on a bar, `base.t` follows the chosen edge of the target bar. The time unit `base.d` and the other BaseNote fields stay with the workspace BaseNote. Any bars in the module keep their own durations and internal references.
+- MIDI export uses the first bar's written meter if it fits the bar length. Otherwise it infers a meter from the duration (4 gives 4/4, 7/2 gives 7/8). If there is no bar or its length has no representable signature, MIDI export omits the time signature. See [Exporting MIDI](/user-guide/modules/exporting-midi).
 
 ## Expression strings
 
@@ -293,9 +294,9 @@ Shipped sections and counts:
 | `progressions` | Progressions | 8 |
 | `melodies` | Melodies | 7 |
 | `scale-systems` | Scale Systems | 6 |
-| `custom` | Custom | 1 |
+| `custom` | Custom | 5 |
 
-**81 modules in total.** `npm test` validates every one of them: structure, expression syntax, self-containment (every `[N]` reference resolves inside the same file), finite evaluation, and — for single-note interval modules — that the evaluated frequency really is `ratio × base` and that `cents` really is `1200·log2(ratio)`.
+**83 modules in total.** `npm test` validates every one of them: structure, expression syntax, self-containment (every `[N]` reference resolves inside the same file), finite evaluation, and — for single-note interval modules — that the evaluated frequency really is `ratio × base` and that `cents` really is `1200·log2(ratio)`.
 
 Self-containment is what makes a library module droppable: on import, its note id 0 is remapped onto the note you dropped it on, and its internal ids are renumbered above the current maximum.
 

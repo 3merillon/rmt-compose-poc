@@ -1,6 +1,6 @@
 ---
 title: Building a Module Library
-description: How the shipped 81-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
+description: How the shipped 83-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
 ---
 
 # Building a Module Library
@@ -10,7 +10,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 
 ## What ships
 
-**81 modules in six sections.**
+**83 modules in six sections.**
 
 | Section | Modules | What's in it |
 |---|---|---|

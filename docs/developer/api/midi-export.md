@@ -55,8 +55,10 @@ and the export writes it as **one quarter note**, which makes the tempo `60 / ba
 of `1/2` writes 120 BPM). A BaseNote duration that is not positive writes 60 BPM.
 
 The time signature comes from the **first measure bar**, the one with the earliest start (a note
-for which `isMeasureNote()` is true). Its duration in time units is the numerator over a quarter-
-note denominator: a bar of `base.d * 4` writes 4/4, a bar of `base.d * 7/2` writes 7/8. Later bars
+for which `isMeasureNote()` is true). A written `"timeSignature": "6/8"` on a bar lasting
+three quarter-note units preserves the compound grouping and sets a dotted-quarter metronome
+click. When the spelling is absent, invalid or inconsistent with the duration, the exporter
+derives a meter from the duration. Four units give 4/4 and seven half units give 7/8. Later bars
 do not add meter changes; the file has one time signature. **No time signature is written** when
 the module has no measure bar, or when the first bar's length cannot be written as one (a length
 such as 5/3 time units, or more than 255). Only the second case adds a warning.

@@ -39,7 +39,9 @@
  *            stored as 909091 µs = 65.999993 BPM).
  *   Pitch    The bend is rounded to one of 16384 steps across ± the bend
  *            range. With the default range of 2 semitones a step is 0.0244
- *            cent, so every note is within 0.0123 cent of its exact frequency.
+ *            cent. For pitches within the MIDI key range, the error is at most
+ *            half a step (0.0123 cent). Beyond key 127 the positive bend limit
+ *            is one step short of the full range.
  *   Loudness velocity = 64 × √amplitude, rounded, kept within 1..127. That is
  *            the inverse of the DLS velocity response (gain ∝ velocity²),
  *            with amplitude 1 on MIDI's own "no velocity information" value,
@@ -244,10 +246,12 @@ export function planMidi(module: Module, options: MidiOptions = {}) {
     if (!isMeasureNote(n)) continue;
     const r = cache.get(n.id);
     const t = r && asFraction(r.startTime);
-    if (t && (!firstBar || t.compare(firstBar.t) < 0)) firstBar = { t, d: asFraction(r.duration) };
+    if (t && (!firstBar || t.compare(firstBar.t) < 0)) {
+      firstBar = { t, d: asFraction(r.duration), signature: n.properties.timeSignature };
+    }
   }
   const barUnits = firstBar && firstBar.d ? firstBar.d.mul(exactTempo).div(60) : null;
-  const timeSignature = timeSignatureFor(barUnits);
+  const timeSignature = timeSignatureFor(barUnits, firstBar?.signature);
 
   // --- notes -------------------------------------------------------------------
   const skipped: Record<SkipReason, number[]> = { silent: [], noPitch: [], outOfRange: [], noLength: [], beforeStart: [] };
@@ -519,8 +523,18 @@ function maxPolyphony(notes: MidiNote[]) {
  * A bar length in time units as a MIDI time signature over a quarter-note beat: 4 -> 4/4,
  * 7/2 -> 7/8. Null when it has no such form (5/3 beats, more than 255 beats).
  */
-function timeSignatureFor(beats: Fraction | null) {
+function timeSignatureFor(beats: Fraction | null, spelling?: string | null) {
   if (!beats || beats.compare(0) <= 0) return null;
+  // 3/4 and 6/8 span the same three quarter notes. Keep the written grouping
+  // while it still fits the bar; editing the bar length can invalidate it.
+  const written = spelling?.match(/^([1-9][0-9]{0,2})\/([1-9][0-9]{0,2})$/);
+  if (written) {
+    const numerator = Number(written[1]), denominator = Number(written[2]);
+    if (numerator <= 255 && Number.isInteger(Math.log2(denominator)) &&
+        beats.equals(new Fraction(4 * numerator, denominator))) {
+      return { numerator, denominator };
+    }
+  }
   const n = beats.s * beats.n, d = beats.d;
   for (const [den, mul] of [[4, 1n], [8, 2n], [16, 4n], [32, 8n], [64, 16n]] as const) {
     if (mul % d === 0n) {
@@ -584,8 +598,9 @@ function conductorTrack(plan: MidiPlan) {
     : `RMT Compose export: one note per channel (never channel 10), pitch-bend range +/-${plan.bendRange} semitones`)));
   if (plan.timeSignature) {
     const { numerator, denominator } = plan.timeSignature;
-    // nn, dd as a power of two, 24 MIDI clocks per click, 8 thirty-second notes per quarter
-    at(0, meta(0x58, [numerator, Math.log2(denominator), 24, 8]));
+    // Six or more eighths grouped in threes take a dotted-quarter click.
+    const clocksPerClick = denominator === 8 && numerator >= 6 && numerator % 3 === 0 ? 36 : 24;
+    at(0, meta(0x58, [numerator, Math.log2(denominator), clocksPerClick, 8]));
   }
   at(0, meta(0x51, [(plan.usPerQuarter >> 16) & 0xFF, (plan.usPerQuarter >> 8) & 0xFF, plan.usPerQuarter & 0xFF]));
   return serializeTrack(events, plan.endTick);

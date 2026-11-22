@@ -29,6 +29,7 @@
  */
 import { isLibraryManifest } from '../src/library/manifest.ts';
 import { required } from './fixtures/required.ts';
+import { buildModuleFromSelection } from '../src/utils/copy-selection.ts';
 import type { ScoreNote, ScoreFields } from '../src/model-types.ts';
 import type { Module as ScoreModule } from '../src/module.ts';
 import { readFileSync, existsSync } from 'node:fs';
@@ -465,6 +466,25 @@ console.log('\nMIDI export: time\n');
     [...notes, { id: 999, startTime: 'base.t', duration: 'base.d * (7/2)', measure: true }]));
   check(v.problems.length === 0 && v.file.usPerQuarter === 909091 && required(v.file.timeSignature).numerator === 7 && required(v.file.timeSignature).denominator === 8,
     `base.d = 10/11 s (66 BPM) is stored as 909091 µs/quarter and a bar of base.d * (7/2) as 7/8; module clock off by ≤ ${v.maxDriftMs.toFixed(4)} ms`);
+
+  const compound = await build(BASE, [{ id: 27, startTime: 'base.t', duration: 'base.d * 3',
+    measure: true, timeSignature: '6/8' }]);
+  const reopened = await Module.loadFromJSON(JSON.parse(await compound.exportOrderedModule()));
+  const bar = reopened.notes[1];
+  check(bar.properties.timeSignature === '6/8' && reopened.createModuleJSONString() === JSON.stringify(reopened.createModuleJSON()),
+    'the written meter survives save, reindex and reload');
+  const [nextBar] = reopened.generateMeasures(bar, 1);
+  const selection = buildModuleFromSelection(reopened, [nextBar.id]);
+  check(selection?.notes[0]?.timeSignature === '6/8', 'appending a measure and copying it retains the written meter');
+  const signatureEvent = () => parseSmf(encodeMidi(planMidi(reopened))).tracks.flat().find(e => e.meta === 0x58);
+  check(signatureEvent()?.data?.join() === '6,3,36,8', '6/8 keeps its six eighths and dotted-quarter metronome click');
+  bar.setVariable('timeSignature', '3/4');
+  check(signatureEvent()?.data?.join() === '3,2,24,8' && reopened.createModuleJSONString().includes('"timeSignature":"3/4"'),
+    'a different spelling of the same duration updates both MIDI export and saved text');
+  bar.setVariable('timeSignature', '9/8');
+  check(signatureEvent()?.data?.join() === '3,2,24,8', 'a stale meter falls back to the actual bar duration');
+  bar.setVariable('timeSignature', '6/7');
+  check(signatureEvent()?.data?.join() === '3,2,24,8', 'an invalid denominator falls back to the actual bar duration');
 
   // The edges of the grid. The report counts a note only when it is written.
   const plan = planMidi(await build(BASE, [
