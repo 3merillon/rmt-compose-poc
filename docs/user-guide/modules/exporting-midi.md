@@ -56,11 +56,11 @@ Use a player that honors independent per-channel pitch bends and program changes
 | `harmonium-soft` | 1 Acoustic Grand Piano (fallback) |
 | `violin` | 41 Violin |
 | `triangle-wave` | 74 Flute |
-| `sine-wave` | 80 Ocarina |
+| `sine-wave` | 21 Reed Organ |
 | `square-wave` | 81 Lead 1 (square) |
 | `sawtooth-wave` | 82 Lead 2 (sawtooth) |
 
-These are the nearest General MIDI sounds, not the app's own; how they sound depends on the player's sound set.
+These are the nearest General MIDI sounds, not the app's own; how they sound depends on the player's sound set. General MIDI has no sine, so `sine-wave` exports as the reed organ: its Ocarina breathes at every note, and a piano adds strings tuned in twelve equal steps.
 
 ::: warning In a DAW
 A track holds one instrument's notes, but spread over many channels. Give the track an instrument that listens on all channels with a bend of its own per channel — a multitimbral General MIDI synth, or an MPE instrument with its bend range at 2 semitones. An instrument that listens on one channel plays only part of the track.

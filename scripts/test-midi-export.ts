@@ -208,7 +208,7 @@ const centsBetween = (a: number, b: number) => 1200 * Math.abs(Math.log2(a / b))
 
 /** General MIDI programs (0-based), written out here independently of the exporter. */
 const PROGRAMS: Record<string, number> = { 'piano': 0, 'fm-epiano': 5, 'vibraphone': 11, 'organ': 19, 'harmonium': 20, 'violin': 40,
-  'triangle-wave': 73, 'sine-wave': 79, 'square-wave': 80, 'sawtooth-wave': 81 };
+  'triangle-wave': 73, 'sine-wave': 20, 'square-wave': 80, 'sawtooth-wave': 81 };
 
 /**
  * Export `mod`, parse the bytes back, and compare note by note.

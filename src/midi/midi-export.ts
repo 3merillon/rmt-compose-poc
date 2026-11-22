@@ -123,7 +123,10 @@ const GM_PROGRAMS: Readonly<Record<string, number>> = Object.freeze({
   'harmonium': 20,      // Reed Organ
   'violin': 40,         // Violin
   'triangle-wave': 73,  // Flute
-  'sine-wave': 79,      // Ocarina
+  // General MIDI has no sine. Ocarina (79) breathes at every note and a piano adds
+  // strings tuned in twelve equal steps; a free reed is steady, with overtones that
+  // are exact multiples of the note.
+  'sine-wave': 20,      // Reed Organ
   'square-wave': 80,    // Lead 1 (square)
   'sawtooth-wave': 81,  // Lead 2 (sawtooth)
 });
