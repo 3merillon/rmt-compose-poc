@@ -9,7 +9,7 @@
       "id": 1,
       "startTime": "(base.t)",
       "duration": "base.d * 2",
-      "frequency": "(9/16) * base.f",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(128,128,128,0.7)"
     },
     {

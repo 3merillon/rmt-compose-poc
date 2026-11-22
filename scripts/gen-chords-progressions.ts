@@ -157,22 +157,24 @@ for (const c of CHORDS) {
 // Octaves displace the sounding root, third, fifth, then seventh or doubled root.
 // The V7 cadences put the fifth in the bass. It steps down to I while the
 // seventh falls to the third, the leading tone rises, and the dominant holds.
+// Every I in root position stands on base itself (octave 0): dropped on a note, the
+// progression resolves onto that note in the bass.
 // `expectRoots` lists the intended ABSOLUTE root ratios for the self-check.
 const PROGS: {file: string; name: string; tags: string[]; chords: Chord[]; expectRoots: string[]}[] = [
   {
     file: 'V7-I.json', name: 'V7 – I', tags: ['progression', 'dominant', 'authentic'],
     chords: [
-      { shapeKey: 'harm7', root: [3, 2], beats: 2, octaves: [-1, -1, -2, -1] },
-      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [-1, 0, -1, -1] },
+      { shapeKey: 'harm7', root: [3, 2], beats: 2, octaves: [0, 0, -1, 0] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [0, 1, 0, 0] },
     ],
     expectRoots: ['3/2', '1/1'],
   },
   {
     file: 'ii-V-I.json', name: 'ii – V – I', tags: ['progression', 'cadential'],
     chords: [
-      { shapeKey: 'minor', root: [9, 8], beats: 2, octaves: [-1, -1, -1] },
-      { shapeKey: 'harm7', root: [4, 3], beats: 2, octaves: [-1, -1, -2, -1] },
-      { shapeKey: 'majOct', root: [2, 3], beats: 4, octaves: [-1, 0, -1, -1] },
+      { shapeKey: 'minor', root: [9, 8], beats: 2, octaves: [0, 0, 0] },
+      { shapeKey: 'harm7', root: [4, 3], beats: 2, octaves: [0, 0, -1, 0] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 4, octaves: [0, 1, 0, 0] },
     ],
     expectRoots: ['9/8', '3/2', '1/1'],
   },
@@ -199,16 +201,16 @@ const PROGS: {file: string; name: string; tags: string[]; chords: Chord[]; expec
   {
     file: 'authentic-cadence.json', name: 'Authentic (V–I)', tags: ['cadence', 'authentic', 'perfect'],
     chords: [
-      { shapeKey: 'major', root: [3, 2], beats: 2, octaves: [-1, -1, -1] },
-      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [-1, 0, -1, -1] },
+      { shapeKey: 'major', root: [3, 2], beats: 2, octaves: [0, 0, 0] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [0, 1, 0, 0] },
     ],
     expectRoots: ['3/2', '1/1'],
   },
   {
     file: 'plagal-cadence.json', name: 'Plagal (IV–I)', tags: ['cadence', 'plagal', 'amen'],
     chords: [
-      { shapeKey: 'major', root: [4, 3], beats: 2, octaves: [-1, 0, -1] },
-      { shapeKey: 'majOct', root: [3, 4], beats: 2, octaves: [-1, -1, 0, -1] },
+      { shapeKey: 'major', root: [4, 3], beats: 2, octaves: [0, 1, 0] },
+      { shapeKey: 'majOct', root: [3, 4], beats: 2, octaves: [0, 0, 1, 0] },
     ],
     expectRoots: ['4/3', '1/1'],
   },
