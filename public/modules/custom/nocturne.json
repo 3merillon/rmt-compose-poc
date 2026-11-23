@@ -1,0 +1,3448 @@
+{
+  "instrumentRule": "start-time",
+  "baseNote": {
+    "frequency": "196",
+    "startTime": "0",
+    "duration": "(3/8)"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "startTime": "base.t",
+      "duration": "base.d * (79712/12135)",
+      "measure": true
+    },
+    {
+      "id": 2,
+      "startTime": "[1].t + [1].d",
+      "duration": "base.d * (24816/4045)",
+      "measure": true
+    },
+    {
+      "id": 3,
+      "startTime": "[2].t + [2].d",
+      "duration": "base.d * (24064/4045)",
+      "measure": true
+    },
+    {
+      "id": 4,
+      "startTime": "[3].t + [3].d",
+      "duration": "base.d * (79712/12135)",
+      "measure": true
+    },
+    {
+      "id": 5,
+      "startTime": "[4].t + [4].d",
+      "duration": "base.d * (75952/12135)",
+      "measure": true
+    },
+    {
+      "id": 6,
+      "startTime": "[5].t + [5].d",
+      "duration": "base.d * (24064/4045)",
+      "measure": true
+    },
+    {
+      "id": 7,
+      "startTime": "[6].t + [6].d",
+      "duration": "base.d * (14288/2427)",
+      "measure": true
+    },
+    {
+      "id": 8,
+      "startTime": "[7].t + [7].d",
+      "duration": "base.d * (16544/2427)",
+      "measure": true
+    },
+    {
+      "id": 9,
+      "startTime": "[8].t + [8].d",
+      "duration": "base.d * (14720/2439)",
+      "measure": true
+    },
+    {
+      "id": 10,
+      "startTime": "[9].t + [9].d",
+      "duration": "base.d * (76544/12195)",
+      "measure": true
+    },
+    {
+      "id": 11,
+      "startTime": "[10].t + [10].d",
+      "duration": "base.d * (13984/2439)",
+      "measure": true
+    },
+    {
+      "id": 12,
+      "startTime": "[11].t + [11].d",
+      "duration": "base.d * (23552/4065)",
+      "measure": true
+    },
+    {
+      "id": 13,
+      "startTime": "[12].t + [12].d",
+      "duration": "base.d * (75808/12195)",
+      "measure": true
+    },
+    {
+      "id": 14,
+      "startTime": "[13].t + [13].d",
+      "duration": "base.d * (14720/2439)",
+      "measure": true
+    },
+    {
+      "id": 15,
+      "startTime": "[14].t + [14].d",
+      "duration": "base.d * (76544/12195)",
+      "measure": true
+    },
+    {
+      "id": 16,
+      "startTime": "[15].t + [15].d",
+      "duration": "base.d * (27232/4065)",
+      "measure": true
+    },
+    {
+      "id": 17,
+      "startTime": "[16].t + [16].d",
+      "duration": "base.d * (75952/12135)",
+      "measure": true
+    },
+    {
+      "id": 18,
+      "startTime": "[17].t + [17].d",
+      "duration": "base.d * (73696/12135)",
+      "measure": true
+    },
+    {
+      "id": 19,
+      "startTime": "[18].t + [18].d",
+      "duration": "base.d * (25568/4045)",
+      "measure": true
+    },
+    {
+      "id": 20,
+      "startTime": "[19].t + [19].d",
+      "duration": "base.d * (14288/2427)",
+      "measure": true
+    },
+    {
+      "id": 21,
+      "startTime": "[20].t + [20].d",
+      "duration": "base.d * (78208/12135)",
+      "measure": true
+    },
+    {
+      "id": 22,
+      "startTime": "[21].t + [21].d",
+      "duration": "base.d * (24064/4045)",
+      "measure": true
+    },
+    {
+      "id": 23,
+      "startTime": "[22].t + [22].d",
+      "duration": "base.d * (24816/4045)",
+      "measure": true
+    },
+    {
+      "id": 24,
+      "startTime": "[23].t + [23].d",
+      "duration": "base.d * (28576/4045)",
+      "measure": true
+    },
+    {
+      "id": 25,
+      "startTime": "[24].t + [24].d",
+      "duration": "base.d * (4624/805)",
+      "measure": true
+    },
+    {
+      "id": 26,
+      "startTime": "[25].t + [25].d",
+      "duration": "base.d * (4488/805)",
+      "measure": true
+    },
+    {
+      "id": 27,
+      "startTime": "[26].t + [26].d",
+      "duration": "base.d * (13192/2415)",
+      "measure": true
+    },
+    {
+      "id": 28,
+      "startTime": "[27].t + [27].d",
+      "duration": "base.d * (14008/2415)",
+      "measure": true
+    },
+    {
+      "id": 29,
+      "startTime": "[28].t + [28].d",
+      "duration": "base.d * (2720/483)",
+      "measure": true
+    },
+    {
+      "id": 30,
+      "startTime": "[29].t + [29].d",
+      "duration": "base.d * (13192/2415)",
+      "measure": true
+    },
+    {
+      "id": 31,
+      "startTime": "[30].t + [30].d",
+      "duration": "base.d * (2720/483)",
+      "measure": true
+    },
+    {
+      "id": 32,
+      "startTime": "[31].t + [31].d",
+      "duration": "base.d * (14552/2415)",
+      "measure": true
+    },
+    {
+      "id": 33,
+      "startTime": "[32].t + [32].d",
+      "duration": "base.d * (23432/4025)",
+      "measure": true
+    },
+    {
+      "id": 34,
+      "startTime": "[33].t + [33].d",
+      "duration": "base.d * (3248/575)",
+      "measure": true
+    },
+    {
+      "id": 35,
+      "startTime": "[34].t + [34].d",
+      "duration": "base.d * (22504/4025)",
+      "measure": true
+    },
+    {
+      "id": 36,
+      "startTime": "[35].t + [35].d",
+      "duration": "base.d * (24592/4025)",
+      "measure": true
+    },
+    {
+      "id": 37,
+      "startTime": "[36].t + [36].d",
+      "duration": "base.d * (22504/4025)",
+      "measure": true
+    },
+    {
+      "id": 38,
+      "startTime": "[37].t + [37].d",
+      "duration": "base.d * (928/161)",
+      "measure": true
+    },
+    {
+      "id": 39,
+      "startTime": "[38].t + [38].d",
+      "duration": "base.d * (22504/4025)",
+      "measure": true
+    },
+    {
+      "id": 40,
+      "startTime": "[39].t + [39].d",
+      "duration": "base.d * (25288/4025)",
+      "measure": true
+    },
+    {
+      "id": 41,
+      "startTime": "[40].t + [40].d",
+      "duration": "base.d * (1664/297)",
+      "measure": true
+    },
+    {
+      "id": 42,
+      "startTime": "[41].t + [41].d",
+      "duration": "base.d * (1568/297)",
+      "measure": true
+    },
+    {
+      "id": 43,
+      "startTime": "[42].t + [42].d",
+      "duration": "base.d * (512/99)",
+      "measure": true
+    },
+    {
+      "id": 44,
+      "startTime": "[43].t + [43].d",
+      "duration": "base.d * (1616/297)",
+      "measure": true
+    },
+    {
+      "id": 45,
+      "startTime": "[44].t + [44].d",
+      "duration": "base.d * (16/3)",
+      "measure": true
+    },
+    {
+      "id": 46,
+      "startTime": "[45].t + [45].d",
+      "duration": "base.d * (1520/297)",
+      "measure": true
+    },
+    {
+      "id": 47,
+      "startTime": "[46].t + [46].d",
+      "duration": "base.d * (1552/297)",
+      "measure": true
+    },
+    {
+      "id": 48,
+      "startTime": "[47].t + [47].d",
+      "duration": "base.d * (544/99)",
+      "measure": true
+    },
+    {
+      "id": 49,
+      "startTime": "[48].t + [48].d",
+      "duration": "base.d * (71104/12255)",
+      "measure": true
+    },
+    {
+      "id": 50,
+      "startTime": "[49].t + [49].d",
+      "duration": "base.d * (71104/12255)",
+      "measure": true
+    },
+    {
+      "id": 51,
+      "startTime": "[50].t + [50].d",
+      "duration": "base.d * (704/129)",
+      "measure": true
+    },
+    {
+      "id": 52,
+      "startTime": "[51].t + [51].d",
+      "duration": "base.d * (68288/12255)",
+      "measure": true
+    },
+    {
+      "id": 53,
+      "startTime": "[52].t + [52].d",
+      "duration": "base.d * (72512/12255)",
+      "measure": true
+    },
+    {
+      "id": 54,
+      "startTime": "[53].t + [53].d",
+      "duration": "base.d * (4928/817)",
+      "measure": true
+    },
+    {
+      "id": 55,
+      "startTime": "[54].t + [54].d",
+      "duration": "base.d * (71104/12255)",
+      "measure": true
+    },
+    {
+      "id": 56,
+      "startTime": "[55].t + [55].d",
+      "duration": "base.d * (1408/215)",
+      "measure": true
+    },
+    {
+      "id": 57,
+      "startTime": "[56].t + [56].d",
+      "duration": "base.d * (192/29)",
+      "measure": true
+    },
+    {
+      "id": 58,
+      "startTime": "[57].t + [57].d",
+      "duration": "base.d * (896/145)",
+      "measure": true
+    },
+    {
+      "id": 59,
+      "startTime": "[58].t + [58].d",
+      "duration": "base.d * (6336/1015)",
+      "measure": true
+    },
+    {
+      "id": 60,
+      "startTime": "[59].t + [59].d",
+      "duration": "base.d * (6848/1015)",
+      "measure": true
+    },
+    {
+      "id": 61,
+      "startTime": "[60].t + [60].d",
+      "duration": "base.d * (896/145)",
+      "measure": true
+    },
+    {
+      "id": 62,
+      "startTime": "[61].t + [61].d",
+      "duration": "base.d * (6144/1015)",
+      "measure": true
+    },
+    {
+      "id": 63,
+      "startTime": "[62].t + [62].d",
+      "duration": "base.d * (1280/203)",
+      "measure": true
+    },
+    {
+      "id": 64,
+      "startTime": "[63].t + [63].d",
+      "duration": "base.d * (6976/1015)",
+      "measure": true
+    },
+    {
+      "id": 65,
+      "startTime": "[64].t + [64].d",
+      "duration": "base.d * (25088/4005)",
+      "measure": true
+    },
+    {
+      "id": 66,
+      "startTime": "[65].t + [65].d",
+      "duration": "base.d * (4864/801)",
+      "measure": true
+    },
+    {
+      "id": 67,
+      "startTime": "[66].t + [66].d",
+      "duration": "base.d * (8704/1335)",
+      "measure": true
+    },
+    {
+      "id": 68,
+      "startTime": "[67].t + [67].d",
+      "duration": "base.d * (5120/801)",
+      "measure": true
+    },
+    {
+      "id": 69,
+      "startTime": "[68].t + [68].d",
+      "duration": "base.d * (24832/4005)",
+      "measure": true
+    },
+    {
+      "id": 70,
+      "startTime": "[69].t + [69].d",
+      "duration": "base.d * (8704/1335)",
+      "measure": true
+    },
+    {
+      "id": 71,
+      "startTime": "[70].t + [70].d",
+      "duration": "base.d * (5120/801)",
+      "measure": true
+    },
+    {
+      "id": 72,
+      "startTime": "[71].t + [71].d",
+      "duration": "base.d * (27392/4005)",
+      "measure": true
+    },
+    {
+      "id": 73,
+      "startTime": "[72].t + [72].d",
+      "duration": "base.d * (9984/1535)",
+      "measure": true
+    },
+    {
+      "id": 74,
+      "startTime": "[73].t + [73].d",
+      "duration": "base.d * (10192/1535)",
+      "measure": true
+    },
+    {
+      "id": 75,
+      "startTime": "[74].t + [74].d",
+      "duration": "base.d * (2184/307)",
+      "measure": true
+    },
+    {
+      "id": 76,
+      "startTime": "[75].t + [75].d",
+      "duration": "base.d * (11336/1535)",
+      "measure": true
+    },
+    {
+      "id": 77,
+      "startTime": "[76].t + [76].d",
+      "duration": "base.d * (10192/1535)",
+      "measure": true
+    },
+    {
+      "id": 78,
+      "startTime": "[77].t + [77].d",
+      "duration": "base.d * (11232/1535)",
+      "measure": true
+    },
+    {
+      "id": 79,
+      "startTime": "[78].t + [78].d",
+      "duration": "base.d * (4180/613)",
+      "measure": true
+    },
+    {
+      "id": 80,
+      "startTime": "[79].t + [79].d",
+      "duration": "base.d * (4356/613)",
+      "measure": true
+    },
+    {
+      "id": 81,
+      "startTime": "[80].t + [80].d",
+      "duration": "base.d * (4268/613)",
+      "measure": true
+    },
+    {
+      "id": 82,
+      "startTime": "[81].t + [81].d",
+      "duration": "base.d * (4620/613)",
+      "measure": true
+    },
+    {
+      "id": 83,
+      "startTime": "[82].t + [82].d",
+      "duration": "base.d * (4928/613)",
+      "measure": true
+    },
+    {
+      "id": 84,
+      "startTime": "[83].t + [83].d",
+      "duration": "base.d * (4620/613)",
+      "measure": true
+    },
+    {
+      "id": 85,
+      "startTime": "[84].t + [84].d",
+      "duration": "base.d * (6664/921)",
+      "measure": true
+    },
+    {
+      "id": 86,
+      "startTime": "[85].t + [85].d",
+      "duration": "base.d * (2312/307)",
+      "measure": true
+    },
+    {
+      "id": 87,
+      "startTime": "[86].t + [86].d",
+      "duration": "base.d * (2176/307)",
+      "measure": true
+    },
+    {
+      "id": 88,
+      "startTime": "[87].t + [87].d",
+      "duration": "base.d * (2244/307)",
+      "measure": true
+    },
+    {
+      "id": 89,
+      "startTime": "[88].t + [88].d",
+      "duration": "base.d * (7276/921)",
+      "measure": true
+    },
+    {
+      "id": 90,
+      "startTime": "[89].t + [89].d",
+      "duration": "base.d * (7616/921)",
+      "measure": true
+    },
+    {
+      "id": 91,
+      "startTime": "[1].t",
+      "duration": "[1].d * (7/24)",
+      "frequency": "base.f",
+      "amplitude": "(13/25)",
+      "attack": "(46113/348740)",
+      "release": "(31551/348740)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 92,
+      "startTime": "[91].t + [91].d",
+      "duration": "[1].d * (7/48)",
+      "frequency": "[91].f * (3/4)",
+      "amplitude": "(12/25)",
+      "attack": "(9708/87185)",
+      "release": "(31551/174370)",
+      "color": "#c57973"
+    },
+    {
+      "id": 93,
+      "startTime": "[92].t + [92].d",
+      "duration": "[1].d * (9/16) + [2].d * (13/48)",
+      "frequency": "[91].f * (6/5)",
+      "amplitude": "(13/25)",
+      "attack": "(6472/325005)",
+      "release": "(10517/325005)",
+      "color": "#c57973"
+    },
+    {
+      "id": 94,
+      "startTime": "[93].t + [93].d",
+      "duration": "[2].d * (1/8)",
+      "frequency": "base.f * (9/8)",
+      "amplitude": "(57/100)",
+      "attack": "(3236/23265)",
+      "release": "(10517/46530)",
+      "color": "#c57973"
+    },
+    {
+      "id": 95,
+      "startTime": "[2].t + [2].d * (19/48)",
+      "duration": "[2].d * (3/8)",
+      "frequency": "[91].f * (2/5)",
+      "amplitude": "(17/50)",
+      "attack": "(809/139590)",
+      "release": "(11326/69795)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 96,
+      "startTime": "[94].t + [94].d",
+      "duration": "[2].d * (17/48)",
+      "frequency": "[95].f * (5/2)",
+      "amplitude": "(51/100)",
+      "attack": "(6472/131835)",
+      "release": "(25888/131835)",
+      "color": "#c57973"
+    },
+    {
+      "id": 97,
+      "startTime": "[2].t + [2].d * (9/16)",
+      "duration": "[2].d * (1/4)",
+      "frequency": "[95].f * 3",
+      "amplitude": "(23/100)",
+      "attack": "(809/93060)",
+      "release": "(5663/23265)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 98,
+      "startTime": "[2].t + [2].d * (37/48)",
+      "duration": "[2].d * (1/6)",
+      "frequency": "[95].f * 5",
+      "amplitude": "(27/100)",
+      "attack": "(809/62040)",
+      "release": "(5663/15510)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 99,
+      "startTime": "[3].t",
+      "duration": "[3].d * (7/24)",
+      "frequency": "[95].f * (5/6)",
+      "amplitude": "(17/50)",
+      "attack": "(809/105280)",
+      "release": "(809/3760)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 100,
+      "startTime": "[3].t + [3].d * (1/48)",
+      "duration": "[3].d * (1/3)",
+      "frequency": "[99].f * 3",
+      "amplitude": "(49/100)",
+      "attack": "(15371/120320)",
+      "release": "(10517/120320)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 101,
+      "startTime": "[3].t + [3].d * (1/6)",
+      "duration": "[3].d * (5/24)",
+      "frequency": "[99].f * 3",
+      "amplitude": "(23/100)",
+      "attack": "(809/75200)",
+      "release": "(5663/18800)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 102,
+      "startTime": "[100].t + [100].d",
+      "duration": "[3].d * (13/48)",
+      "frequency": "[99].f * 4",
+      "amplitude": "(27/50)",
+      "attack": "(809/12220)",
+      "release": "(809/7520)",
+      "color": "#c57973"
+    },
+    {
+      "id": 103,
+      "startTime": "[3].t + [3].d * (35/96)",
+      "duration": "[3].d * (1/4)",
+      "frequency": "[99].f * 6",
+      "amplitude": "(13/50)",
+      "attack": "(809/90240)",
+      "release": "(5663/22560)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 104,
+      "startTime": "[102].t + [102].d",
+      "duration": "[3].d * (3/8) + [4].d * (1/48)",
+      "frequency": "base.f * (6/5)",
+      "amplitude": "(27/50)",
+      "attack": "(9708/215495)",
+      "release": "(31551/430990)",
+      "color": "#c57973"
+    },
+    {
+      "id": 105,
+      "startTime": "[104].t + [104].d",
+      "duration": "[4].d * (1/2)",
+      "frequency": "[99].f * (27/8)",
+      "amplitude": "(53/100)",
+      "attack": "(809/24910)",
+      "release": "(10517/199280)",
+      "color": "#c57973"
+    },
+    {
+      "id": 106,
+      "startTime": "[105].t + [105].d",
+      "duration": "[4].d * (7/24)",
+      "frequency": "[105].f * (5/6)",
+      "amplitude": "(12/25)",
+      "attack": "(4854/87185)",
+      "release": "(19416/87185)",
+      "color": "#c57973"
+    },
+    {
+      "id": 107,
+      "startTime": "[5].t",
+      "duration": "[5].d * (1/3)",
+      "frequency": "[105].f * (2/9)",
+      "amplitude": "(9/25)",
+      "attack": "(2427/379760)",
+      "release": "(16989/94940)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 108,
+      "startTime": "[5].t + [5].d * (1/48)",
+      "duration": "[5].d * (13/48)",
+      "frequency": "[107].f * 8",
+      "amplitude": "(14/25)",
+      "attack": "(2427/308555)",
+      "release": "(67956/308555)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 109,
+      "startTime": "[5].t + [5].d * (3/16)",
+      "duration": "[5].d * (5/48)",
+      "frequency": "[107].f * 3",
+      "amplitude": "(6/25)",
+      "attack": "(2427/118675)",
+      "release": "(67956/118675)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 110,
+      "startTime": "[5].t + [5].d * (5/16)",
+      "duration": "[5].d * (11/96)",
+      "frequency": "[107].f * 6",
+      "amplitude": "(47/100)",
+      "attack": "(4854/261085)",
+      "release": "(135912/261085)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 111,
+      "startTime": "[5].t + [5].d * (7/16)",
+      "duration": "[5].d * (9/16) + [6].d * (11/48)",
+      "frequency": "[107].f * (48/5)",
+      "amplitude": "(31/50)",
+      "attack": "(809/296335)",
+      "release": "(22652/296335)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 112,
+      "startTime": "[6].t",
+      "duration": "[6].d * (13/48)",
+      "frequency": "[107].f * (6/5)",
+      "amplitude": "(8/25)",
+      "attack": "(809/97760)",
+      "release": "(5663/24440)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 113,
+      "startTime": "[6].t + [6].d * (1/6)",
+      "duration": "[6].d * (1/8)",
+      "frequency": "[112].f * 3",
+      "amplitude": "(23/100)",
+      "attack": "(809/45120)",
+      "release": "(5663/11280)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 114,
+      "startTime": "[6].t + [6].d * (5/16)",
+      "duration": "[6].d * (7/48)",
+      "frequency": "[112].f * 9",
+      "amplitude": "(1/2)",
+      "attack": "(809/52640)",
+      "release": "(809/1880)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 115,
+      "startTime": "[6].t + [6].d * (23/48)",
+      "duration": "[6].d * (13/48)",
+      "frequency": "[112].f * 10",
+      "amplitude": "(29/50)",
+      "attack": "(809/97760)",
+      "release": "(5663/24440)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 116,
+      "startTime": "[6].t + [6].d * (37/48)",
+      "duration": "[6].d * (1/6)",
+      "frequency": "[112].f * 8",
+      "amplitude": "(23/50)",
+      "attack": "(809/60160)",
+      "release": "(5663/15040)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 117,
+      "startTime": "[7].t",
+      "duration": "[7].d * (1/3)",
+      "frequency": "[112].f * (3/2)",
+      "amplitude": "(17/50)",
+      "attack": "(2427/357200)",
+      "release": "(16989/89300)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 118,
+      "startTime": "[7].t + [7].d * (1/48)",
+      "duration": "[7].d * (5/24)",
+      "frequency": "[117].f * 6",
+      "amplitude": "(13/25)",
+      "attack": "(2427/223250)",
+      "release": "(33978/111625)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 119,
+      "startTime": "[7].t + [7].d * (7/48)",
+      "duration": "[7].d * (5/24)",
+      "frequency": "[117].f * 3",
+      "amplitude": "(21/100)",
+      "attack": "(2427/223250)",
+      "release": "(33978/111625)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 120,
+      "startTime": "[7].t + [7].d * (25/96)",
+      "duration": "[7].d * (5/24)",
+      "frequency": "[117].f * 8",
+      "amplitude": "(59/100)",
+      "attack": "(2427/223250)",
+      "release": "(33978/111625)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 121,
+      "startTime": "[7].t + [7].d * (17/48)",
+      "duration": "[7].d * (1/4)",
+      "frequency": "[117].f * 5",
+      "amplitude": "(13/50)",
+      "attack": "(809/89300)",
+      "release": "(5663/22325)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 122,
+      "startTime": "[7].t + [7].d * (25/48)",
+      "duration": "[7].d * (11/24)",
+      "frequency": "[117].f * 7",
+      "amplitude": "(11/20)",
+      "attack": "(2427/491150)",
+      "release": "(33978/245575)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 123,
+      "startTime": "[8].t",
+      "duration": "[8].d * (19/48)",
+      "frequency": "[117].f * (2/3)",
+      "amplitude": "(3/10)",
+      "attack": "(2427/491150)",
+      "release": "(33978/245575)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 124,
+      "startTime": "[8].t + [8].d * (1/48)",
+      "duration": "[8].d * (3/8)",
+      "frequency": "[123].f * 10",
+      "amplitude": "(27/50)",
+      "attack": "(809/155100)",
+      "release": "(5663/38775)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 125,
+      "startTime": "[8].t + [8].d * (3/16)",
+      "duration": "[8].d * (7/24)",
+      "frequency": "[123].f * 3",
+      "amplitude": "(11/50)",
+      "attack": "(2427/361900)",
+      "release": "(2427/12925)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 126,
+      "startTime": "[8].t + [8].d * (7/16)",
+      "duration": "[8].d * (7/48)",
+      "frequency": "[123].f * 9",
+      "amplitude": "(9/20)",
+      "attack": "(2427/180950)",
+      "release": "(4854/12925)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 127,
+      "startTime": "[8].t + [8].d * (29/48)",
+      "duration": "[8].d * (1/4)",
+      "frequency": "[123].f * 8",
+      "amplitude": "(43/100)",
+      "attack": "(809/103400)",
+      "release": "(5663/25850)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 128,
+      "startTime": "[9].t + [9].d * (1/32)",
+      "duration": "[9].d * (9/32)",
+      "frequency": "[130].f * (3/4)",
+      "amplitude": "(49/100)",
+      "attack": "(5149/34500)",
+      "release": "(3523/34500)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 129,
+      "startTime": "[128].t + [128].d",
+      "duration": "[9].d * (1/8)",
+      "frequency": "[130].f * (5/8)",
+      "amplitude": "(9/20)",
+      "attack": "(813/5750)",
+      "release": "(10569/46000)",
+      "color": "#c57973"
+    },
+    {
+      "id": 130,
+      "startTime": "[129].t + [129].d",
+      "duration": "[9].d * (9/16) + [10].d * (5/16)",
+      "frequency": "[123].f * (16/3)",
+      "amplitude": "(13/25)",
+      "attack": "(813/40825)",
+      "release": "(10569/326600)",
+      "color": "#c57973"
+    },
+    {
+      "id": 131,
+      "startTime": "[10].t",
+      "duration": "[10].d * (1/3)",
+      "frequency": "[130].f * (1/3)",
+      "amplitude": "(17/50)",
+      "attack": "(2439/382720)",
+      "release": "(17073/95680)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 132,
+      "startTime": "[10].t + [10].d * (1/6)",
+      "duration": "[10].d * (5/24)",
+      "frequency": "[131].f * (3/2)",
+      "amplitude": "(11/50)",
+      "attack": "(2439/239200)",
+      "release": "(17073/59800)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 133,
+      "startTime": "[130].t + [130].d",
+      "duration": "[10].d * (5/16)",
+      "frequency": "[131].f * (5/2)",
+      "amplitude": "(14/25)",
+      "attack": "(813/14950)",
+      "release": "(813/9200)",
+      "color": "#c57973"
+    },
+    {
+      "id": 134,
+      "startTime": "[10].t + [10].d * (3/8)",
+      "duration": "[10].d * (1/4)",
+      "frequency": "[131].f * (5/2)",
+      "amplitude": "(13/50)",
+      "attack": "(813/95680)",
+      "release": "(5691/23920)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 135,
+      "startTime": "[133].t + [133].d",
+      "duration": "[10].d * (1/4)",
+      "frequency": "[131].f * (9/4)",
+      "amplitude": "(1/2)",
+      "attack": "(813/11960)",
+      "release": "(813/2990)",
+      "color": "#c57973"
+    },
+    {
+      "id": 136,
+      "startTime": "[10].t + [10].d * (31/48)",
+      "duration": "[10].d * (7/24)",
+      "frequency": "[131].f * 3",
+      "amplitude": "(27/100)",
+      "attack": "(2439/334880)",
+      "release": "(2439/11960)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 137,
+      "startTime": "[11].t",
+      "duration": "[11].d * (7/24)",
+      "frequency": "[131].f * (5/8)",
+      "amplitude": "(9/25)",
+      "attack": "(2439/305900)",
+      "release": "(2439/10925)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 138,
+      "startTime": "[11].t + [11].d * (7/48)",
+      "duration": "[11].d * (1/6)",
+      "frequency": "[137].f * 3",
+      "amplitude": "(1/4)",
+      "attack": "(2439/174800)",
+      "release": "(17073/43700)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 139,
+      "startTime": "[11].t + [11].d * (5/16)",
+      "duration": "[11].d * (7/48)",
+      "frequency": "[137].f * 4",
+      "amplitude": "(1/4)",
+      "attack": "(2439/152950)",
+      "release": "(4878/10925)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 140,
+      "startTime": "[11].t + [11].d * (23/48)",
+      "duration": "[11].d * (5/24)",
+      "frequency": "[137].f * (24/5)",
+      "amplitude": "(29/100)",
+      "attack": "(2439/218500)",
+      "release": "(17073/54625)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 141,
+      "startTime": "[11].t + [11].d * (35/48)",
+      "duration": "[11].d * (1/6)",
+      "frequency": "[137].f * 6",
+      "amplitude": "(27/100)",
+      "attack": "(2439/174800)",
+      "release": "(17073/43700)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 142,
+      "startTime": "[12].t + [12].d * (17/48)",
+      "duration": "[12].d * (7/24)",
+      "frequency": "[137].f * (27/8)",
+      "amplitude": "(47/100)",
+      "attack": "(15447/103040)",
+      "release": "(10569/103040)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 143,
+      "startTime": "[142].t + [142].d",
+      "duration": "[12].d * (17/48) + [13].d * (1/32)",
+      "frequency": "[142].f * (5/3)",
+      "amplitude": "(13/25)",
+      "attack": "(2168/45655)",
+      "release": "(3523/45655)",
+      "color": "#c57973"
+    },
+    {
+      "id": 144,
+      "startTime": "[143].t + [143].d",
+      "duration": "[13].d * (55/96)",
+      "frequency": "[142].f * (16/9)",
+      "amplitude": "(11/20)",
+      "attack": "(19512/651475)",
+      "release": "(31707/651475)",
+      "color": "#c57973"
+    },
+    {
+      "id": 145,
+      "startTime": "[144].t + [144].d",
+      "duration": "[13].d * (5/16)",
+      "frequency": "[144].f * (3/4)",
+      "amplitude": "(13/25)",
+      "attack": "(3252/59225)",
+      "release": "(13008/59225)",
+      "color": "#c57973"
+    },
+    {
+      "id": 146,
+      "startTime": "[14].t + [14].d * (1/16)",
+      "duration": "[14].d * (7/24)",
+      "frequency": "[147].f * (3/4)",
+      "amplitude": "(19/50)",
+      "attack": "(2439/322000)",
+      "release": "(2439/11500)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 147,
+      "startTime": "[14].t + [14].d * (17/48)",
+      "duration": "[14].d * (7/48)",
+      "frequency": "[144].f * (4/5)",
+      "amplitude": "(43/100)",
+      "attack": "(2439/161000)",
+      "release": "(2439/5750)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 148,
+      "startTime": "[14].t + [14].d * (25/48)",
+      "duration": "[14].d * (1/3)",
+      "frequency": "[147].f * (5/4)",
+      "amplitude": "(12/25)",
+      "attack": "(2439/368000)",
+      "release": "(17073/92000)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 149,
+      "startTime": "[15].t",
+      "duration": "[15].d * (1/3)",
+      "frequency": "[147].f * (15/64)",
+      "amplitude": "(17/50)",
+      "attack": "(2439/382720)",
+      "release": "(17073/95680)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 150,
+      "startTime": "[15].t + [15].d * (3/16)",
+      "duration": "[15].d * (1/4)",
+      "frequency": "[149].f * 3",
+      "amplitude": "(6/25)",
+      "attack": "(813/95680)",
+      "release": "(5691/23920)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 151,
+      "startTime": "[15].t + [15].d * (23/48)",
+      "duration": "[15].d * (5/16)",
+      "frequency": "[149].f * 5",
+      "amplitude": "(8/25)",
+      "attack": "(813/119600)",
+      "release": "(5691/29900)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 152,
+      "startTime": "[15].t + [15].d * (7/12)",
+      "duration": "[15].d * (5/12) + [16].d * (1/48)",
+      "frequency": "[149].f * (5/2)",
+      "amplitude": "(43/100)",
+      "attack": "(46341/503930)",
+      "release": "(31707/503930)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 153,
+      "startTime": "[152].t + [152].d",
+      "duration": "[16].d * (17/24)",
+      "frequency": "[149].f * (8/3)",
+      "amplitude": "(23/50)",
+      "attack": "(1626/72335)",
+      "release": "(6504/72335)",
+      "color": "#c57973"
+    },
+    {
+      "id": 154,
+      "startTime": "[17].t",
+      "duration": "[17].d * (13/48)",
+      "frequency": "[153].f * (1/3)",
+      "amplitude": "(8/25)",
+      "attack": "(2427/308555)",
+      "release": "(67956/308555)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 155,
+      "startTime": "[17].t + [17].d * (11/48)",
+      "duration": "[17].d * (13/48)",
+      "frequency": "[154].f * 3",
+      "amplitude": "(23/100)",
+      "attack": "(2427/308555)",
+      "release": "(67956/308555)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 156,
+      "startTime": "[17].t + [17].d * (1/2)",
+      "duration": "[17].d * (1/3)",
+      "frequency": "[154].f * (24/5)",
+      "amplitude": "(9/25)",
+      "attack": "(2427/379760)",
+      "release": "(16989/94940)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 157,
+      "startTime": "[18].t + [18].d * (1/24)",
+      "duration": "[18].d * (5/24)",
+      "frequency": "[154].f * (9/2)",
+      "amplitude": "(39/100)",
+      "attack": "(2427/230300)",
+      "release": "(2427/8225)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 158,
+      "startTime": "[18].t + [18].d * (3/8)",
+      "duration": "[18].d * (1/12)",
+      "frequency": "[157].f",
+      "amplitude": "(8/25)",
+      "attack": "(2427/92120)",
+      "release": "(2427/3290)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 159,
+      "startTime": "[18].t + [18].d * (5/8)",
+      "duration": "[18].d * (1/4)",
+      "frequency": "[157].f * (4/5)",
+      "amplitude": "(21/50)",
+      "attack": "(809/92120)",
+      "release": "(809/3290)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 160,
+      "startTime": "[19].t + [19].d * (1/48)",
+      "duration": "[19].d * (5/16)",
+      "frequency": "[162].f * (3/4)",
+      "amplitude": "(47/100)",
+      "attack": "(15371/119850)",
+      "release": "(10517/119850)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 161,
+      "startTime": "[160].t + [160].d",
+      "duration": "[19].d * (7/48)",
+      "frequency": "[162].f * (5/8)",
+      "amplitude": "(43/100)",
+      "attack": "(3236/27965)",
+      "release": "(10517/55930)",
+      "color": "#c57973"
+    },
+    {
+      "id": 162,
+      "startTime": "[161].t + [161].d",
+      "duration": "[19].d * (25/48) + [20].d * (11/48)",
+      "frequency": "[157].f * (16/15)",
+      "amplitude": "(51/100)",
+      "attack": "(19416/844825)",
+      "release": "(31551/844825)",
+      "color": "#c57973"
+    },
+    {
+      "id": 163,
+      "startTime": "[20].t",
+      "duration": "[20].d * (3/8)",
+      "frequency": "[162].f * (3/16)",
+      "amplitude": "(8/25)",
+      "attack": "(809/133950)",
+      "release": "(11326/66975)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 164,
+      "startTime": "[20].t + [20].d * (11/48)",
+      "duration": "[20].d * (7/24)",
+      "frequency": "[163].f * 3",
+      "amplitude": "(11/50)",
+      "attack": "(2427/312550)",
+      "release": "(4854/22325)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 165,
+      "startTime": "[162].t + [162].d",
+      "duration": "[20].d * (25/48)",
+      "frequency": "[163].f * 5",
+      "amplitude": "(13/25)",
+      "attack": "(19416/558125)",
+      "release": "(77664/558125)",
+      "color": "#c57973"
+    },
+    {
+      "id": 166,
+      "startTime": "[21].t + [21].d * (1/48)",
+      "duration": "[21].d * (1/3)",
+      "frequency": "[163].f * (16/9)",
+      "amplitude": "(33/100)",
+      "attack": "(2427/391040)",
+      "release": "(16989/97760)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 167,
+      "startTime": "[21].t + [21].d * (11/48)",
+      "duration": "[21].d * (1/4)",
+      "frequency": "[166].f * (5/2)",
+      "amplitude": "(27/100)",
+      "attack": "(809/97760)",
+      "release": "(5663/24440)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 168,
+      "startTime": "[21].t + [21].d * (25/48)",
+      "duration": "[21].d * (7/24)",
+      "frequency": "[166].f * 3",
+      "amplitude": "(31/100)",
+      "attack": "(2427/342160)",
+      "release": "(2427/12220)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 169,
+      "startTime": "[22].t + [22].d * (1/16)",
+      "duration": "[22].d * (11/24)",
+      "frequency": "[166].f * (135/64)",
+      "amplitude": "(11/25)",
+      "attack": "(15371/165440)",
+      "release": "(10517/165440)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 170,
+      "startTime": "[169].t + [169].d",
+      "duration": "[22].d * (23/48) + [23].d * (1/32)",
+      "frequency": "[169].f * (5/6)",
+      "amplitude": "(9/20)",
+      "attack": "(12944/369185)",
+      "release": "(21034/369185)",
+      "color": "#c57973"
+    },
+    {
+      "id": 171,
+      "startTime": "[170].t + [170].d",
+      "duration": "[23].d * (17/32)",
+      "frequency": "[169].f * (8/9)",
+      "amplitude": "(23/50)",
+      "attack": "(12944/395505)",
+      "release": "(21034/395505)",
+      "color": "#c57973"
+    },
+    {
+      "id": 172,
+      "startTime": "[171].t + [171].d",
+      "duration": "[23].d * (7/16) + [24].d * (1/32)",
+      "frequency": "[171].f * (6/5)",
+      "amplitude": "(21/50)",
+      "attack": "(3236/88125)",
+      "release": "(10517/176250)",
+      "color": "#c57973"
+    },
+    {
+      "id": 173,
+      "startTime": "[172].t + [172].d",
+      "duration": "[24].d * (49/96)",
+      "frequency": "[171].f * (5/4)",
+      "amplitude": "(43/100)",
+      "attack": "(6472/218785)",
+      "release": "(25888/218785)",
+      "color": "#c57973"
+    },
+    {
+      "id": 174,
+      "startTime": "[25].t",
+      "duration": "[25].d * (3/16)",
+      "frequency": "[173].f * (1/4)",
+      "amplitude": "(11/25)",
+      "attack": "(161/13005)",
+      "release": "(4508/13005)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 175,
+      "startTime": "[25].t",
+      "duration": "[25].d * (11/48)",
+      "frequency": "[174].f * 4",
+      "amplitude": "(14/25)",
+      "attack": "(10143/79475)",
+      "release": "(2898/15895)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 176,
+      "startTime": "[25].t",
+      "duration": "[25].d * (1/8)",
+      "frequency": "[174].f * 6",
+      "amplitude": "(87/250)",
+      "attack": "(161/8670)",
+      "release": "(2254/4335)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 177,
+      "startTime": "[25].t + [25].d * (1/2)",
+      "duration": "[25].d * (5/48)",
+      "frequency": "[174].f * 4",
+      "amplitude": "(43/100)",
+      "attack": "(10143/36125)",
+      "release": "(2898/7225)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 178,
+      "startTime": "[25].t + [25].d * (2/3)",
+      "duration": "[25].d * (5/24)",
+      "frequency": "[174].f * (24/5)",
+      "amplitude": "(13/25)",
+      "attack": "(10143/72250)",
+      "release": "(1449/7225)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 179,
+      "startTime": "[26].t",
+      "duration": "[26].d * (11/48)",
+      "frequency": "[174].f * 6",
+      "amplitude": "(63/125)",
+      "attack": "(6762/51425)",
+      "release": "(1932/10285)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 180,
+      "startTime": "[26].t + [26].d * (1/2)",
+      "duration": "[26].d * (5/48)",
+      "frequency": "[179].f",
+      "amplitude": "(387/1000)",
+      "attack": "(6762/23375)",
+      "release": "(1932/4675)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 181,
+      "startTime": "[26].t + [26].d * (2/3)",
+      "duration": "[26].d * (5/24)",
+      "frequency": "[179].f * (4/5)",
+      "amplitude": "(117/250)",
+      "attack": "(3381/23375)",
+      "release": "(966/4675)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 182,
+      "startTime": "[27].t",
+      "duration": "[27].d * (3/16)",
+      "frequency": "[179].f * (1/4)",
+      "amplitude": "(2/5)",
+      "attack": "(322/24735)",
+      "release": "(9016/24735)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 183,
+      "startTime": "[27].t",
+      "duration": "[27].d * (1/8)",
+      "frequency": "[182].f * 4",
+      "amplitude": "(79/250)",
+      "attack": "(161/8245)",
+      "release": "(4508/8245)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 184,
+      "startTime": "[27].t",
+      "duration": "[27].d * (3/8)",
+      "frequency": "[182].f * 5",
+      "amplitude": "(53/100)",
+      "attack": "(3381/41225)",
+      "release": "(966/8245)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 185,
+      "startTime": "[27].t + [27].d * (2/3)",
+      "duration": "[27].d * (7/48)",
+      "frequency": "[182].f * 4",
+      "amplitude": "(23/50)",
+      "attack": "(8694/41225)",
+      "release": "(2484/8245)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 186,
+      "startTime": "[28].t",
+      "duration": "[28].d * (5/12)",
+      "frequency": "[187].f * (6/5)",
+      "amplitude": "(53/100)",
+      "attack": "(9177/87550)",
+      "release": "(6279/87550)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 187,
+      "startTime": "[186].t + [186].d",
+      "duration": "[28].d * (1/3)",
+      "frequency": "[182].f * (8/3)",
+      "amplitude": "(23/50)",
+      "attack": "(483/8755)",
+      "release": "(1932/8755)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 188,
+      "startTime": "[29].t + [29].d * (1/48)",
+      "duration": "[29].d * (3/4)",
+      "frequency": "[187].f * (6/5)",
+      "amplitude": "(49/100)",
+      "attack": "(3059/51000)",
+      "release": "(2093/51000)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 189,
+      "startTime": "[188].t + [188].d",
+      "duration": "[29].d * (11/48) + [30].d * (1/48)",
+      "frequency": "[188].f * (5/6)",
+      "amplitude": "(51/100)",
+      "attack": "(368/4845)",
+      "release": "(598/4845)",
+      "color": "#c57973"
+    },
+    {
+      "id": 190,
+      "startTime": "[189].t + [189].d",
+      "duration": "[30].d * (9/16)",
+      "frequency": "[188].f * (5/6)",
+      "amplitude": "(1/2)",
+      "attack": "(2576/74205)",
+      "release": "(4186/74205)",
+      "color": "#c57973"
+    },
+    {
+      "id": 191,
+      "startTime": "[190].t + [190].d",
+      "duration": "[30].d * (7/24)",
+      "frequency": "[190].f * (3/4)",
+      "amplitude": "(23/50)",
+      "attack": "(552/8245)",
+      "release": "(2208/8245)",
+      "color": "#c57973"
+    },
+    {
+      "id": 192,
+      "startTime": "[31].t + [31].d * (5/48)",
+      "duration": "[31].d * (25/48)",
+      "frequency": "[193].f * (5/2)",
+      "amplitude": "(23/50)",
+      "attack": "(9177/106250)",
+      "release": "(6279/106250)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 193,
+      "startTime": "[31].t + [31].d * (1/3)",
+      "duration": "[31].d * (3/16)",
+      "frequency": "[190].f * (3/8)",
+      "amplitude": "(37/100)",
+      "attack": "(161/12750)",
+      "release": "(2254/6375)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 194,
+      "startTime": "[31].t + [31].d * (1/3)",
+      "duration": "[31].d * (1/8)",
+      "frequency": "[193].f * 4",
+      "amplitude": "(73/250)",
+      "attack": "(161/8500)",
+      "release": "(1127/2125)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 195,
+      "startTime": "[192].t + [192].d",
+      "duration": "[31].d * (3/8) + [32].d * (1/48)",
+      "frequency": "[193].f * 3",
+      "amplitude": "(1/2)",
+      "attack": "(7728/162095)",
+      "release": "(12558/162095)",
+      "color": "#c57973"
+    },
+    {
+      "id": 196,
+      "startTime": "[195].t + [195].d",
+      "duration": "[32].d * (11/16)",
+      "frequency": "[193].f * (8/3)",
+      "amplitude": "(1/2)",
+      "attack": "(2576/100045)",
+      "release": "(10304/100045)",
+      "color": "#c57973"
+    },
+    {
+      "id": 197,
+      "startTime": "[33].t",
+      "duration": "[33].d * (11/48)",
+      "frequency": "[196].f",
+      "amplitude": "(221/500)",
+      "attack": "(20286/161095)",
+      "release": "(5796/32219)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 198,
+      "startTime": "[33].t + [33].d * (1/2)",
+      "duration": "[33].d * (5/48)",
+      "frequency": "[197].f",
+      "amplitude": "(17/50)",
+      "attack": "(20286/73225)",
+      "release": "(5796/14645)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 199,
+      "startTime": "[33].t + [33].d * (2/3)",
+      "duration": "[33].d * (5/24)",
+      "frequency": "[197].f * (6/5)",
+      "amplitude": "(411/1000)",
+      "attack": "(10143/73225)",
+      "release": "(2898/14645)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 200,
+      "startTime": "[34].t",
+      "duration": "[34].d * (11/48)",
+      "frequency": "[197].f * (3/2)",
+      "amplitude": "(431/1000)",
+      "attack": "(207/1595)",
+      "release": "(414/2233)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 201,
+      "startTime": "[34].t + [34].d * (1/2)",
+      "duration": "[34].d * (5/48)",
+      "frequency": "[200].f",
+      "amplitude": "(331/1000)",
+      "attack": "(207/725)",
+      "release": "(414/1015)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 202,
+      "startTime": "[34].t + [34].d * (2/3)",
+      "duration": "[34].d * (5/24)",
+      "frequency": "[200].f * (4/5)",
+      "amplitude": "(2/5)",
+      "attack": "(207/1450)",
+      "release": "(207/1015)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 203,
+      "startTime": "[35].t + [35].d * (1/48)",
+      "duration": "[35].d * (29/48)",
+      "frequency": "[200].f * (8/9)",
+      "amplitude": "(21/50)",
+      "attack": "(6118/81577)",
+      "release": "(4186/81577)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 204,
+      "startTime": "[203].t + [203].d",
+      "duration": "[35].d * (3/8) + [36].d * (1/48)",
+      "frequency": "[203].f * (6/5)",
+      "amplitude": "(23/50)",
+      "attack": "(644/13427)",
+      "release": "(2093/26854)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 205,
+      "startTime": "[204].t + [204].d",
+      "duration": "[36].d * (29/48)",
+      "frequency": "[203].f * (45/32)",
+      "amplitude": "(47/100)",
+      "attack": "(1288/44573)",
+      "release": "(5152/44573)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 206,
+      "startTime": "[37].t",
+      "duration": "[37].d * (1/2)",
+      "frequency": "[205].f * (8/15)",
+      "amplitude": "(1/2)",
+      "attack": "(3059/33756)",
+      "release": "(2093/33756)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 207,
+      "startTime": "[206].t + [206].d",
+      "duration": "[37].d * (1/2)",
+      "frequency": "[206].f * (3/4)",
+      "amplitude": "(23/50)",
+      "attack": "(322/8439)",
+      "release": "(2093/33756)",
+      "color": "#c57973"
+    },
+    {
+      "id": 208,
+      "startTime": "[37].t + [37].d * (2/3)",
+      "duration": "[37].d * (1/3) + [38].d * (11/48)",
+      "frequency": "[206].f * (6/5)",
+      "amplitude": "(2/5)",
+      "attack": "(3059/38454)",
+      "release": "(161/2958)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 209,
+      "startTime": "[207].t + [207].d",
+      "duration": "[38].d * (19/24)",
+      "frequency": "[211].f * (5/8)",
+      "amplitude": "(12/25)",
+      "attack": "(322/13775)",
+      "release": "(1288/13775)",
+      "color": "#c57973"
+    },
+    {
+      "id": 210,
+      "startTime": "[208].t + [208].d",
+      "duration": "[38].d * (23/48)",
+      "frequency": "[211].f * (3/4)",
+      "amplitude": "(11/25)",
+      "attack": "(28/725)",
+      "release": "(91/1450)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 211,
+      "startTime": "[210].t + [210].d",
+      "duration": "[38].d * (1/4)",
+      "frequency": "[206].f * (8/5)",
+      "amplitude": "(23/50)",
+      "attack": "(161/2175)",
+      "release": "(644/2175)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 212,
+      "startTime": "[39].t + [39].d * (1/48)",
+      "duration": "[39].d * (9/16)",
+      "frequency": "[214].f * (5/6)",
+      "amplitude": "(47/100)",
+      "attack": "(6118/75951)",
+      "release": "(4186/75951)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 213,
+      "startTime": "[39].t + [39].d * (17/48)",
+      "duration": "[39].d * (31/48) + [40].d * (1/32)",
+      "frequency": "[214].f * (5/3)",
+      "amplitude": "(43/100)",
+      "attack": "(12236/183889)",
+      "release": "(8372/183889)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 214,
+      "startTime": "[212].t + [212].d",
+      "duration": "[39].d * (5/12) + [40].d * (1/48)",
+      "frequency": "[211].f * (3/5)",
+      "amplitude": "(23/50)",
+      "attack": "(2576/59421)",
+      "release": "(4186/59421)",
+      "color": "#c57973"
+    },
+    {
+      "id": 215,
+      "startTime": "[214].t + [214].d",
+      "duration": "[40].d * (29/48)",
+      "frequency": "[214].f * (4/3)",
+      "amplitude": "(49/100)",
+      "attack": "(2576/91669)",
+      "release": "(10304/91669)",
+      "color": "#c57973"
+    },
+    {
+      "id": 216,
+      "startTime": "[213].t + [213].d",
+      "duration": "[40].d * (15/32)",
+      "frequency": "[215].f * (3/2)",
+      "amplitude": "(47/100)",
+      "attack": "(5152/142245)",
+      "release": "(20608/142245)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 217,
+      "startTime": "[41].t",
+      "duration": "[41].d * (3/16)",
+      "frequency": "[215].f * (1/4)",
+      "amplitude": "(23/50)",
+      "attack": "(33/2600)",
+      "release": "(231/650)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 218,
+      "startTime": "[41].t",
+      "duration": "[41].d * (1/8)",
+      "frequency": "[217].f * 5",
+      "amplitude": "(363/1000)",
+      "attack": "(99/5200)",
+      "release": "(693/1300)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 219,
+      "startTime": "[41].t + [41].d * (1/2)",
+      "duration": "[41].d * (5/48)",
+      "frequency": "[217].f * 4",
+      "amplitude": "(37/100)",
+      "attack": "(297/13000)",
+      "release": "(2079/3250)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 220,
+      "startTime": "[41].t + [41].d * (2/3)",
+      "duration": "[41].d * (11/48)",
+      "frequency": "[217].f * 6",
+      "amplitude": "(49/100)",
+      "attack": "(27/2600)",
+      "release": "(189/650)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 221,
+      "startTime": "[42].t",
+      "duration": "[42].d * (3/16)",
+      "frequency": "[217].f",
+      "amplitude": "(21/50)",
+      "attack": "(33/2450)",
+      "release": "(66/175)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 222,
+      "startTime": "[42].t",
+      "duration": "[42].d * (1/8)",
+      "frequency": "[221].f * 4",
+      "amplitude": "(83/250)",
+      "attack": "(99/4900)",
+      "release": "(99/175)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 223,
+      "startTime": "[42].t + [42].d * (1/2)",
+      "duration": "[42].d * (5/48)",
+      "frequency": "[221].f * 5",
+      "amplitude": "(7/20)",
+      "attack": "(297/12250)",
+      "release": "(594/875)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 224,
+      "startTime": "[42].t + [42].d * (2/3)",
+      "duration": "[42].d * (11/48)",
+      "frequency": "[221].f * 4",
+      "amplitude": "(23/50)",
+      "attack": "(27/2450)",
+      "release": "(54/175)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 225,
+      "startTime": "[43].t",
+      "duration": "[43].d * (11/48)",
+      "frequency": "[221].f * 3",
+      "amplitude": "(133/250)",
+      "attack": "(567/4000)",
+      "release": "(81/400)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 226,
+      "startTime": "[43].t + [43].d * (1/2)",
+      "duration": "[43].d * (5/48)",
+      "frequency": "[225].f",
+      "amplitude": "(51/125)",
+      "attack": "(6237/20000)",
+      "release": "(891/2000)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 227,
+      "startTime": "[43].t + [43].d * (2/3)",
+      "duration": "[43].d * (5/24)",
+      "frequency": "[225].f * (5/4)",
+      "amplitude": "(247/500)",
+      "attack": "(6237/40000)",
+      "release": "(891/4000)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 228,
+      "startTime": "[44].t",
+      "duration": "[44].d * (3/16)",
+      "frequency": "[225].f * (3/8)",
+      "amplitude": "(43/100)",
+      "attack": "(33/2525)",
+      "release": "(924/2525)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 229,
+      "startTime": "[44].t",
+      "duration": "[44].d * (1/8)",
+      "frequency": "[228].f * 6",
+      "amplitude": "(17/50)",
+      "attack": "(99/5050)",
+      "release": "(1386/2525)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 230,
+      "startTime": "[44].t + [44].d * (1/48)",
+      "duration": "[44].d * (9/16)",
+      "frequency": "[228].f * 4",
+      "amplitude": "(13/25)",
+      "attack": "(209/2525)",
+      "release": "(143/2525)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 231,
+      "startTime": "[230].t + [230].d",
+      "duration": "[44].d * (7/24)",
+      "frequency": "[228].f * 3",
+      "amplitude": "(49/100)",
+      "attack": "(1188/17675)",
+      "release": "(4752/17675)",
+      "color": "#c57973"
+    },
+    {
+      "id": 232,
+      "startTime": "[45].t + [45].d * (1/48)",
+      "duration": "[45].d * (1/3)",
+      "frequency": "[235].f * (3/4)",
+      "amplitude": "(12/25)",
+      "attack": "(57/400)",
+      "release": "(39/400)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 233,
+      "startTime": "[232].t + [232].d",
+      "duration": "[45].d * (1/4)",
+      "frequency": "base.f",
+      "amplitude": "(51/100)",
+      "attack": "(2/25)",
+      "release": "(13/100)",
+      "color": "#c57973"
+    },
+    {
+      "id": 234,
+      "startTime": "[233].t + [233].d",
+      "duration": "[45].d * (5/24)",
+      "frequency": "base.f * (9/8)",
+      "amplitude": "(53/100)",
+      "attack": "(12/125)",
+      "release": "(39/250)",
+      "color": "#c57973"
+    },
+    {
+      "id": 235,
+      "startTime": "[234].t + [234].d",
+      "duration": "[45].d * (3/16) + [46].d * (1/32)",
+      "frequency": "[228].f * (8/3)",
+      "amplitude": "(11/20)",
+      "attack": "(1584/17225)",
+      "release": "(198/1325)",
+      "color": "#c57973"
+    },
+    {
+      "id": 236,
+      "startTime": "[235].t + [235].d",
+      "duration": "[46].d * (49/96)",
+      "frequency": "[235].f * (25/24)",
+      "amplitude": "(57/100)",
+      "attack": "(4752/116375)",
+      "release": "(7722/116375)",
+      "color": "#c57973"
+    },
+    {
+      "id": 237,
+      "startTime": "[236].t + [236].d",
+      "duration": "[46].d * (1/3)",
+      "frequency": "[236].f * (9/8)",
+      "amplitude": "(29/50)",
+      "attack": "(297/4750)",
+      "release": "(594/2375)",
+      "color": "#c57973"
+    },
+    {
+      "id": 238,
+      "startTime": "[47].t + [47].d * (1/48)",
+      "duration": "[47].d * (7/16)",
+      "frequency": "base.f * (3/2)",
+      "amplitude": "(27/50)",
+      "attack": "(1881/16975)",
+      "release": "(1287/16975)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 239,
+      "startTime": "[238].t + [238].d",
+      "duration": "[47].d * (13/24) + [48].d * (1/48)",
+      "frequency": "[236].f * (4/3)",
+      "amplitude": "(57/100)",
+      "attack": "(297/8200)",
+      "release": "(3861/65600)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 240,
+      "startTime": "[239].t + [239].d",
+      "duration": "[48].d * (29/48)",
+      "frequency": "[239].f * (9/8)",
+      "amplitude": "(59/100)",
+      "attack": "(396/12325)",
+      "release": "(1584/12325)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 241,
+      "startTime": "[49].t",
+      "duration": "[49].d * (3/4)",
+      "frequency": "[240].f * (1/6)",
+      "amplitude": "(13/25)",
+      "attack": "(817/266640)",
+      "release": "(5719/66660)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 242,
+      "startTime": "[49].t + [49].d * (5/48)",
+      "duration": "[49].d * (43/48) + [50].d * (3/16)",
+      "frequency": "[241].f * 8",
+      "amplitude": "(3/5)",
+      "attack": "(46569/1155440)",
+      "release": "(2451/88880)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 243,
+      "startTime": "[49].t + [49].d * (23/48)",
+      "duration": "[49].d * (25/48) + [50].d * (5/48)",
+      "frequency": "[241].f * 3",
+      "amplitude": "(47/100)",
+      "attack": "(15523/222200)",
+      "release": "(10621/222200)",
+      "color": "#d4a15e",
+      "instrument": "violin"
+    },
+    {
+      "id": 244,
+      "startTime": "[243].t + [243].d",
+      "duration": "[50].d * (19/48)",
+      "frequency": "[247].f * (3/5)",
+      "amplitude": "(23/50)",
+      "attack": "(258/5555)",
+      "release": "(1032/5555)",
+      "color": "#d4a15e"
+    },
+    {
+      "id": 245,
+      "startTime": "[242].t + [242].d",
+      "duration": "[50].d * (5/24)",
+      "frequency": "[247].f * (4/3)",
+      "amplitude": "(59/100)",
+      "attack": "(2451/27775)",
+      "release": "(31863/222200)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 246,
+      "startTime": "[245].t + [245].d",
+      "duration": "[50].d * (5/16)",
+      "frequency": "[247].f * (6/5)",
+      "amplitude": "(57/100)",
+      "attack": "(1634/27775)",
+      "release": "(10621/111100)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 247,
+      "startTime": "[246].t + [246].d",
+      "duration": "[50].d * (1/4)",
+      "frequency": "[241].f * (16/3)",
+      "amplitude": "(13/25)",
+      "attack": "(817/11110)",
+      "release": "(1634/5555)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 248,
+      "startTime": "[51].t",
+      "duration": "[51].d * (3/16)",
+      "frequency": "[247].f * (3/16)",
+      "amplitude": "(39/100)",
+      "attack": "(43/3300)",
+      "release": "(301/825)",
+      "color": "#6988ac",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 249,
+      "startTime": "[51].t",
+      "duration": "[51].d * (1/8)",
+      "frequency": "[248].f * 4",
+      "amplitude": "(77/250)",
+      "attack": "(43/2200)",
+      "release": "(301/550)",
+      "color": "#d4a15e",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 250,
+      "startTime": "[51].t",
+      "duration": "[51].d * (11/48)",
+      "frequency": "[248].f * 6",
+      "amplitude": "(27/50)",
+      "attack": "(8127/60500)",
+      "release": "(1161/6050)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 251,
+      "startTime": "[51].t + [51].d * (2/3)",
+      "duration": "[51].d * (1/6)",
+      "frequency": "[248].f * 4",
+      "amplitude": "(43/100)",
+      "attack": "(8127/44000)",
+      "release": "(1161/4400)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 252,
+      "startTime": "[52].t + [52].d * (1/32)",
+      "duration": "[52].d * (49/96)",
+      "frequency": "[253].f * (5/6)",
+      "amplitude": "(11/25)",
+      "attack": "(46569/522830)",
+      "release": "(31863/522830)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 253,
+      "startTime": "[252].t + [252].d",
+      "duration": "[52].d * (11/24) + [53].d * (1/48)",
+      "frequency": "[248].f * (9/2)",
+      "amplitude": "(43/100)",
+      "attack": "(4902/123035)",
+      "release": "(31863/492140)",
+      "color": "#c57973"
+    },
+    {
+      "id": 254,
+      "startTime": "[253].t + [253].d",
+      "duration": "[53].d * (11/16)",
+      "frequency": "[253].f * (8/9)",
+      "amplitude": "(47/100)",
+      "attack": "(1634/62315)",
+      "release": "(6536/62315)",
+      "color": "#c57973"
+    },
+    {
+      "id": 255,
+      "startTime": "[54].t",
+      "duration": "[54].d * (1/3)",
+      "frequency": "[254].f * (2/5)",
+      "amplitude": "(8/25)",
+      "attack": "(817/123200)",
+      "release": "(817/4400)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 256,
+      "startTime": "[54].t + [54].d * (25/48)",
+      "duration": "[54].d * (1/4)",
+      "frequency": "[255].f * (5/2)",
+      "amplitude": "(8/25)",
+      "attack": "(817/92400)",
+      "release": "(817/3300)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 257,
+      "startTime": "[54].t + [54].d * (2/3)",
+      "duration": "[54].d * (1/3) + [55].d * (1/48)",
+      "frequency": "[255].f * (5/2)",
+      "amplitude": "(19/50)",
+      "attack": "(46569/391820)",
+      "release": "(2451/30140)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 258,
+      "startTime": "[257].t + [257].d",
+      "duration": "[55].d * (1/2)",
+      "frequency": "[255].f * 3",
+      "amplitude": "(41/100)",
+      "attack": "(817/22220)",
+      "release": "(10621/177760)",
+      "color": "#c57973"
+    },
+    {
+      "id": 259,
+      "startTime": "[258].t + [258].d",
+      "duration": "[55].d * (5/16)",
+      "frequency": "[258].f * (5/8)",
+      "amplitude": "(39/100)",
+      "attack": "(1634/27775)",
+      "release": "(6536/27775)",
+      "color": "#c57973"
+    },
+    {
+      "id": 260,
+      "startTime": "[56].t + [56].d * (3/16)",
+      "duration": "[56].d * (7/24)",
+      "frequency": "[261].f * (3/4)",
+      "amplitude": "(3/10)",
+      "attack": "(43/6160)",
+      "release": "(43/220)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 261,
+      "startTime": "[56].t + [56].d * (25/48)",
+      "duration": "[56].d * (11/48)",
+      "frequency": "[258].f",
+      "amplitude": "(27/100)",
+      "attack": "(43/4840)",
+      "release": "(301/1210)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 262,
+      "startTime": "[57].t + [57].d * (1/24)",
+      "duration": "[57].d * (5/16)",
+      "frequency": "[261].f * (2/3)",
+      "amplitude": "(11/25)",
+      "attack": "(551/4500)",
+      "release": "(377/4500)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 263,
+      "startTime": "[262].t + [262].d",
+      "duration": "[57].d * (7/48)",
+      "frequency": "[262].f * (3/4)",
+      "amplitude": "(21/50)",
+      "attack": "(58/525)",
+      "release": "(377/2100)",
+      "color": "#c57973"
+    },
+    {
+      "id": 264,
+      "startTime": "[263].t + [263].d",
+      "duration": "[57].d * (1/2) + [58].d * (19/48)",
+      "frequency": "[262].f * (6/5)",
+      "amplitude": "(23/50)",
+      "attack": "(29/1565)",
+      "release": "(377/12520)",
+      "color": "#c57973"
+    },
+    {
+      "id": 265,
+      "startTime": "[58].t + [58].d * (1/48)",
+      "duration": "[58].d * (1/3)",
+      "frequency": "[262].f * (2/5)",
+      "amplitude": "(31/100)",
+      "attack": "(29/4480)",
+      "release": "(29/160)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 266,
+      "startTime": "[58].t + [58].d * (3/16)",
+      "duration": "[58].d * (1/4)",
+      "frequency": "[265].f * 3",
+      "amplitude": "(21/100)",
+      "attack": "(29/3360)",
+      "release": "(29/120)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 267,
+      "startTime": "[264].t + [264].d",
+      "duration": "[58].d * (3/8)",
+      "frequency": "[265].f * (5/2)",
+      "amplitude": "(49/100)",
+      "attack": "(29/630)",
+      "release": "(58/315)",
+      "color": "#c57973"
+    },
+    {
+      "id": 268,
+      "startTime": "[58].t + [58].d * (23/48)",
+      "duration": "[58].d * (7/24)",
+      "frequency": "[265].f * 5",
+      "amplitude": "(6/25)",
+      "attack": "(29/3920)",
+      "release": "(29/140)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 269,
+      "startTime": "[59].t + [59].d * (1/32)",
+      "duration": "[59].d * (47/96)",
+      "frequency": "[265].f * (10/3)",
+      "amplitude": "(23/50)",
+      "attack": "(3857/46530)",
+      "release": "(2639/46530)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 270,
+      "startTime": "[269].t + [269].d",
+      "duration": "[59].d * (23/48) + [60].d * (1/32)",
+      "frequency": "[269].f * (3/4)",
+      "amplitude": "(43/100)",
+      "attack": "(812/24375)",
+      "release": "(203/3750)",
+      "color": "#c57973"
+    },
+    {
+      "id": 271,
+      "startTime": "[270].t + [270].d",
+      "duration": "[60].d * (43/96)",
+      "frequency": "[269].f * (27/32)",
+      "amplitude": "(11/25)",
+      "attack": "(812/23005)",
+      "release": "(2639/46010)",
+      "color": "#c57973"
+    },
+    {
+      "id": 272,
+      "startTime": "[271].t + [271].d",
+      "duration": "[60].d * (11/48)",
+      "frequency": "[271].f * (5/6)",
+      "amplitude": "(21/50)",
+      "attack": "(406/5885)",
+      "release": "(1624/5885)",
+      "color": "#c57973"
+    },
+    {
+      "id": 273,
+      "startTime": "[61].t + [61].d * (1/24)",
+      "duration": "[61].d * (5/16)",
+      "frequency": "[271].f * (8/9)",
+      "amplitude": "(37/100)",
+      "attack": "(29/4200)",
+      "release": "(29/150)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 274,
+      "startTime": "[61].t + [61].d * (19/48)",
+      "duration": "[61].d * (1/8)",
+      "frequency": "[273].f * (3/4)",
+      "amplitude": "(8/25)",
+      "attack": "(29/1680)",
+      "release": "(29/60)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 275,
+      "startTime": "[61].t + [61].d * (9/16)",
+      "duration": "[61].d * (7/16) + [62].d * (11/48)",
+      "frequency": "[273].f * (6/5)",
+      "amplitude": "(11/25)",
+      "attack": "(203/62280)",
+      "release": "(1421/15570)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 276,
+      "startTime": "[62].t + [62].d * (1/3)",
+      "duration": "[62].d * (5/24)",
+      "frequency": "[277].f * (5/6)",
+      "amplitude": "(19/50)",
+      "attack": "(203/19200)",
+      "release": "(1421/4800)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 277,
+      "startTime": "[62].t + [62].d * (29/48)",
+      "duration": "[62].d * (13/48)",
+      "frequency": "[273].f * (6/5)",
+      "amplitude": "(39/100)",
+      "attack": "(203/24960)",
+      "release": "(1421/6240)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 278,
+      "startTime": "[63].t",
+      "duration": "[63].d * (1/3)",
+      "frequency": "[277].f * (5/18)",
+      "amplitude": "(3/10)",
+      "attack": "(203/32000)",
+      "release": "(1421/8000)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 279,
+      "startTime": "[63].t + [63].d * (3/16)",
+      "duration": "[63].d * (1/6)",
+      "frequency": "[278].f * 3",
+      "amplitude": "(11/50)",
+      "attack": "(203/16000)",
+      "release": "(1421/4000)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 280,
+      "startTime": "[63].t + [63].d * (19/48)",
+      "duration": "[63].d * (1/6)",
+      "frequency": "[278].f * 4",
+      "amplitude": "(6/25)",
+      "attack": "(203/16000)",
+      "release": "(1421/4000)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 281,
+      "startTime": "[63].t + [63].d * (9/16)",
+      "duration": "[63].d * (7/24)",
+      "frequency": "[278].f * (24/5)",
+      "amplitude": "(33/100)",
+      "attack": "(29/4000)",
+      "release": "(203/1000)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 282,
+      "startTime": "[64].t + [64].d * (1/16)",
+      "duration": "[64].d * (13/24)",
+      "frequency": "[278].f * (27/8)",
+      "amplitude": "(21/50)",
+      "attack": "(3857/56680)",
+      "release": "(203/4360)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 283,
+      "startTime": "[282].t + [282].d",
+      "duration": "[64].d * (13/48)",
+      "frequency": "[282].f * (5/6)",
+      "amplitude": "(41/100)",
+      "attack": "(406/7085)",
+      "release": "(1624/7085)",
+      "color": "#c57973"
+    },
+    {
+      "id": 284,
+      "startTime": "[65].t",
+      "duration": "[65].d * (7/24)",
+      "frequency": "[282].f * (4/15)",
+      "amplitude": "(3/10)",
+      "attack": "(801/109760)",
+      "release": "(801/3920)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 285,
+      "startTime": "[65].t + [65].d * (1/32)",
+      "duration": "[65].d * (1/3)",
+      "frequency": "[284].f * 8",
+      "amplitude": "(1/2)",
+      "attack": "(801/125440)",
+      "release": "(801/4480)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 286,
+      "startTime": "[65].t + [65].d * (7/16)",
+      "duration": "[65].d * (1/6)",
+      "frequency": "[284].f * 6",
+      "amplitude": "(21/50)",
+      "attack": "(801/62720)",
+      "release": "(801/2240)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 287,
+      "startTime": "[65].t + [65].d * (31/48)",
+      "duration": "[65].d * (1/4)",
+      "frequency": "[284].f * 10",
+      "amplitude": "(11/20)",
+      "attack": "(267/31360)",
+      "release": "(267/1120)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 288,
+      "startTime": "[66].t",
+      "duration": "[66].d * (7/24)",
+      "frequency": "[284].f * (3/2)",
+      "amplitude": "(31/100)",
+      "attack": "(801/106400)",
+      "release": "(801/3800)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 289,
+      "startTime": "[66].t + [66].d * (1/24)",
+      "duration": "[66].d * (7/24)",
+      "frequency": "[288].f * 6",
+      "amplitude": "(9/20)",
+      "attack": "(801/106400)",
+      "release": "(801/3800)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 290,
+      "startTime": "[66].t + [66].d * (7/16)",
+      "duration": "[66].d * (5/12)",
+      "frequency": "[288].f * 7",
+      "amplitude": "(13/25)",
+      "attack": "(801/152000)",
+      "release": "(5607/38000)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 291,
+      "startTime": "[67].t",
+      "duration": "[67].d * (7/24)",
+      "frequency": "[288].f * (2/3)",
+      "amplitude": "(3/10)",
+      "attack": "(267/38080)",
+      "release": "(267/1360)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 292,
+      "startTime": "[67].t + [67].d * (1/48)",
+      "duration": "[67].d * (1/2)",
+      "frequency": "[291].f * 10",
+      "amplitude": "(13/25)",
+      "attack": "(89/21760)",
+      "release": "(623/5440)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 293,
+      "startTime": "[67].t + [67].d * (5/8)",
+      "duration": "[67].d * (1/4)",
+      "frequency": "[291].f * 8",
+      "amplitude": "(11/25)",
+      "attack": "(89/10880)",
+      "release": "(623/2720)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 294,
+      "startTime": "[67].t + [67].d * (17/24)",
+      "duration": "[67].d * (7/24) + [68].d * (1/32)",
+      "frequency": "[291].f * 5",
+      "amplitude": "(39/100)",
+      "attack": "(5073/42080)",
+      "release": "(3471/42080)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 295,
+      "startTime": "[294].t + [294].d",
+      "duration": "[68].d * (47/96)",
+      "frequency": "[291].f * (16/3)",
+      "amplitude": "(43/100)",
+      "attack": "(801/23500)",
+      "release": "(10413/188000)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 296,
+      "startTime": "[295].t + [295].d",
+      "duration": "[68].d * (3/8)",
+      "frequency": "[295].f * (3/4)",
+      "amplitude": "(39/100)",
+      "attack": "(89/2000)",
+      "release": "(89/500)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 297,
+      "startTime": "[69].t + [69].d * (1/48)",
+      "duration": "[69].d * (3/8)",
+      "frequency": "[298].f * (3/4)",
+      "amplitude": "(11/25)",
+      "attack": "(1691/15520)",
+      "release": "(1157/15520)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 298,
+      "startTime": "[297].t + [297].d",
+      "duration": "[69].d * (1/4)",
+      "frequency": "[295].f * (5/6)",
+      "amplitude": "(49/100)",
+      "attack": "(267/3880)",
+      "release": "(3471/31040)",
+      "color": "#c57973"
+    },
+    {
+      "id": 299,
+      "startTime": "[298].t + [298].d",
+      "duration": "[69].d * (17/48) + [70].d * (23/48)",
+      "frequency": "[298].f * (3/2)",
+      "amplitude": "(13/25)",
+      "attack": "(801/39950)",
+      "release": "(10413/319600)",
+      "color": "#c57973"
+    },
+    {
+      "id": 300,
+      "startTime": "[70].t",
+      "duration": "[70].d * (7/24)",
+      "frequency": "[298].f * (3/16)",
+      "amplitude": "(8/25)",
+      "attack": "(267/38080)",
+      "release": "(267/1360)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 301,
+      "startTime": "[70].t + [70].d * (1/6)",
+      "duration": "[70].d * (5/24)",
+      "frequency": "[300].f * 3",
+      "amplitude": "(23/100)",
+      "attack": "(267/27200)",
+      "release": "(1869/6800)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 302,
+      "startTime": "[70].t + [70].d * (3/8)",
+      "duration": "[70].d * (1/4)",
+      "frequency": "[300].f * (24/5)",
+      "amplitude": "(27/100)",
+      "attack": "(89/10880)",
+      "release": "(623/2720)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 303,
+      "startTime": "[299].t + [299].d",
+      "duration": "[70].d * (19/48)",
+      "frequency": "[300].f * 6",
+      "amplitude": "(12/25)",
+      "attack": "(267/6460)",
+      "release": "(267/1615)",
+      "color": "#c57973"
+    },
+    {
+      "id": 304,
+      "startTime": "[71].t + [71].d * (1/48)",
+      "duration": "[71].d * (5/12)",
+      "frequency": "[305].f * (3/4)",
+      "amplitude": "(19/50)",
+      "attack": "(15219/160000)",
+      "release": "(10413/160000)",
+      "color": "#a68cb0",
+      "instrument": "violin"
+    },
+    {
+      "id": 305,
+      "startTime": "[304].t + [304].d",
+      "duration": "[71].d * (9/16) + [72].d * (1/32)",
+      "frequency": "[300].f * (32/5)",
+      "amplitude": "(21/50)",
+      "attack": "(267/9535)",
+      "release": "(3471/76280)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 306,
+      "startTime": "[305].t + [305].d",
+      "duration": "[72].d * (53/96)",
+      "frequency": "[307].f * (5/8)",
+      "amplitude": "(43/100)",
+      "attack": "(801/28355)",
+      "release": "(3204/28355)",
+      "color": "#a68cb0"
+    },
+    {
+      "id": 307,
+      "startTime": "[72].t + [72].d * (31/48)",
+      "duration": "[72].d * (13/48)",
+      "frequency": "[305].f * (3/2)",
+      "amplitude": "(19/50)",
+      "attack": "(801/111280)",
+      "release": "(5607/27820)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 308,
+      "startTime": "[73].t + [73].d * (1/48)",
+      "duration": "[73].d * (7/24)",
+      "frequency": "[309].f * (3/4)",
+      "amplitude": "(43/100)",
+      "attack": "(5833/43680)",
+      "release": "(307/3360)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 309,
+      "startTime": "[308].t + [308].d",
+      "duration": "[73].d * (11/16) + [74].d * (1/48)",
+      "frequency": "[307].f * (5/9)",
+      "amplitude": "(12/25)",
+      "attack": "(2456/106145)",
+      "release": "(307/8165)",
+      "color": "#c57973"
+    },
+    {
+      "id": 310,
+      "startTime": "[74].t",
+      "duration": "[74].d * (1/3)",
+      "frequency": "[309].f * (2/5)",
+      "amplitude": "(8/25)",
+      "attack": "(307/50960)",
+      "release": "(307/1820)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 311,
+      "startTime": "[309].t + [309].d",
+      "duration": "[74].d * (29/48)",
+      "frequency": "[310].f * (5/2)",
+      "amplitude": "(47/100)",
+      "attack": "(2456/92365)",
+      "release": "(307/7105)",
+      "color": "#c57973"
+    },
+    {
+      "id": 312,
+      "startTime": "[74].t + [74].d * (3/16)",
+      "duration": "[74].d * (1/4)",
+      "frequency": "[310].f * (3/2)",
+      "amplitude": "(11/50)",
+      "attack": "(307/38220)",
+      "release": "(307/1365)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 313,
+      "startTime": "[74].t + [74].d * (23/48)",
+      "duration": "[74].d * (1/4)",
+      "frequency": "[310].f * 3",
+      "amplitude": "(7/25)",
+      "attack": "(307/38220)",
+      "release": "(307/1365)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 314,
+      "startTime": "[311].t + [311].d",
+      "duration": "[74].d * (7/24)",
+      "frequency": "[310].f * (9/4)",
+      "amplitude": "(9/20)",
+      "attack": "(1228/22295)",
+      "release": "(4912/22295)",
+      "color": "#c57973"
+    },
+    {
+      "id": 315,
+      "startTime": "[75].t",
+      "duration": "[75].d * (7/24)",
+      "frequency": "[310].f * (45/64)",
+      "amplitude": "(17/50)",
+      "attack": "(307/47775)",
+      "release": "(1228/6825)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 316,
+      "startTime": "[75].t + [75].d * (5/48)",
+      "duration": "[75].d * (7/16)",
+      "frequency": "[315].f * 3",
+      "amplitude": "(23/50)",
+      "attack": "(11666/143325)",
+      "release": "(614/11025)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 317,
+      "startTime": "[75].t + [75].d * (11/48)",
+      "duration": "[75].d * (1/4)",
+      "frequency": "[315].f * 3",
+      "amplitude": "(6/25)",
+      "attack": "(307/40950)",
+      "release": "(614/2925)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 318,
+      "startTime": "[316].t + [316].d",
+      "duration": "[75].d * (11/24) + [76].d * (1/48)",
+      "frequency": "[315].f * (5/2)",
+      "amplitude": "(9/20)",
+      "attack": "(4912/157235)",
+      "release": "(614/12095)",
+      "color": "#c57973"
+    },
+    {
+      "id": 319,
+      "startTime": "[76].t",
+      "duration": "[76].d * (5/12)",
+      "frequency": "[315].f * (16/15)",
+      "amplitude": "(8/25)",
+      "attack": "(307/70850)",
+      "release": "(4298/35425)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 320,
+      "startTime": "[318].t + [318].d",
+      "duration": "[76].d * (37/48)",
+      "frequency": "base.f",
+      "amplitude": "(12/25)",
+      "attack": "(4912/262145)",
+      "release": "(19648/262145)",
+      "color": "#c57973"
+    },
+    {
+      "id": 321,
+      "startTime": "[76].t + [76].d * (23/48)",
+      "duration": "[76].d * (7/24)",
+      "frequency": "[319].f * 3",
+      "amplitude": "(11/50)",
+      "attack": "(307/49595)",
+      "release": "(1228/7085)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 322,
+      "startTime": "[77].t",
+      "duration": "[77].d * (7/24)",
+      "frequency": "[319].f * (5/6)",
+      "amplitude": "(3/10)",
+      "attack": "(307/44590)",
+      "release": "(614/3185)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 323,
+      "startTime": "[77].t + [77].d * (3/16)",
+      "duration": "[77].d * (7/48)",
+      "frequency": "[322].f * 3",
+      "amplitude": "(11/50)",
+      "attack": "(307/22295)",
+      "release": "(1228/3185)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 324,
+      "startTime": "[77].t + [77].d * (17/48)",
+      "duration": "[77].d * (3/16)",
+      "frequency": "[322].f * 4",
+      "amplitude": "(6/25)",
+      "attack": "(307/28665)",
+      "release": "(1228/4095)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 325,
+      "startTime": "[77].t + [77].d * (29/48)",
+      "duration": "[77].d * (1/4)",
+      "frequency": "[322].f * (24/5)",
+      "amplitude": "(3/10)",
+      "attack": "(307/38220)",
+      "release": "(307/1365)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 326,
+      "startTime": "[78].t + [78].d * (1/16)",
+      "duration": "[78].d * (25/48)",
+      "frequency": "[327].f * (6/5)",
+      "amplitude": "(21/50)",
+      "attack": "(5833/87750)",
+      "release": "(307/6750)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 327,
+      "startTime": "[326].t + [326].d",
+      "duration": "[78].d * (7/24)",
+      "frequency": "[322].f * 3",
+      "amplitude": "(39/100)",
+      "attack": "(614/12285)",
+      "release": "(2456/12285)",
+      "color": "#c57973"
+    },
+    {
+      "id": 328,
+      "startTime": "[79].t + [79].d * (1/48)",
+      "duration": "[79].d * (5/16)",
+      "frequency": "[329].f * (3/2)",
+      "amplitude": "(37/100)",
+      "attack": "(2452/391875)",
+      "release": "(68656/391875)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 329,
+      "startTime": "[79].t + [79].d * (3/8)",
+      "duration": "[79].d * (1/6)",
+      "frequency": "[327].f * (4/3)",
+      "amplitude": "(31/100)",
+      "attack": "(613/52250)",
+      "release": "(8582/26125)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 330,
+      "startTime": "[79].t + [79].d * (9/16)",
+      "duration": "[79].d * (13/48)",
+      "frequency": "[329].f * (6/5)",
+      "amplitude": "(19/50)",
+      "attack": "(2452/339625)",
+      "release": "(68656/339625)",
+      "color": "#c57973",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 331,
+      "startTime": "[80].t",
+      "duration": "[80].d * (7/16)",
+      "frequency": "[329].f * (3/16)",
+      "amplitude": "(3/10)",
+      "attack": "(2452/571725)",
+      "release": "(9808/81675)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 332,
+      "startTime": "[80].t + [80].d * (1/3)",
+      "duration": "[80].d * (7/24)",
+      "frequency": "[331].f * 3",
+      "amplitude": "(21/100)",
+      "attack": "(1226/190575)",
+      "release": "(4904/27225)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 333,
+      "startTime": "[80].t + [80].d * (11/16)",
+      "duration": "[80].d * (3/16)",
+      "frequency": "[331].f * (24/5)",
+      "amplitude": "(13/50)",
+      "attack": "(2452/245025)",
+      "release": "(68656/245025)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 334,
+      "startTime": "[81].t + [81].d * (1/32)",
+      "duration": "[81].d * (49/96)",
+      "frequency": "[331].f * (16/3)",
+      "amplitude": "(21/50)",
+      "attack": "(93176/1307075)",
+      "release": "(63752/1307075)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 335,
+      "startTime": "[334].t + [334].d",
+      "duration": "[81].d * (11/24) + [82].d * (1/48)",
+      "frequency": "[334].f * (9/10)",
+      "amplitude": "(21/50)",
+      "attack": "(19616/615725)",
+      "release": "(31876/615725)",
+      "color": "#c57973"
+    },
+    {
+      "id": 336,
+      "startTime": "[82].t",
+      "duration": "[82].d * (3/8)",
+      "frequency": "[334].f * (9/32)",
+      "amplitude": "(29/100)",
+      "attack": "(1226/259875)",
+      "release": "(4904/37125)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 337,
+      "startTime": "[335].t + [335].d",
+      "duration": "[82].d * (1/2)",
+      "frequency": "[336].f * 3",
+      "amplitude": "(43/100)",
+      "attack": "(2452/86625)",
+      "release": "(7969/173250)",
+      "color": "#c57973"
+    },
+    {
+      "id": 338,
+      "startTime": "[337].t + [337].d",
+      "duration": "[82].d * (23/48) + [83].d * (1/32)",
+      "frequency": "[336].f * (5/2)",
+      "amplitude": "(41/100)",
+      "attack": "(19616/710325)",
+      "release": "(31876/710325)",
+      "color": "#c57973"
+    },
+    {
+      "id": 339,
+      "startTime": "[83].t",
+      "duration": "[83].d * (1/3)",
+      "frequency": "[336].f * (16/15)",
+      "amplitude": "(7/25)",
+      "attack": "(613/123200)",
+      "release": "(613/4400)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 340,
+      "startTime": "[338].t + [338].d",
+      "duration": "[83].d * (19/32)",
+      "frequency": "base.f",
+      "amplitude": "(43/100)",
+      "attack": "(2452/109725)",
+      "release": "(9808/109725)",
+      "color": "#c57973"
+    },
+    {
+      "id": 341,
+      "startTime": "[83].t + [83].d * (7/12)",
+      "duration": "[83].d * (1/4)",
+      "frequency": "[339].f * 3",
+      "amplitude": "(21/100)",
+      "attack": "(613/92400)",
+      "release": "(613/3300)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 342,
+      "startTime": "[84].t",
+      "duration": "[84].d * (1/3)",
+      "frequency": "[339].f * (5/6)",
+      "amplitude": "(29/100)",
+      "attack": "(613/115500)",
+      "release": "(613/4125)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 343,
+      "startTime": "[84].t + [84].d * (5/24)",
+      "duration": "[84].d * (3/16)",
+      "frequency": "[342].f * 3",
+      "amplitude": "(21/100)",
+      "attack": "(2452/259875)",
+      "release": "(9808/37125)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 344,
+      "startTime": "[84].t + [84].d * (23/48)",
+      "duration": "[84].d * (5/16)",
+      "frequency": "[342].f * (24/5)",
+      "amplitude": "(7/25)",
+      "attack": "(2452/433125)",
+      "release": "(9808/61875)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 345,
+      "startTime": "[85].t",
+      "duration": "[85].d * (3/8)",
+      "frequency": "[342].f * (9/8)",
+      "amplitude": "(31/100)",
+      "attack": "(307/62475)",
+      "release": "(1228/8925)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 346,
+      "startTime": "[85].t + [85].d * (13/48)",
+      "duration": "[85].d * (7/24)",
+      "frequency": "[345].f * 3",
+      "amplitude": "(11/50)",
+      "attack": "(921/145775)",
+      "release": "(3684/20825)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 347,
+      "startTime": "[85].t + [85].d * (5/16)",
+      "duration": "[85].d * (7/24)",
+      "frequency": "[345].f * 3",
+      "amplitude": "(2/5)",
+      "attack": "(17499/145775)",
+      "release": "(11973/145775)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 348,
+      "startTime": "[347].t + [347].d",
+      "duration": "[85].d * (19/48) + [86].d * (1/32)",
+      "frequency": "[345].f * (5/2)",
+      "amplitude": "(41/100)",
+      "attack": "(29472/856375)",
+      "release": "(3684/65875)",
+      "color": "#c57973"
+    },
+    {
+      "id": 349,
+      "startTime": "[86].t",
+      "duration": "[86].d * (11/24)",
+      "frequency": "[345].f * (2/3)",
+      "amplitude": "(31/100)",
+      "attack": "(307/79475)",
+      "release": "(8596/79475)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 350,
+      "startTime": "[348].t + [348].d",
+      "duration": "[86].d * (73/96)",
+      "frequency": "[349].f * 4",
+      "amplitude": "(43/100)",
+      "attack": "(9824/527425)",
+      "release": "(39296/527425)",
+      "color": "#c57973"
+    },
+    {
+      "id": 351,
+      "startTime": "[86].t + [86].d * (11/48)",
+      "duration": "[86].d * (5/24)",
+      "frequency": "[349].f * 3",
+      "amplitude": "(21/100)",
+      "attack": "(307/36125)",
+      "release": "(8596/36125)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 352,
+      "startTime": "[86].t + [86].d * (23/48)",
+      "duration": "[86].d * (1/4)",
+      "frequency": "[349].f * (24/5)",
+      "amplitude": "(13/50)",
+      "attack": "(307/43350)",
+      "release": "(4298/21675)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 353,
+      "startTime": "[87].t + [87].d * (1/24)",
+      "duration": "[87].d * (5/12)",
+      "frequency": "[349].f * (4/3)",
+      "amplitude": "(27/100)",
+      "attack": "(307/68000)",
+      "release": "(2149/17000)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 354,
+      "startTime": "[87].t + [87].d * (5/16)",
+      "duration": "[87].d * (7/24)",
+      "frequency": "[353].f * 4",
+      "amplitude": "(11/50)",
+      "attack": "(307/47600)",
+      "release": "(307/1700)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 355,
+      "startTime": "[87].t + [87].d * (25/48)",
+      "duration": "[87].d * (23/48) + [88].d * (5/24)",
+      "frequency": "[353].f * 3",
+      "amplitude": "(37/100)",
+      "attack": "(11666/226525)",
+      "release": "(614/17425)",
+      "color": "#c57973",
+      "instrument": "violin"
+    },
+    {
+      "id": 356,
+      "startTime": "[355].t + [355].d",
+      "duration": "[88].d * (13/48)",
+      "frequency": "[353].f * (9/4)",
+      "amplitude": "(9/25)",
+      "attack": "(9824/182325)",
+      "release": "(1228/14025)",
+      "color": "#c57973"
+    },
+    {
+      "id": 357,
+      "startTime": "[356].t + [356].d",
+      "duration": "[88].d * (25/48) + [89].d * (1/48)",
+      "frequency": "[356].f * (8/5)",
+      "amplitude": "(19/50)",
+      "attack": "(14736/548675)",
+      "release": "(23946/548675)",
+      "color": "#c57973"
+    },
+    {
+      "id": 358,
+      "startTime": "[357].t + [357].d",
+      "duration": "[89].d * (19/24)",
+      "frequency": "[356].f * (4/3)",
+      "amplitude": "(9/25)",
+      "attack": "(14736/864025)",
+      "release": "(58944/864025)",
+      "color": "#c57973"
+    },
+    {
+      "id": 359,
+      "startTime": "[89].t + [89].d * (19/24)",
+      "duration": "[89].d * (7/48)",
+      "frequency": "[358].f * (3/2)",
+      "amplitude": "(21/100)",
+      "attack": "(3684/318325)",
+      "release": "(14736/45475)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 360,
+      "startTime": "[90].t",
+      "duration": "[90].d",
+      "frequency": "[358].f * (1/2)",
+      "amplitude": "(7/25)",
+      "attack": "(307/190400)",
+      "release": "(307/6800)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    },
+    {
+      "id": 361,
+      "startTime": "[90].t + [90].d * (17/96)",
+      "duration": "[90].d * (25/32)",
+      "frequency": "[360].f * (24/5)",
+      "amplitude": "(21/100)",
+      "attack": "(307/148750)",
+      "release": "(614/10625)",
+      "color": "#74a6a1",
+      "instrument": "vibraphone"
+    }
+  ]
+}

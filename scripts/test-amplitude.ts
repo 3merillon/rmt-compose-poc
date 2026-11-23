@@ -8,7 +8,9 @@
  *
  *   A. Unset stays unset — a module that never mentions amplitude loads,
  *      evaluates and saves without the key appearing, and every note sounds
- *      at exactly 1 (so playback is unchanged). Checked on every shipped module.
+ *      at exactly 1 (so playback is unchanged). Checked on every shipped module
+ *      except those written with dynamics, which keep their gains through a
+ *      save and load instead.
  *   B. Inheritance and references — `base.a` scales the notes that do not
  *      define their own; `[N].a` reads what note N sounds at; `a`, `amp` and
  *      `amplitude` are the same property; a module in the retired
@@ -66,11 +68,23 @@ console.log('Amplitude: a module that never sets it is untouched\n');
 {
   const lib = JSON.parse(readFileSync(join(modulesDir, 'library.json'), 'utf8'));
   assert(isLibraryManifest(lib));
+  // Shipped modules written with dynamics. A1 and A2 cover every other one, so a
+  // module that starts setting amplitude has to be added here deliberately.
+  const dynamics = new Set(['custom/nocturne.json']);
   const files = ['defaultModule.json', ...lib.sections.flatMap((s) => (s.items || []).map((i) => i.file))];
-  let leaked = 0, notUnity = 0, notes = 0;
+  let leaked = 0, notUnity = 0, notes = 0, kept = 0;
   for (const file of files) {
-    const mod = await Module.loadFromJSON(JSON.parse(readFileSync(join(modulesDir, file), 'utf8')));
+    const text = readFileSync(join(modulesDir, file), 'utf8');
+    const mod = await Module.loadFromJSON(JSON.parse(text));
     const cache = mod.evaluateModule();
+    if (dynamics.has(file)) {
+      const reopened = await Module.loadFromJSON(mod.createModuleJSON());
+      reopened.evaluateModule();
+      const same = Object.keys(mod.notes).every((id) =>
+        mod.findAmplitude(mod.notes[id]).toFraction() === reopened.findAmplitude(reopened.notes[id]).toFraction());
+      if (/"amplitude"/.test(text) && same) kept++;
+      continue;
+    }
     if (/"amplitude"/.test(JSON.stringify(mod.createModuleJSON()))) leaked++;
     if (/"amplitude"/.test(await mod.exportOrderedModule())) leaked++;
     for (const id of Object.keys(mod.notes)) {
@@ -80,9 +94,10 @@ console.log('Amplitude: a module that never sets it is untouched\n');
       if ((r && r.amplitude != null) || a.n !== 1n || a.d !== 1n || a.s !== 1n) notUnity++;
     }
   }
-  check(leaked === 0, `A1 no "amplitude" key written for any of ${files.length} shipped modules`);
-  check(notUnity === 0, `A2 all ${notes} notes sound at exactly 1/1`);
+  check(leaked === 0, `A1 no "amplitude" key written for any of ${files.length - dynamics.size} shipped modules without dynamics`);
+  check(notUnity === 0, `A2 all ${notes} of their notes sound at exactly 1/1`);
   check(amplitudeToGain(null) === 1 && 0.2 * amplitudeToGain(null) === 0.2, 'A3 unity gain leaves the envelope peak bit-identical');
+  check(kept === dynamics.size, `A4 ${[...dynamics].join(', ')} writes dynamics and keeps every gain through a save and load`);
 }
 
 // --- B: inheritance and references ---------------------------------------------

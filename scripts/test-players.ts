@@ -18,6 +18,9 @@
  *   E. A note that sets its own instrument mid-line starts a new player, and the
  *      notes after it follow it.
  *   F. No note of any library module changes instrument (against the rule before).
+ *      A module composed under this rule is not compared with the old one: each
+ *      of its notes must play an instrument the module pins, whatever the
+ *      BaseNote plays.
  *   G. An old module whose instruments the new rule would change is migrated on
  *      load (the old instrument is written onto those notes); a saved module carries
  *      `instrumentRule` and is not migrated again; the round trip is stable.
@@ -150,10 +153,23 @@ console.log('\nThe library\n');
   const files: string[] = [];
   const walk = (d: string) => { for (const f of readdirSync(d)) { const q = join(d, f); if (statSync(q).isDirectory()) walk(q); else if (f.endsWith('.json') && f !== 'library.json' && f !== 'index.json') files.push(q); } };
   walk(modulesDir);
-  let notes = 0, changed = 0, mods = 0;
+  // Modules composed under the start-time rule. The rule before would give some of
+  // their notes other instruments by design, so F2 checks them instead of F1.
+  const composedForTheRule = new Set(['custom/nocturne.json']);
+  let notes = 0, changed = 0, mods = 0, pinned = 0;
   for (const file of files) {
     if (/voices-(20000|100000)/.test(file)) continue;   // generated stress files: the 5000 one stands for them
     const json = JSON.parse(readFileSync(file, 'utf8'));
+    if (composedForTheRule.has(relative(modulesDir, file).replace(/\\/g, '/'))) {
+      const under = (instrument: string) => load({ ...json, baseNote: { ...json.baseNote, instrument } });
+      const a = await under('organ'), b = await under('piano');
+      const own = json.instrumentRule === INSTRUMENT_RULE && sounding(a).every((n) => {
+        const x = a.findInstrument(n);
+        return x !== 'organ' && x === b.findInstrument(required(b.getNoteById(n.id)));
+      });
+      if (own) pinned++; else console.error(`    ${relative(modulesDir, file)}: a note plays the BaseNote's instrument`);
+      continue;
+    }
     const m = await load({ ...json, instrumentRule: INSTRUMENT_RULE });   // the rule as it is, no migration
     const now = new Map(), old = new Map();
     let c = 0;
@@ -161,7 +177,8 @@ console.log('\nThe library\n');
     if (c) { changed += c; console.error(`    ${relative(modulesDir, file)}: ${c} note(s) change`); }
     mods++;
   }
-  check(changed === 0, `F no note of ${mods} library modules (${notes} sounding notes) changes instrument`);
+  check(changed === 0, `F1 no note of ${mods} library modules (${notes} sounding notes) changes instrument`);
+  check(pinned === composedForTheRule.size, `F2 every note of ${[...composedForTheRule].join(', ')} plays an instrument the module pins, whatever the BaseNote plays`);
 }
 
 // ── G: migration ──

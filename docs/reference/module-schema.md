@@ -294,9 +294,9 @@ Shipped sections and counts:
 | `progressions` | Progressions | 8 |
 | `melodies` | Melodies | 7 |
 | `scale-systems` | Scale Systems | 6 |
-| `custom` | Custom | 5 |
+| `custom` | Custom | 6 |
 
-**83 modules in total.** `npm test` validates every one of them: structure, expression syntax, self-containment (every `[N]` reference resolves inside the same file), finite evaluation, and — for single-note interval modules — that the evaluated frequency really is `ratio × base` and that `cents` really is `1200·log2(ratio)`.
+**84 modules in total.** `npm test` validates every one of them: structure, expression syntax, self-containment (every `[N]` reference resolves inside the same file), finite evaluation, and — for single-note interval modules — that the evaluated frequency really is `ratio × base` and that `cents` really is `1200·log2(ratio)`.
 
 Self-containment is what makes a library module droppable: on import, its note id 0 is remapped onto the note you dropped it on, and its internal ids are renumbered above the current maximum.
 

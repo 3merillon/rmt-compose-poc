@@ -916,6 +916,15 @@
             "gruber",
             "carol"
           ]
+        },
+        {
+          "file": "custom/nocturne.json",
+          "name": "nocturne",
+          "family": "melody",
+          "tags": [
+            "the first matinee",
+            "trio"
+          ]
         }
       ]
     }
